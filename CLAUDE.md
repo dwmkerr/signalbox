@@ -63,6 +63,8 @@ relaunch the app itself to pick up an app rebuild.
 - Conventional Commits (`feat:`, `fix:`, `docs:`, ...).
 - Comments explain *why*, not *what* - no breadcrumb comments.
 - Use a regular hyphen (-), never an em-dash, anywhere in code, comments, or docs.
-- Only ever write files signalbox owns (its adapter symlinks). User config
-  (Claude settings, tmux.conf) gets a printed snippet, never an edit - the
-  same rule governs install and removal.
+- User config: JSON agent configs (Claude settings.json, Cursor hooks.json)
+  are merged only with consent, with a timestamped backup and an atomic
+  parse-validated write; removal reverses exactly that edit (literal
+  signalbox commands only). Freeform config (tmux.conf) is never edited -
+  print the snippet instead.

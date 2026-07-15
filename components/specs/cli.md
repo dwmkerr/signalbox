@@ -4,6 +4,8 @@ signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/h
 
 signalbox is a single binary. The commands agents call on the hook path (`fire`, `hook claude`, `hook cursor`, `tmux seen-pane`, and the `session` verbs `ack`, `hide`, `rename`, `remove`, `tag`, `untag`) are strictly bounded - one POST with a 200ms timeout, a capped backlog drain - and always exit 0, so a notifier can never break the agent that called it. The commands you run yourself (`state`, `jump`, `pick`, `init`, `hub`, `drain`) may fail loudly.
 
+Bare `signalbox` (and `-h`/`--help`) prints a short help: just the human commands. `signalbox help` is the full reference - every command, flag, and environment variable. When a command needs the hub and it is not running, the error names the fix (open the Signalbox app, or `signalbox hub`).
+
 ## init
 
 Guided, idempotent setup. One board, rendered two ways: on a terminal it opens
@@ -46,11 +48,17 @@ signalbox init --status -v   # the same: status with paths
 `●` is set up, `○` is not (with what it costs you). When everything is green the last line points at the jumplist: "Everything is set up. Press `⌃⌥J` to jump between sessions." In the picker a checked-but-
 missing row shows `◉ · set up` and an unchecked-but-installed row shows `○ · remove`.
 
-It only ever writes things it owns (its adapter symlinks) - install and
-removal both. User config files such as `~/.claude/settings.json` and
-`~/.tmux.conf` get the exact snippet, or removal instructions, printed instead.
-The binary itself is not init's business: Homebrew owns the CLI on PATH, and
-the menu bar app owns the hub. Pass `--yes` to apply non-interactively.
+User config policy: JSON agent configs (`~/.claude/settings.json`,
+`~/.cursor/hooks.json`) are merged only with consent - checking the row in
+the picker or passing the scope flag IS the consent - with a timestamped
+backup next to the file and an atomic, parse-validated write. Only events
+with no hooks at all are filled; hooks routed through your own wrapper are
+never touched (and never doubled). `--remove` is the same edit in reverse:
+only the literal `signalbox hook <agent>` commands are removed. Freeform
+config (`~/.tmux.conf`) is never edited - the exact snippet is printed
+instead. The binary itself is not init's business: Homebrew owns the CLI on
+PATH, and the menu bar app owns the hub. Pass `--yes` to apply
+non-interactively.
 
 Scope it to one component when you do not want the whole board. Add `--remove`
 to turn that component off instead of on:

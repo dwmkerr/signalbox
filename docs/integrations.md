@@ -4,10 +4,12 @@ signalbox wires your coding agents to report progress to the local hub. Set them
 up with `signalbox init` (interactive) or one at a time with
 `signalbox init --agent <name>`; remove with `signalbox init --remove --agent <name>`.
 
-signalbox only ever writes files it owns (its adapter symlinks). Agent config
-files like `~/.claude/settings.json`, `~/.cursor/hooks.json` and `~/.tmux.conf`
-are yours - `init` prints the exact snippet for you to apply, and never edits
-them itself.
+`init` wires JSON agent configs (`~/.claude/settings.json`,
+`~/.cursor/hooks.json`) for you, with consent: it takes a timestamped backup,
+merges only events that have no hooks at all (your own wrappers are never
+touched), and writes atomically. `--remove` reverses exactly that edit.
+Freeform config like `~/.tmux.conf` is never edited - `init` prints the exact
+snippet for you to apply instead.
 
 | Agent | How it's wired | Status |
 |---|---|---|

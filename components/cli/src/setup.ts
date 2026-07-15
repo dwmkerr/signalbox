@@ -1,17 +1,22 @@
 // `signalbox install` - the README's front door: an idempotent guided
 // install. Every step detects current state before acting and reports one of
 // three statuses, so re-running is a status checklist, never a re-install.
-// It only ever writes things it owns (its adapter symlinks) - user config
-// files (Claude settings, tmux.conf) get the exact snippet printed instead,
-// because merging someone's settings is how installers break setups.
+//
+// User config policy: JSON agent configs (Claude settings.json, Cursor
+// hooks.json) are merged only with consent (the picker checkbox / scoped
+// flag), with a timestamped backup and an atomic parse-validated write -
+// and removal is the same edit in reverse, touching only the literal
+// signalbox command. Freeform config (tmux.conf) is never edited: the exact
+// snippet is printed instead, because merging someone's dotfiles is how
+// installers break setups.
 //
 // The binary itself is not init's business: Homebrew (or make install) owns
 // the CLI on PATH, and the menu bar app owns the hub - init wires the things
 // around them.
 
 import {
-  existsSync, lstatSync, readFileSync, mkdirSync, unlinkSync,
-  symlinkSync, realpathSync,
+  existsSync, lstatSync, readFileSync, writeFileSync, mkdirSync, unlinkSync,
+  symlinkSync, realpathSync, renameSync,
 } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
@@ -172,9 +177,10 @@ class Setup {
     return r;
   }
 
-  // Only ever detects and prints. Hook config lives in the user's
-  // settings.json alongside their own hooks; a wrong merge there breaks
-  // every Claude session, so the user applies the block themselves.
+  // Merges the signalbox hooks into the user's settings.json, with consent
+  // (the picker checkbox / scoped flag), a timestamped backup, and an atomic
+  // parse-validated write - a wrong merge there breaks every Claude session,
+  // so declining still prints the block to apply by hand.
   stepClaudeHooks(): StepResult {
     const name = "Claude Code hooks";
     const settingsPath = join(this.home, ".claude", "settings.json");
@@ -191,8 +197,8 @@ class Setup {
     // Every event has *some* hook, but not the literal signalbox command:
     // the user routes through a wrapper/dispatcher (e.g. a dotfiles script
     // that calls signalbox). We cannot verify what a script does, and
-    // printing the merge block would double-fire every hook - so report it
-    // as present-but-unverified, never as missing.
+    // merging would double-fire every hook - so report it as
+    // present-but-unverified, never as missing, and never write.
     if (scan.empty.length === 0) {
       return {
         status: statusDone,
@@ -200,16 +206,37 @@ class Setup {
         detail: `${settingsPath} (hooks present via a wrapper - ensure it calls 'signalbox hook claude')`,
       };
     }
-    return {
-      status: statusNeeds,
-      name,
-      detail: `merge the JSON block below into ${settingsPath}`,
-      after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${scan.empty.join(", ")}):\n${claudeHooksBlock}`,
-    };
+    if (!this.confirm(`merge the signalbox hooks into ${settingsPath} (backup taken)`)) {
+      return {
+        status: statusNeeds,
+        name,
+        detail: `merge the JSON block below into ${settingsPath}`,
+        after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${scan.empty.join(", ")}):\n${claudeHooksBlock}`,
+      };
+    }
+    try {
+      // Only the events with no hooks at all are touched (scan.empty) -
+      // anything the user routes elsewhere is left exactly as it was.
+      const backup = mergeJSONFile(settingsPath, (settings) => {
+        settings.hooks ??= {};
+        for (const ev of scan.empty) {
+          settings.hooks[ev] ??= [];
+          settings.hooks[ev].push({ hooks: [{ type: "command", command: "signalbox hook claude" }] });
+        }
+      });
+      return { status: statusInstalled, name, detail: `${settingsPath}${backup ? ` (backup: ${backup})` : ""}` };
+    } catch (err) {
+      return {
+        status: statusNeeds,
+        name,
+        detail: `could not merge (${err}) - apply the block below by hand`,
+        after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${scan.empty.join(", ")}):\n${claudeHooksBlock}`,
+      };
+    }
   }
 
-  // Cursor's hooks.json is the user's file (like Claude's settings.json): the
-  // block is printed, never merged. Cursor Hooks are beta.
+  // Cursor's hooks.json gets the same consent-gated merge as Claude's
+  // settings.json (backup, atomic write). Cursor Hooks are beta.
   stepCursorHooks(): StepResult {
     const name = "Cursor hooks";
     const hooksPath = join(this.home, ".cursor", "hooks.json");
@@ -224,7 +251,7 @@ class Setup {
     }
     // Every event already routes somewhere but not through the literal
     // signalbox command - assume a wrapper and report present-but-unverified,
-    // never missing (printing the block would double-fire the hooks).
+    // never missing (merging would double-fire the hooks).
     if (scan.empty.length === 0) {
       return {
         status: statusDone,
@@ -232,23 +259,60 @@ class Setup {
         detail: `${hooksPath} (hooks present via a wrapper - ensure it calls 'signalbox hook cursor')`,
       };
     }
-    return {
-      status: statusNeeds,
-      name,
-      detail: `merge the JSON block below into ${hooksPath}`,
-      after: `Cursor hooks - merge this into ${hooksPath} (missing: ${scan.empty.join(", ")}):\n${cursorHooksBlock}`,
-    };
+    if (!this.confirm(`merge the signalbox hooks into ${hooksPath} (backup taken)`)) {
+      return {
+        status: statusNeeds,
+        name,
+        detail: `merge the JSON block below into ${hooksPath}`,
+        after: `Cursor hooks - merge this into ${hooksPath} (missing: ${scan.empty.join(", ")}):\n${cursorHooksBlock}`,
+      };
+    }
+    try {
+      const backup = mergeJSONFile(hooksPath, (cfg) => {
+        cfg.version ??= 1;
+        cfg.hooks ??= {};
+        for (const ev of scan.empty) {
+          cfg.hooks[ev] ??= [];
+          cfg.hooks[ev].push({ command: "signalbox hook cursor" });
+        }
+      });
+      return { status: statusInstalled, name, detail: `${hooksPath}${backup ? ` (backup: ${backup})` : ""}` };
+    } catch (err) {
+      return {
+        status: statusNeeds,
+        name,
+        detail: `could not merge (${err}) - apply the block below by hand`,
+        after: `Cursor hooks - merge this into ${hooksPath} (missing: ${scan.empty.join(", ")}):\n${cursorHooksBlock}`,
+      };
+    }
   }
 
+  // Removal edits out only the literal signalbox command - a wrapper that
+  // *mentions* signalbox is the user's own script and is left alone.
   unstepCursorHooks(): StepResult {
     const name = "Cursor hooks";
     const hooksPath = join(this.home, ".cursor", "hooks.json");
-    return {
-      status: statusNeeds,
-      name,
-      detail: `remove the signalbox hooks from ${hooksPath}`,
-      after: `Cursor hooks - remove every hook whose command is "signalbox hook cursor" from ${hooksPath}.`,
-    };
+    if (!fileExists(hooksPath)) return { status: statusDone, name, detail: "not set up" };
+    if (!this.confirm(`remove the signalbox hooks from ${hooksPath} (backup taken)`)) {
+      return { status: statusNeeds, name, detail: `remove every "signalbox hook cursor" hook from ${hooksPath}` };
+    }
+    try {
+      let changed = false;
+      const backup = mergeJSONFile(hooksPath, (cfg) => {
+        for (const ev of Object.keys(cfg.hooks ?? {})) {
+          const entries = cfg.hooks[ev];
+          if (!Array.isArray(entries)) continue;
+          const kept = entries.filter((e: any) => e?.command !== "signalbox hook cursor");
+          if (kept.length !== entries.length) changed = true;
+          if (kept.length === 0) delete cfg.hooks[ev];
+          else cfg.hooks[ev] = kept;
+        }
+      });
+      if (!changed) return { status: statusDone, name, detail: "no signalbox hooks found" };
+      return { status: statusInstalled, name, detail: `removed${backup ? ` (backup: ${backup})` : ""}` };
+    } catch (err) {
+      return { status: statusNeeds, name, detail: `could not edit ${hooksPath}: ${err}` };
+    }
   }
 
   // tmux config is the user's file: the snippet is printed, not merged.
@@ -329,15 +393,38 @@ class Setup {
     return { status: statusInstalled, name, detail: `removed ${dest}` };
   }
 
+  // Removal edits out only the literal signalbox command - a wrapper that
+  // *mentions* signalbox is the user's own script and is left alone.
   unstepClaudeHooks(): StepResult {
     const name = "Claude Code hooks";
     const settingsPath = join(this.home, ".claude", "settings.json");
-    return {
-      status: statusNeeds,
-      name,
-      detail: `remove the signalbox hooks from ${settingsPath}`,
-      after: `Claude Code hooks - remove every hook whose command is "signalbox hook claude" from ${settingsPath}.`,
-    };
+    if (!fileExists(settingsPath)) return { status: statusDone, name, detail: "not set up" };
+    if (!this.confirm(`remove the signalbox hooks from ${settingsPath} (backup taken)`)) {
+      return { status: statusNeeds, name, detail: `remove every "signalbox hook claude" hook from ${settingsPath}` };
+    }
+    try {
+      let changed = false;
+      const backup = mergeJSONFile(settingsPath, (settings) => {
+        for (const ev of Object.keys(settings.hooks ?? {})) {
+          const entries = settings.hooks[ev];
+          if (!Array.isArray(entries)) continue;
+          const kept = entries
+            .map((e: any) => {
+              if (!Array.isArray(e?.hooks)) return e;
+              const hooks = e.hooks.filter((h: any) => h?.command !== "signalbox hook claude");
+              if (hooks.length !== e.hooks.length) changed = true;
+              return { ...e, hooks };
+            })
+            .filter((e: any) => !Array.isArray(e?.hooks) || e.hooks.length > 0);
+          if (kept.length === 0) delete settings.hooks[ev];
+          else settings.hooks[ev] = kept;
+        }
+      });
+      if (!changed) return { status: statusDone, name, detail: "no signalbox hooks found" };
+      return { status: statusInstalled, name, detail: `removed${backup ? ` (backup: ${backup})` : ""}` };
+    } catch (err) {
+      return { status: statusNeeds, name, detail: `could not edit ${settingsPath}: ${err}` };
+    }
   }
 
   unstepTmux(): StepResult {
@@ -402,6 +489,37 @@ class Setup {
   unstepVSCode(): StepResult {
     return { status: statusDone, name: "VS Code", detail: "nothing to remove - detection is automatic" };
   }
+}
+
+// mergeJSONFile edits a user-owned JSON config as safely as an editor can:
+// parse (missing file starts as {}), timestamped backup of the original,
+// mutate, re-parse the serialized result as a sanity check, then an atomic
+// rename into place - a crash can never leave a half-written settings file.
+// Returns the backup path (null when there was nothing to back up).
+// Formatting is normalized to 2-space JSON; the backup preserves the byte-
+// exact original.
+function mergeJSONFile(path: string, mutate: (obj: any) => void): string | null {
+  let raw: string | null = null;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err: any) {
+    if (err?.code !== "ENOENT") throw err;
+  }
+  const obj = raw === null || raw.trim() === "" ? {} : JSON.parse(raw);
+  let backup: string | null = null;
+  if (raw !== null) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
+    backup = `${path}.backup-${stamp}`;
+    writeFileSync(backup, raw);
+  }
+  mutate(obj);
+  const out = JSON.stringify(obj, null, 2) + "\n";
+  JSON.parse(out); // sanity: never install something that does not parse
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, out);
+  renameSync(tmp, path);
+  return backup;
 }
 
 const claudeHookEvents = ["Notification", "Stop", "UserPromptSubmit", "SessionStart", "SessionEnd"];
