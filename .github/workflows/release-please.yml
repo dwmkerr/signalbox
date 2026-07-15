@@ -35,6 +35,13 @@ name: release-please
 on:
   push:
     branches: [main]
+  # Rebuild and publish the artifacts for an existing release tag - recovery
+  # path when a build job failed (or was skipped) after the release was cut.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag (e.g. v0.1.1) to build artifacts for"
+        required: true
 
 permissions:
   contents: write
@@ -43,11 +50,15 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # Manifest configs emit path-prefixed outputs (components/cli--tag_name)
+    # and the plural releases_created - the bare release_created/tag_name
+    # outputs are never set, so gating on them silently skips every job.
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      release_created: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.release.outputs.releases_created }}
+      tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || steps.release.outputs['components/cli--tag_name'] }}
     steps:
       - id: release
+        if: github.event_name != 'workflow_dispatch'
         uses: googleapis/release-please-action@v4
         with:
           config-file: .github/release-please-config.json
