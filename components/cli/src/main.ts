@@ -21,7 +21,7 @@ import {
 } from "./display";
 
 // A plain const stamped by release-please; the compiled binary carries it.
-const version = "0.1.0"; // x-release-please-version
+const version = "0.1.1"; // x-release-please-version
 
 function usage(): string {
   return `signalbox ${version} - one board for everything you run

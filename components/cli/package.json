@@ -1,6 +1,6 @@
 {
   "name": "@dwmkerr/signalbox",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "One board for every agent, terminal, and job you run",
   "license": "MIT",
   "type": "module",
