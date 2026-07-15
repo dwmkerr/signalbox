@@ -1,0 +1,322 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>signalbox - hero 07: css cinema</title>
+<!--
+  CONCEPT 7 - CSS CINEMA
+
+  The 12-second signalbox demo acted out as one looping, CSS-animated timeline.
+  A faithful full jumplist panel (per specs/hub-jumplist.html) performs the demo
+  runsheet with zero scripting - every beat is keyframed on a single 12s master
+  timeline so it loops seamlessly and doubles as the GIF source:
+
+    0.0-1.5s  ⌃⌥J keycaps press above; panel opens (scale/fade)
+    1.5-4.0s  cursor pill steps down two rows (app-switcher browse)
+    4.0-6.0s  search field types "fix" char by char (blinking caret);
+              the list filters down to the amber ask row
+    6.0-8.0s  preview pane populates the prompt/reply with a type-on reveal
+    8.0-10s   "↩" keycap pulses, the panel dips as if jumping
+    10-12s    panel fades closed; internal state resets while hidden
+
+  Implementation note: instead of animation-delay chains (which don't survive
+  infinite loops), every element carries a 12s keyframe animation and the beats
+  live at percentage stops (1s = 8.333%). All state returns to its 0% value
+  while the panel is faded out, so frame 0 and frame 12s are identical.
+
+  JS is used only for the tiny restart control (bottom-right).
+-->
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; min-height:100vh; display:flex; flex-direction:column;
+         align-items:center; justify-content:center; padding:40px 20px;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+
+  /* ---------- the hotkey strip above the panel ---------- */
+  .hotkey { display:flex; align-items:center; gap:6px; margin-bottom:22px;
+            animation:hotkeyStrip 12s linear infinite; }
+  .hotkey .cap { background:#2a2a2e; border:1px solid #ffffff1a; border-bottom-width:2px;
+                 border-radius:6px; min-width:30px; height:30px; display:flex; align-items:center;
+                 justify-content:center; color:#B5B5BA; font-size:13px;
+                 font-family:'SF Mono',ui-monospace,Menlo,monospace;
+                 animation:capPress 12s linear infinite; }
+  .hotkey .plus { color:#6E6E73; font-size:11px; margin:0 1px; }
+  @keyframes hotkeyStrip {
+    0%, 12% { opacity:1; }
+    16%, 88% { opacity:.4; }
+    93%, 100% { opacity:1; }
+  }
+  @keyframes capPress {
+    0%, 1.5% { transform:none; background:#2a2a2e; border-bottom-width:2px; color:#B5B5BA; }
+    2.6%, 4.4% { transform:translateY(2px); background:#4a4a52; border-bottom-width:1px; color:#EDEDED; }
+    6%, 100% { transform:none; background:#2a2a2e; border-bottom-width:2px; color:#B5B5BA; }
+  }
+
+  /* ---------- the panel (anatomy per specs/hub-jumplist.html) ---------- */
+  .panel { width:860px; max-width:100%; background:#161618; border:1px solid #ffffff14;
+           border-radius:16px; box-shadow:0 18px 50px rgba(0,0,0,.6); overflow:hidden;
+           user-select:none; font-size:13px;
+           animation:panelLife 12s cubic-bezier(.2,.7,.3,1) infinite; }
+  @keyframes panelLife {
+    0%, 4.2%   { opacity:0; transform:scale(.965) translateY(12px); }
+    12.5%      { opacity:1; transform:none; }
+    72%        { opacity:1; transform:none; }
+    /* the dip: the jump has fired, the panel gives way to the terminal */
+    75%        { opacity:.93; transform:scale(.982) translateY(4px); }
+    78.5%      { opacity:1; transform:none; }
+    83.3%      { opacity:1; transform:none; }
+    90%, 100%  { opacity:0; transform:scale(.965) translateY(12px); }
+  }
+
+  header { display:flex; align-items:center; justify-content:space-between; padding:0 20px;
+           height:46px; border-bottom:1px solid #ffffff14; }
+  header .brand { color:#B5B5BA; font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  header .verbs { display:flex; align-items:center; gap:6px; color:#B5B5BA; font-size:12px; }
+  kbd { background:#3a3a3f; border:1px solid #ffffff1a; border-radius:4px; padding:1px 6px;
+        font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#D8D8DC;
+        display:inline-block; }
+  kbd.jump { animation:jumpPulse 12s linear infinite; }
+  @keyframes jumpPulse {
+    0%, 66%   { transform:none; background:#3a3a3f; box-shadow:none; }
+    67.5%     { transform:scale(1.22); background:#55555e; box-shadow:0 0 12px rgba(255,255,255,.3); color:#fff; }
+    69%       { transform:scale(1); background:#3a3a3f; box-shadow:none; }
+    70.5%     { transform:scale(1.22); background:#55555e; box-shadow:0 0 12px rgba(255,255,255,.3); color:#fff; }
+    72.5%, 100% { transform:none; background:#3a3a3f; box-shadow:none; }
+  }
+
+  /* the search field: a div acting out typing - chars unmask on the timeline */
+  .search { flex:1; margin:0 16px; color:#EDEDED; font-size:13px; display:flex; align-items:center; }
+  .search .ph { color:#6E6E73; position:absolute; animation:phFade 12s linear infinite; }
+  .search .typed { display:flex; }
+  .search .typed span { display:inline-block; overflow:hidden; max-width:0; }
+  .search .typed .c1 { animation:typeChar1 12s linear infinite; }
+  .search .typed .c2 { animation:typeChar2 12s linear infinite; }
+  .search .typed .c3 { animation:typeChar3 12s linear infinite; }
+  @keyframes phFade   { 0%, 33.5% { opacity:1; } 35%, 90% { opacity:0; } 93%, 100% { opacity:1; } }
+  @keyframes typeChar1 { 0%, 35.9% { max-width:0; } 36%, 90% { max-width:1.2ch; } 91%, 100% { max-width:0; } }
+  @keyframes typeChar2 { 0%, 39.4% { max-width:0; } 39.5%, 90% { max-width:1.2ch; } 91%, 100% { max-width:0; } }
+  @keyframes typeChar3 { 0%, 42.9% { max-width:0; } 43%, 90% { max-width:1.2ch; } 91%, 100% { max-width:0; } }
+  .caret { width:1.5px; height:15px; background:#EDEDED; margin-left:1px; visibility:hidden;
+           animation:caretWindow 12s linear infinite, caretBlink 1s steps(1) infinite; }
+  @keyframes caretWindow { 0%, 31% { visibility:hidden; } 32%, 79% { visibility:visible; } 80%, 100% { visibility:hidden; } }
+  @keyframes caretBlink  { 0%, 55% { opacity:1; } 56%, 100% { opacity:0; } }
+
+  .body { display:flex; }
+  .list { width:400px; border-right:1px solid #ffffff14; padding:10px 0 12px; flex-shrink:0; }
+  .list h3 { color:#6E6E73; font-size:10px; letter-spacing:1.5px; font-weight:600; padding:10px 24px 8px; }
+  .rows { position:relative; }
+
+  /* the cursor pill: one element stepping the timeline (keyboard-nav jumps) */
+  .pill { position:absolute; left:10px; right:10px; height:52px; border-radius:9px;
+          background:#2C2C31; z-index:0;
+          animation:pillMove 12s cubic-bezier(.3,0,.2,1) infinite; }
+  @keyframes pillMove {
+    0%, 19%     { top:0; background:#2C2C31; }
+    19.6%       { top:52px; }
+    26.5%       { top:52px; }
+    27.1%       { top:104px; }
+    46.4%       { top:104px; }
+    47%, 73.5%  { top:0; background:#2C2C31; }
+    75%         { top:0; background:#3D3D45; }   /* flash as the jump fires */
+    78%, 100%   { top:0; background:#2C2C31; }
+  }
+
+  .row { position:relative; z-index:1; display:flex; align-items:center; gap:10px;
+         margin:0 10px; padding:0 10px; height:52px; overflow:hidden; }
+  /* rows 2-6 collapse when "fix" filters the list; restore while panel hidden */
+  .row.flt { animation:rowFilter 12s cubic-bezier(.4,0,.2,1) infinite; }
+  @keyframes rowFilter {
+    0%, 45.4% { height:52px; opacity:1; }
+    48.4%     { height:0; opacity:0; }
+    91%       { height:0; opacity:0; }
+    93%, 100% { height:52px; opacity:1; }
+  }
+  .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
+  .glyph { width:22px; display:flex; justify-content:center; flex-shrink:0; }
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:13px; color:#ADADB2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row.unread .txt .t { font-weight:700; color:#EDEDED; }
+  .txt .d { font-size:10.5px; color:#6E6E73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .right { text-align:right; flex-shrink:0; }
+  .age { font-size:11px; font-weight:600; color:#98989D; }
+  .dot { width:8.5px; height:8.5px; border-radius:50%; background:#0A84FF; }
+  .dot.ask { background:#FF9F0A; }
+  .ring { width:8px; height:8px; border-radius:50%; border:1.4px solid rgba(152,152,157,.55); }
+  .xmark { color:#FF453A; font-size:11px; font-weight:700; line-height:1; }
+  .spin { width:11px; height:11px; border-radius:50%; border:1.7px solid rgba(152,152,157,.25);
+          border-top-color:#98989D; animation:rot .9s linear infinite; }
+  @keyframes rot { to { transform:rotate(360deg); } }
+  svg.aglyph { display:block; }
+  .pi { font-family:'SF Mono',ui-monospace,Menlo,monospace; color:#0A84FF; font-size:15px; }
+
+  /* the preview is full black: a window into the terminal it quotes */
+  .preview { flex:1; min-height:392px; background:#000; position:relative; }
+  .pane { position:absolute; inset:18px 22px; font-family:'SF Mono',ui-monospace,Menlo,monospace;
+          font-size:11.5px; line-height:1.75; color:#C8C8CC; }
+  .pane .you { color:#98989D; white-space:pre-wrap; }
+  .pane .you::before { content:"❯ "; color:#5A5A5F; }
+  .pane .gap { height:12px; }
+  .pane .resp { display:flex; gap:8px; }
+  .pane .resp .b { color:#0A84FF; }
+  .pane .resp.askb .b { color:#FF9F0A; }
+  .pane .resp .body-t { white-space:pre-wrap; color:#D8D8DC; }
+  .pane .body-t code { background:#ffffff14; border-radius:3px; padding:0 4px; color:#EDEDED; }
+  .pane .working { color:#E8B339; }
+  .pane .working .star { display:inline-block; animation:starPulse 1.2s ease-in-out infinite; }
+  @keyframes starPulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+  .actline { margin-top:16px; font-size:11px; color:#6E6E73;
+             font-family:-apple-system,sans-serif; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .actline kbd { font-size:10.5px; }
+  .actline .need { color:#FF9F0A; font-weight:600; }
+
+  /* preview layers crossfade with the browsing selection… */
+  .pane.p1 { animation:pane1 12s linear infinite; }
+  .pane.p2 { animation:pane2 12s linear infinite; }
+  .pane.p3 { animation:pane3 12s linear infinite; }
+  @keyframes pane1 { 0%, 10.5% { opacity:0; } 12.5%, 18.6% { opacity:1; } 19.6%, 100% { opacity:0; } }
+  @keyframes pane2 { 0%, 19%   { opacity:0; } 20%, 26.2%   { opacity:1; } 27.2%, 100% { opacity:0; } }
+  @keyframes pane3 { 0%, 26.8% { opacity:0; } 27.8%, 45.5% { opacity:1; } 47%, 100% { opacity:0; } }
+
+  /* …and the final pane types itself on after the filter lands (6-8s) */
+  .pane.p4 { animation:pane4 12s linear infinite; }
+  @keyframes pane4 { 0%, 48.6% { opacity:0; } 50%, 84% { opacity:1; } 89%, 100% { opacity:0; } }
+  .p4 .you    { animation:revealPrompt 12s linear infinite; }
+  .p4 .resp   { animation:revealReply 12s linear infinite; }
+  .p4 .actline { animation:revealAct 12s linear infinite; }
+  @keyframes revealPrompt {
+    0%, 50%   { clip-path:inset(0 100% 0 0); }
+    56%, 92%  { clip-path:inset(0 -2% 0 0); }
+    93%, 100% { clip-path:inset(0 100% 0 0); }
+  }
+  @keyframes revealReply {
+    0%, 56.5% { clip-path:inset(0 100% 0 0); }
+    64.5%, 92% { clip-path:inset(0 -2% 0 0); }
+    93%, 100% { clip-path:inset(0 100% 0 0); }
+  }
+  @keyframes revealAct {
+    0%, 64.8% { opacity:0; transform:translateY(4px); }
+    67.5%, 92% { opacity:1; transform:none; }
+    93%, 100% { opacity:0; transform:translateY(4px); }
+  }
+
+  footer { border-top:1px solid #ffffff14; height:34px; display:flex; align-items:center;
+           justify-content:center; color:#6E6E73; font-size:10.5px; gap:4px; position:relative; }
+  footer b { color:#8E8E93; font-weight:600; }
+  footer b.sc { font-variant:small-caps; letter-spacing:.5px; }
+  footer .cog { position:absolute; right:14px; top:50%; transform:translateY(-50%);
+                color:#6E6E73; font-size:14px; line-height:1; }
+
+  /* ---------- restart control ---------- */
+  #restart { position:fixed; bottom:16px; right:16px; background:#16161899; color:#6E6E73;
+             border:1px solid #ffffff14; border-radius:8px; padding:6px 12px; font-size:11px;
+             font-family:inherit; cursor:pointer; display:flex; align-items:center; gap:6px; }
+  #restart:hover { color:#B5B5BA; border-color:#ffffff2a; }
+</style></head><body>
+
+<div class="hotkey">
+  <span class="cap">⌃</span><span class="cap">⌥</span><span class="cap">J</span>
+</div>
+
+<div class="panel">
+  <header>
+    <span class="brand"><svg width="16" height="16" viewBox="0 0 20 20" stroke="#B5B5BA" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#B5B5BA" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>signalbox</span>
+    <div class="search">
+      <span class="ph">Search sessions…</span>
+      <span class="typed"><span class="c1">f</span><span class="c2">i</span><span class="c3">x</span></span>
+      <span class="caret"></span>
+    </div>
+    <span class="verbs">Jump <kbd class="jump">↩</kbd></span>
+  </header>
+
+  <div class="body">
+    <div class="list">
+      <h3>SESSIONS</h3>
+      <div class="rows">
+        <div class="pill"></div>
+
+        <div class="row unread">
+          <div class="mark"><div class="dot ask"></div></div>
+          <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+          <div class="txt"><div class="t">fix-auth-token-expiry</div><div class="d">The expiry check uses &lt; where it should use &lt;=. Shall I change it and add a regression test?</div></div>
+          <div class="right"><span class="age">45s</span></div>
+        </div>
+
+        <div class="row flt">
+          <div class="mark"><div class="spin"></div></div>
+          <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+          <div class="txt"><div class="t">schema-migration</div><div class="d">apply the v12 schema migration and backfill the audit table.</div></div>
+          <div class="right"><span class="age">2m</span></div>
+        </div>
+
+        <div class="row flt unread">
+          <div class="mark"><div class="dot"></div></div>
+          <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <div class="txt"><div class="t">release-notes</div><div class="d">Draft ready in RELEASE_NOTES.md - three sections and a highlights paragraph.</div></div>
+          <div class="right"><span class="age">8m</span></div>
+        </div>
+
+        <div class="row flt unread">
+          <div class="mark"><span class="xmark">✕</span></div>
+          <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+          <div class="txt"><div class="t">flaky-test-hunt</div><div class="d">3 retries failed: 'renews session token' still times out on CI.</div></div>
+          <div class="right"><span class="age">15m</span></div>
+        </div>
+
+        <div class="row flt">
+          <div class="mark"><div class="ring"></div></div>
+          <div class="glyph"><span class="pi">π</span></div>
+          <div class="txt"><div class="t">crash-analysis</div><div class="d">Summarised 14 dumps - one recurring null deref in the tail worker.</div></div>
+          <div class="right"><span class="age">25m</span></div>
+        </div>
+
+        <div class="row flt">
+          <div class="mark"><div class="ring"></div></div>
+          <div class="glyph"><svg class="aglyph" width="19" height="19" viewBox="0 0 16 16"><path fill="#B5B5BA" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></div>
+          <div class="txt"><div class="t">deploy · ci.yml</div><div class="d">Workflow run #9182 succeeded in 4m 12s - 2 artifacts.</div></div>
+          <div class="right"><span class="age">40m</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview">
+      <!-- browse crossfades: what the preview shows while the pill steps -->
+      <div class="pane p1">
+        <div class="you">auth tokens seem to expire a second early - take a look?</div>
+        <div class="gap"></div>
+        <div class="resp askb"><span class="b">●</span><span class="body-t">The expiry check uses <code>&lt;</code> where it should use <code>&lt;=</code>. Shall I change it and add a regression test?</span></div>
+        <div class="actline"><kbd>↩</kbd> Jump to iTerm (tmux auth:1) on localhost · <span class="need">needs your input</span></div>
+      </div>
+      <div class="pane p2">
+        <div class="you">apply the v12 schema migration and backfill the audit table.</div>
+        <div class="gap"></div>
+        <div class="working"><span class="star">✻</span> Working… (2m 04s)</div>
+        <div class="actline"><kbd>↩</kbd> Jump to iTerm (tmux db:3) on localhost</div>
+      </div>
+      <div class="pane p3">
+        <div class="you">draft the 0.2.0 release notes from the changelog.</div>
+        <div class="gap"></div>
+        <div class="resp"><span class="b">●</span><span class="body-t">Draft ready in RELEASE_NOTES.md - three sections, sixteen entries, and a short highlights paragraph.</span></div>
+        <div class="actline"><kbd>↩</kbd> Jump to iTerm (tmux dwmkerr:2) on localhost</div>
+      </div>
+      <!-- the money shot: the filtered ask, typing itself on -->
+      <div class="pane p4">
+        <div class="you">auth tokens seem to expire a second early - take a look?</div>
+        <div class="gap"></div>
+        <div class="resp askb"><span class="b">●</span><span class="body-t">The expiry check uses <code>&lt;</code> where it should use <code>&lt;=</code>. Shall I change it and add a regression test?</span></div>
+        <div class="actline"><kbd>↩</kbd> Jump to iTerm (tmux auth:1) on localhost · <span class="need">needs your input</span></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <span>type to search &nbsp;·&nbsp; <b>⌃J ⌃K</b> down/up &nbsp;·&nbsp; <b>⌃1 ⌃2 …</b> jump to session &nbsp;·&nbsp; <b>⇥</b> next unread &nbsp;·&nbsp; <b>⌃R</b> rename &nbsp;·&nbsp; <b>⌃X</b> hide &nbsp;·&nbsp; <b>⌃⌫</b> remove &nbsp;·&nbsp; <b>↩</b> jump &nbsp;·&nbsp; <b class="sc">esc</b> clear/close</span>
+    <span class="cog" title="Settings">⚙</span>
+  </footer>
+</div>
+
+<button id="restart" title="Restart the loop">⟳ restart</button>
+<script>
+  // Rewind every animation on the page to t=0 so the 12s loop restarts in sync.
+  document.getElementById('restart').addEventListener('click', () => {
+    document.getAnimations().forEach(a => { a.currentTime = 0; a.play(); });
+  });
+</script>
+</body></html>

@@ -1,0 +1,141 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>signalbox menu bar</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; color:#c9c9ce; font-size:16px; line-height:1.6;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Arial,sans-serif;
+         display:flex; flex-direction:column; align-items:center; padding:48px 20px; }
+  .page { width:760px; max-width:100%; }
+  .nav { color:#6E6E73; font-size:13px; margin-bottom:18px; }
+  .nav a { color:#0A84FF; text-decoration:none; }
+  h1 { color:#EDEDED; font-size:26px; margin-bottom:6px; }
+  .subtitle { color:#98989D; font-size:15px; margin-bottom:8px; }
+  .note-line { color:#c9c9ce; font-size:14px; margin-bottom:22px; }
+  .prose h2 { color:#EDEDED; font-size:19px; font-weight:600; margin:26px 0 10px;
+              padding-bottom:6px; border-bottom:1px solid #ffffff1a; }
+  .prose p { margin-bottom:10px; }
+  .prose ul { padding-left:22px; margin-bottom:10px; }
+  .prose li { margin-bottom:4px; }
+  .prose code { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:13.5px;
+                background:#ffffff12; border-radius:4px; padding:1px 5px; color:#D8D8DC; }
+  .prose a { color:#0A84FF; text-decoration:none; }
+  .prose img { max-width:100%; border-radius:10px; border:1px solid #ffffff1e; }
+  .prose table { border-collapse:collapse; margin:10px 0; }
+  .prose th, .prose td { border:1px solid #ffffff1e; padding:6px 12px; text-align:left; font-size:14.5px; }
+  .prose th { color:#EDEDED; }
+  .amber { color:#FF9F0A; } .blue { color:#0A84FF; } .red { color:#FF453A; }
+
+  .iconrow { display:flex; gap:26px; align-items:flex-end; margin:12px 0 4px; }
+  .icon { display:flex; flex-direction:column; align-items:center; gap:7px; }
+  .icon .well { width:42px; height:38px; border-radius:9px; background:#2f3136; display:flex;
+                align-items:center; justify-content:center; position:relative; }
+  .icon .cap { color:#6E6E73; font-size:11px; text-align:center; line-height:1.3; }
+  .dotb { position:absolute; top:6px; right:6px; width:7px; height:7px; border-radius:50%;
+          border:1.1px solid #1a1a1c; }
+
+  /* The macOS menu bar, top-right corner. */
+  .strip-wrap { border:1px solid #ffffff18; border-radius:10px; overflow:hidden; margin:4px 0 10px;
+                background:linear-gradient(160deg,#1b2a4a,#3b2a58); }
+  .strip { display:flex; align-items:center; justify-content:flex-end; gap:14px; height:30px;
+           padding:0 14px; background:rgba(20,20,24,.78); color:#E4E4E8; font-size:12.5px;
+           line-height:normal; }
+  .strip .sbicon { display:flex; align-items:center; position:relative; }
+  .strip .statusdot { position:absolute; top:-2px; right:-4px; width:7px; height:7px;
+                      border-radius:50%; border:1.2px solid #1a1a1c; }
+  .strip-cap { color:#6E6E73; font-size:11px; text-align:right; padding:5px 14px 6px;
+               background:rgba(0,0,0,.3); line-height:normal; }
+
+  /* Combined mock: the bar with the dropdown hanging from the icon. */
+  .barmock { position:relative; border:1px solid #ffffff18; border-radius:10px; overflow:hidden;
+             background:linear-gradient(160deg,#1b2a4a,#3b2a58); padding-bottom:330px; margin:4px 0 10px; }
+  .barmock .strip { background:rgba(20,20,24,.85); }
+  .barmock .menu { position:absolute; top:34px; right:150px; margin:0; }
+  /* Solid recreation of the dropdown (light appearance, opaque). */
+  .menu { width:340px; background:#f5f5f7; border:1px solid #00000022; border-radius:8px;
+          box-shadow:0 12px 34px rgba(0,0,0,.45); padding:5px;
+          font-size:14px; color:#1d1d1f; line-height:normal; }
+  .mrow { display:flex; align-items:center; gap:9px; padding:5px 10px; border-radius:5px; }
+  .mrow:hover { background:#0A84FF; color:#fff; }
+  .mrow:hover .agent, .mrow:hover .mage, .mrow:hover .t.read { color:#ffffffcc; }
+  .mk { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .mk.ring { background:none; border:1.5px solid #00000055; }
+  .agent { color:#6e6e73; width:16px; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; }
+  .agent svg { display:block; }
+  .t { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .t.unread { font-weight:700; }
+  .t.read { color:#6e6e73; }
+  .mage { color:#8e8e93; font-size:13px; font-variant-numeric:tabular-nums; }
+  .msep { height:1px; background:#00000018; margin:5px 10px; }
+</style></head><body>
+
+<div class="page">
+<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | <a href="settings.html">settings</a> | menu bar | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
+<h1>Specification: signalbox menu bar</h1>
+<div class="subtitle">The status item: an icon with a status dot, and a dropdown listing every session.</div>
+<div class="note-line"><b>Note:</b> the mockups below are the living specification for the signalbox menu bar item (hover a dropdown row to see selection).</div>
+
+<div class="barmock">
+  <div class="strip">
+    <span class="sbicon">
+      <svg width="17" height="17" viewBox="0 0 20 20" stroke="#E4E4E8" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#E4E4E8" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>
+      <span class="statusdot" style="background:#FF9F0A"></span>
+    </span>
+    <svg width="17" height="13" viewBox="0 0 16 12" fill="#E4E4E8"><path d="M8 9.6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM8 6c1.7 0 3.2.7 4.3 1.8l-1.4 1.4A4.1 4.1 0 0 0 8 8.1c-1.1 0-2.1.4-2.9 1.1L3.7 7.8A6 6 0 0 1 8 6zM8 2.2c2.7 0 5.2 1.1 7 2.9l-1.4 1.4A7.9 7.9 0 0 0 8 4.2c-2.2 0-4.2.9-5.6 2.3L1 5.1a9.9 9.9 0 0 1 7-2.9z"/></svg>
+    <svg width="24" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="#E4E4E8" stroke-opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="#E4E4E8"/><rect x="22.5" y="4" width="2" height="4" rx="1" fill="#E4E4E8" fill-opacity=".6"/></svg>
+    <span>Tue 7 Jul&nbsp;&nbsp;21:42</span>
+  </div>
+  <div class="menu">
+    <div class="mrow"><span class="mk ring"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span><span class="t read">signalbox</span><span class="mage">12m</span></div>
+    <div class="mrow"><span class="mk" style="background:#0A84FF"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span><span class="t unread">agent-notifier</span><span class="mage">4m</span></div>
+    <div class="mrow"><span class="mk" style="background:#FF9F0A"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span><span class="t unread">writing-studio</span><span class="mage">1m</span></div>
+    <div class="mrow"><span class="mk" style="background:#0A84FF"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span><span class="t unread">work-project</span><span class="mage">10m</span></div>
+    <div class="mrow"><span class="mk ring"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#6e6e73" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#34C759" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#6e6e73" stroke-width="1.6" stroke-linecap="round"/></svg></span><span class="t read">release-notes</span><span class="mage">5h</span></div>
+    <div class="mrow"><span class="mk ring"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">crash-dumps</span><span class="mage">23h</span></div>
+    <div class="msep"></div>
+    <div class="mrow"><span class="t">Refresh</span><span class="mage">⌘R</span></div>
+    <div class="mrow"><span class="t">Settings…</span><span class="mage">⌘,</span></div>
+    <div class="mrow"><span class="t">Quit Signalbox</span><span class="mage">⌘Q</span></div>
+  </div>
+</div>
+
+<div class="prose">
+  <h2>Icon</h2>
+  <p>The beacon (radio waves) is the default; the list glyph is the alternate, switchable in
+  <a href="settings.html">settings</a>. Idle shows the plain template glyph. When sessions wait, one
+  dot appears top-right, and the highest urgency wins:
+  <span class="red">red failed</span> beats <span class="amber">amber needs-you</span> beats
+  <span class="blue">blue output updated</span>. The dot counts only unacked, unhidden rows, so a
+  dealt-with board goes quiet. No text counts on the icon.</p>
+
+  <table>
+    <tr><th>Dot</th><th>State</th></tr>
+    <tr><td>none</td><td>idle, or everything dealt with</td></tr>
+    <tr><td><span style="color:#0A84FF">●</span> blue</td><td>output updated (look)</td></tr>
+    <tr><td><span style="color:#FF9F0A">●</span> amber</td><td>needs your input (act)</td></tr>
+    <tr><td><span style="color:#FF453A">●</span> red</td><td>a session failed (fix)</td></tr>
+  </table>
+
+  <h2>Dropdown</h2>
+  <p>One row per session in board order: status mark (same temperatures as the
+  <a href="hub-jumplist.html">jumplist</a> - a menu cannot animate, so working shows a static dotted
+  circle and failed the red ✕), the agent glyph (the same per-agent icon the jumplist
+  uses, not its name), name, age. Bold means unread; a faint ring means
+  read. Click a row to jump. Hidden rows drop out, and the
+  <a href="settings.html">additional filters</a> apply here too, so the dropdown always matches the
+  jumplist; with nothing to show, a disabled "No sessions" row. Below the sessions:
+  Refresh (⌘R), Settings… (⌘,), Quit Signalbox (⌘Q). If the signalbox CLI cannot be found, a
+  disabled banner row sits at the top (<code>signalbox CLI not found - brew install
+  dwmkerr/tools/signalbox (or set SIGNALBOX_BIN)</code>) - jump, hide and remove need the CLI. The
+  mock above shows the bar and the open dropdown together.</p>
+
+  <h2>Notifications</h2>
+  <ul>
+    <li>Attention and error always notify; done only after more than 30 seconds of work, because quick
+    prompt turnarounds are noise.</li>
+    <li>Clicking a notification jumps to the session.</li>
+    <li>Notifications are keyed by session, so a newer signal replaces the stale banner.</li>
+  </ul>
+</div>
+</div>
+</body></html>

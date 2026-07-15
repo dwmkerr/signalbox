@@ -1,0 +1,44 @@
+# Cask template for dwmkerr/homebrew-tools (Casks/signalbox.rb). Rendered by
+# the release workflow with envsubst: VERSION and SHA_APP come from the
+# release's notarized app zip.
+#
+# One artifact installs the whole product: the app owns the hub (spawned as a
+# child process, kept alive, killed on quit) and ships the CLI inside the
+# bundle - the `binary` stanza symlinks it onto PATH. Universal (arm64 +
+# x86_64), signed, notarized, stapled.
+cask "signalbox" do
+  version "${VERSION}"
+  sha256 "${SHA_APP}"
+
+  url "https://github.com/dwmkerr/signalbox/releases/download/v#{version}/Signalbox-#{version}.zip"
+  name "Signalbox"
+  desc "One board for every AI coding agent, terminal, and job you run"
+  homepage "https://github.com/dwmkerr/signalbox"
+
+  depends_on macos: :ventura
+
+  app "Signalbox.app"
+  binary "#{appdir}/Signalbox.app/Contents/Resources/signalbox"
+
+  uninstall quit:       "com.dwmkerr.signalbox",
+            login_item: "Signalbox"
+
+  # `brew uninstall --zap signalbox` is the full teardown: state (board,
+  # spool, logs), app preferences, and the legacy LaunchAgent from pre-cask
+  # installs. Agent-side wiring (Claude/Cursor hooks, tmux lines) lives in
+  # user config files signalbox never edits - `signalbox init --remove`
+  # prints how to unwind those.
+  zap trash: [
+        "~/.local/state/signalbox",
+        "~/Library/Caches/com.dwmkerr.signalbox",
+        "~/Library/HTTPStorages/com.dwmkerr.signalbox",
+        "~/Library/LaunchAgents/com.dwmkerr.signalbox.plist",
+        "~/Library/Preferences/com.dwmkerr.signalbox.plist",
+      ]
+
+  caveats <<~EOS
+    Open Signalbox (it lives in the menu bar and runs the hub), then wire up
+    your coding agents:
+      signalbox init
+  EOS
+end

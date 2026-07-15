@@ -1,0 +1,465 @@
+<!doctype html>
+<!--
+  CONCEPT 8C - CAUSE & EFFECT (iteration on 08-chaos-calm)
+
+  Same split as the base - restless terminal pile left, calm board right -
+  but here the DIVIDER is the story: cause on the right, effect on the left.
+  Three keycaps sit ON the divider in a vertical chain (⌃⌥J, ↑↓, ⏎), joined
+  by a thin fuse line that lights downward as a ~10s sequence plays:
+
+    ⌃⌥J lights → the board wakes (scale .97→1) and a selection pill
+                 appears on row 1.
+    ↑↓ lights   → the pill steps down two rows to the amber ask-row.
+    ⏎ lights    → a pulse crosses the divider LEFTWARD: the buried amber
+                 window rises out of the pile, straightens and brightens,
+                 and the pile's jitter holds still for ~1.5s - you got in,
+                 dealt with it.
+    Reset       → the fuse dims, the pile resumes its restlessness, loop.
+
+  New copy above the split (h1/h2/h3), and a new Cursor row on the board
+  (isometric cube glyph, "landing-page", working spinner, 4m) - 7 sessions.
+  Reduced-motion resting frame: the base composition with all three keycaps
+  visible but unlit.
+-->
+<html><head><meta charset="utf-8"><title>signalbox - cause &amp; effect</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; color:#B5B5BA;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif;
+         display:flex; flex-direction:column; align-items:center;
+         padding:72px 24px 96px; overflow-x:hidden; }
+  .hero { width:1060px; max-width:100%; }
+  h1 { color:#EDEDED; font-size:44px; font-weight:700; letter-spacing:-.02em;
+       text-align:center; margin-bottom:14px; }
+  h2 { color:#EDEDED; font-size:19px; font-weight:600; text-align:center;
+       margin-bottom:12px; }
+  h3 { color:#B5B5BA; font-size:15px; font-weight:400; line-height:1.6;
+       text-align:center; max-width:60ch; margin:0 auto 56px; }
+
+  /* ---------- the split ---------- */
+  .split { display:flex; align-items:stretch; position:relative; }
+  .half { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center;
+          padding:12px 34px 0; }
+  .cap { color:#6E6E73; font-size:13.5px; font-style:italic; margin-top:26px; text-align:center; }
+
+  /* ---------- the divider: cause on the right, effect on the left ---------- */
+  .divider { width:1px; background:#ffffff14; position:relative; flex-shrink:0; }
+  .keycap { position:absolute; left:50%; transform:translate(-50%,-50%);
+            background:linear-gradient(#2e2e33,#232327); color:#EDEDED;
+            font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:15px; font-weight:600;
+            letter-spacing:.06em; padding:9px 15px; border-radius:9px;
+            border:1px solid #ffffff26; border-bottom-width:3px; border-bottom-color:#ffffff12;
+            box-shadow:0 6px 22px rgba(0,0,0,.65), 0 0 0 6px #0d0d0f,
+                       0 0 20px rgba(237,237,237,0);
+            white-space:nowrap; z-index:2; }
+  .k1 { top:26%; }
+  .k2 { top:50%; font-size:14px; padding:8px 13px; }
+  .k3 { top:74%; }
+  .k1 { animation:k1lit 10s linear infinite; }
+  .k2 { animation:k2lit 10s linear infinite; }
+  .k3 { animation:k3lit 10s linear infinite; }
+  @keyframes k1lit {
+    0%,9%    { filter:brightness(1);   color:#EDEDED; border-color:#ffffff26;
+               box-shadow:0 6px 22px rgba(0,0,0,.65), 0 0 0 6px #0d0d0f, 0 0 20px rgba(237,237,237,0); }
+    11%,84%  { filter:brightness(1.45); color:#FFFFFF; border-color:#ffffff55;
+               box-shadow:0 6px 22px rgba(0,0,0,.65), 0 0 0 6px #0d0d0f, 0 0 20px rgba(237,237,237,.4); }
+    90%,100% { filter:brightness(1);   color:#EDEDED; border-color:#ffffff26;
+               box-shadow:0 6px 22px rgba(0,0,0,.65), 0 0 0 6px #0d0d0f, 0 0 20px rgba(237,237,237,0); }
+  }
+  @keyframes k2lit {
+    0%,25%   { filter:brightness(1);   color:#EDEDED; border-color:#ffffff26;
+               box-shadow:0 6px 22px rgba(0,0,0,.65), 0 0 0 6px #0d0d0f, 0 0 20px rgba(237,237,237,0); }
+    27%,84%  { filter:brightness(1.45); color:#FFFFFF; border-color:#ffffff55;
+               box-shadow:0 6px 22px rgba(0,0,0,.65), 0 0 0 6px #0d0d0f, 0 0 20px rgba(237,237,237,.4); }
+    90%,100% { filter:brightness(1);   color:#EDEDED; border-color:#ffffff26;
+               box-shadow:0 6px 22px rgba(0,0,0,.65), 0 0 0 6px #0d0d0f, 0 0 20px rgba(237,237,237,0); }
+  }
+  @keyframes k3lit {
+    0%,49%   { filter:brightness(1);   color:#EDEDED; border-color:#ffffff26;
+               box-shadow:0 6px 22px rgba(0,0,0,.65), 0 0 0 6px #0d0d0f, 0 0 20px rgba(237,237,237,0); }
+    51%,84%  { filter:brightness(1.45); color:#FFFFFF; border-color:#ffffff55;
+               box-shadow:0 6px 22px rgba(0,0,0,.65), 0 0 0 6px #0d0d0f, 0 0 20px rgba(237,237,237,.4); }
+    90%,100% { filter:brightness(1);   color:#EDEDED; border-color:#ffffff26;
+               box-shadow:0 6px 22px rgba(0,0,0,.65), 0 0 0 6px #0d0d0f, 0 0 20px rgba(237,237,237,0); }
+  }
+  /* the fuse: two segments that light downward between the keycaps */
+  .fuse { position:absolute; left:0; width:1px; background:#EDEDED;
+          box-shadow:0 0 6px rgba(237,237,237,.55); transform:scaleY(0);
+          transform-origin:top; opacity:0; z-index:1; }
+  .fa { top:26%; height:24%; animation:fuseA 10s linear infinite; }
+  .fb { top:50%; height:24%; animation:fuseB 10s linear infinite; }
+  @keyframes fuseA {
+    0%,14%   { transform:scaleY(0); opacity:0; }
+    15%      { transform:scaleY(0); opacity:1; }
+    24%,84%  { transform:scaleY(1); opacity:1; }
+    90%,100% { transform:scaleY(1); opacity:0; }
+  }
+  @keyframes fuseB {
+    0%,37%   { transform:scaleY(0); opacity:0; }
+    38%      { transform:scaleY(0); opacity:1; }
+    48%,84%  { transform:scaleY(1); opacity:1; }
+    90%,100% { transform:scaleY(1); opacity:0; }
+  }
+  /* ⏎ fires a pulse back across the divider into the pile */
+  .pulse { position:absolute; right:50%; left:13%; top:calc(74% - 1px); height:2px;
+           background:linear-gradient(to left, rgba(237,237,237,.5), rgba(255,159,10,.7));
+           border-radius:1px; transform:scaleX(0); transform-origin:right;
+           opacity:0; pointer-events:none;
+           animation:pulse 10s linear infinite; }
+  @keyframes pulse {
+    0%,50%   { transform:scaleX(0); opacity:0; }
+    51%      { transform:scaleX(0); opacity:1; }
+    56%      { transform:scaleX(1); opacity:1; }
+    62%,100% { transform:scaleX(1); opacity:0; }
+  }
+
+  /* ---------- LEFT: the chaos cluster ---------- */
+  /* jitter runs on the same 10s clock; it holds still 55-70% (~1.5s) after ⏎ */
+  .cluster { position:relative; width:100%; max-width:440px; height:360px;
+             animation:jitter 10s ease-in-out infinite; }
+  @keyframes jitter {
+    0%   { transform:translate(0,0) rotate(0deg); }
+    6%   { transform:translate(1.2px,-.8px) rotate(.12deg); }
+    13%  { transform:translate(-1px,.6px) rotate(-.1deg); }
+    20%  { transform:translate(.6px,1px) rotate(.08deg); }
+    27%  { transform:translate(-.8px,-.6px) rotate(-.14deg); }
+    34%  { transform:translate(1px,.5px) rotate(.1deg); }
+    41%  { transform:translate(-.7px,-1px) rotate(-.08deg); }
+    48%  { transform:translate(.9px,.7px) rotate(.12deg); }
+    54%,70% { transform:translate(0,0) rotate(0deg); }
+    78%  { transform:translate(-1px,.8px) rotate(-.12deg); }
+    86%  { transform:translate(.8px,-.6px) rotate(.1deg); }
+    93%  { transform:translate(-.6px,.5px) rotate(-.08deg); }
+    100% { transform:translate(0,0) rotate(0deg); }
+  }
+  .tw { position:absolute; background:#161618; border:1px solid #ffffff14; border-radius:8px;
+        overflow:hidden; box-shadow:0 14px 34px rgba(0,0,0,.55); }
+  .tw .bar { height:20px; background:#1e1e21; border-bottom:1px solid #ffffff14;
+             display:flex; align-items:center; gap:5px; padding:0 8px; }
+  .tw .bar i { width:7px; height:7px; border-radius:50%; background:#3a3a3f; }
+  .tw .bar span { color:#6E6E73; font-size:8.5px;
+                  font-family:'SF Mono',ui-monospace,Menlo,monospace;
+                  margin-left:4px; white-space:nowrap; overflow:hidden; }
+  .tw .out { height:calc(100% - 20px); overflow:hidden; padding:6px 10px; position:relative; }
+  /* seamless loop: line block is duplicated, scroll travels exactly half */
+  .scroll { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:9px; line-height:1.9;
+            color:#45454b; white-space:nowrap; }
+  .scroll b { display:block; font-weight:400; }
+  .scroll .g { color:#3d5a44; } .scroll .y { color:#6b5a33; } .scroll .p { color:#56565c; }
+  @keyframes crawl { from { transform:translateY(0); } to { transform:translateY(-50%); } }
+  .w1 { top:12px;  left:6px;   width:262px; height:170px; transform:rotate(-3.4deg); z-index:3; }
+  .w2 { top:2px;   left:186px; width:246px; height:158px; transform:rotate(2.6deg);  z-index:4; }
+  .w3 { top:118px; left:118px; width:274px; height:176px; transform:rotate(-1.6deg); z-index:5; }
+  .w4 { top:158px; left:-4px;  width:226px; height:160px; transform:rotate(4.2deg);  z-index:2; }
+  .w5 { top:96px;  left:262px; width:212px; height:196px; transform:rotate(-4.8deg); z-index:1; }
+  .w1 .scroll { animation:crawl 11s linear infinite; }
+  .w2 .scroll { animation:crawl 7s  linear infinite; }
+  .w3 .scroll { animation:crawl 15s linear infinite; }
+  .w4 .scroll { animation:crawl 9s  linear infinite; }
+  .w5 .scroll { animation:crawl 6s  linear infinite; }
+  /* the buried one that needs you - pleads at rest, rises when ⏎ fires */
+  .w4 { border-color:#FF9F0A55;
+        animation:plead 2.6s ease-in-out infinite, w4rise 10s ease-in-out infinite; }
+  @keyframes plead {
+    0%,100% { box-shadow:0 14px 34px rgba(0,0,0,.55), 0 0 14px #FF9F0A2e; }
+    50%     { box-shadow:0 14px 34px rgba(0,0,0,.55), 0 0 26px #FF9F0A55; }
+  }
+  @keyframes w4rise {
+    0%,54%   { transform:rotate(4.2deg); filter:brightness(1); z-index:2;
+               border-color:#FF9F0A55; }
+    57%      { transform:rotate(.6deg) translateY(-10px); z-index:6; }
+    60%,72%  { transform:rotate(0deg) translateY(-16px) scale(1.03);
+               filter:brightness(1.28); z-index:6; border-color:#FF9F0Acc; }
+    80%,100% { transform:rotate(4.2deg) translateY(0) scale(1); filter:brightness(1);
+               z-index:2; border-color:#FF9F0A55; }
+  }
+
+  /* ---------- RIGHT: the board ---------- */
+  /* asleep at .97; ⌃⌥J wakes it */
+  .board { width:100%; max-width:430px; background:#1e1e21; border:1px solid #ffffff20;
+           border-radius:14px; box-shadow:0 18px 50px rgba(0,0,0,.6); overflow:hidden;
+           user-select:none; transform:scale(.97);
+           animation:wake 10s ease-in-out infinite; }
+  @keyframes wake {
+    0%,10%   { transform:scale(.97); }
+    14%,90%  { transform:scale(1); }
+    96%,100% { transform:scale(.97); }
+  }
+  .board header { display:flex; align-items:center; gap:8px; padding:0 16px; height:40px;
+                  border-bottom:1px solid #ffffff14; color:#B5B5BA; font-size:12.5px;
+                  font-weight:600; }
+  .board header .n { margin-left:auto; color:#6E6E73; font-weight:400; font-size:11px; }
+  .rows { padding:8px 0 10px; position:relative; }
+  .row { display:flex; align-items:center; gap:10px; margin:0 8px; padding:0 10px;
+         height:48px; border-radius:9px; position:relative; z-index:1; }
+  /* the selection pill: appears on row 1 when ⌃⌥J lights, steps down on ↑↓ */
+  .pill { position:absolute; left:8px; right:8px; top:8px; height:48px; border-radius:9px;
+          background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.2);
+          opacity:0; z-index:0; pointer-events:none;
+          animation:pillmove 10s linear infinite; }
+  @keyframes pillmove {
+    0%,11%   { opacity:0; transform:translateY(0); }
+    13%,29%  { opacity:1; transform:translateY(0); }
+    31%,35%  { opacity:1; transform:translateY(48px); }
+    37%,84%  { opacity:1; transform:translateY(96px); }
+    90%,100% { opacity:0; transform:translateY(96px); }
+  }
+  .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
+  .glyph { width:22px; display:flex; justify-content:center; flex-shrink:0; }
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:13px; color:#ADADB2; white-space:nowrap; overflow:hidden;
+            text-overflow:ellipsis; }
+  .row.unread .txt .t { font-weight:700; color:#EDEDED; }
+  .txt .d { font-size:10.5px; color:#6E6E73; white-space:nowrap; overflow:hidden;
+            text-overflow:ellipsis; margin-top:2px; }
+  .age { font-size:11px; font-weight:600; color:#98989D; flex-shrink:0; }
+  .dot { width:8.5px; height:8.5px; border-radius:50%; background:#0A84FF; }
+  .dot.ask { background:#FF9F0A; }
+  .err { color:#FF453A; font-size:12px; font-weight:700; line-height:1; }
+  .ring { width:8px; height:8px; border-radius:50%; border:1.4px solid rgba(152,152,157,.55); }
+  .spin { width:11px; height:11px; border-radius:50%; border:1.7px solid rgba(152,152,157,.25);
+          border-top-color:#98989D; animation:rot .9s linear infinite; }
+  @keyframes rot { to { transform:rotate(360deg); } }
+  /* the ask row still breathes - it is what the pill is walking toward */
+  .row.ask-row { animation:breathe 3.2s ease-in-out infinite; }
+  @keyframes breathe {
+    0%,100% { background:rgba(255,159,10,.05); }
+    50%     { background:rgba(255,159,10,.12); }
+  }
+  .row.ask-row .dot.ask { animation:dotbreathe 3.2s ease-in-out infinite; }
+  @keyframes dotbreathe {
+    0%,100% { box-shadow:0 0 3px #FF9F0A66; }
+    50%     { box-shadow:0 0 9px #FF9F0Aaa; }
+  }
+  svg.aglyph { display:block; }
+  .pi { font-family:'SF Mono',ui-monospace,Menlo,monospace; color:#0A84FF; font-size:15px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    /* resting frame: base composition, three keycaps visible unlit */
+    .cluster, .w4, .scroll, .row.ask-row, .row.ask-row .dot.ask,
+    .k1, .k2, .k3, .fuse, .pulse, .board, .pill, .spin { animation:none; }
+    .board { transform:none; }
+    .pill { opacity:0; }
+  }
+  @media (max-width: 880px) {
+    h1 { font-size:32px; }
+    .split { flex-direction:column; align-items:center; gap:64px; }
+    .divider { width:60%; height:1px; }
+    /* chain runs horizontally along the divider; fuse + pulse stay desktop-only */
+    .k1 { left:26%; top:50%; }
+    .k2 { left:50%; top:50%; }
+    .k3 { left:74%; top:50%; }
+    .fuse, .pulse { display:none; }
+    .half { padding:0 8px; }
+    .cluster { transform:scale(.92); }
+  }
+</style></head><body>
+
+<div class="hero">
+  <h1>Stop tab-hunting your agents</h1>
+  <h2>Your fingers are sore and your brain is hurting.</h2>
+  <h3>Why not see everything in one place and jump with a single keystroke instead? The chaos is still there, you are still doing too much, but at least you are saving half a second each time you context switch.</h3>
+
+  <div class="split">
+
+    <!-- ===================== LEFT: chaos ===================== -->
+    <div class="half">
+      <div class="cluster">
+
+        <div class="tw w1">
+          <div class="bar"><i></i><i></i><i></i><span>tmux: work-project:1 - claude</span></div>
+          <div class="out"><div class="scroll">
+            <b>✻ Compacting conversation…</b>
+            <b class="p">⎿ Read src/auth/token.ts (412 lines)</b>
+            <b>✻ Thinking…</b>
+            <b class="p">⎿ Grep "refreshToken" - 23 matches</b>
+            <b class="g">⎿ Edit applied: src/auth/rotate.ts</b>
+            <b>$ bun test auth</b>
+            <b class="p">42 pass, 0 fail (1.24s)</b>
+            <b class="y">⚠ deprecated: crypto.createCipher</b>
+            <b>✻ Working… (esc to interrupt)</b>
+            <b class="p">⎿ Read src/auth/session.ts (188 lines)</b>
+            <b>✻ Compacting conversation…</b>
+            <b class="p">⎿ Read src/auth/token.ts (412 lines)</b>
+            <b>✻ Thinking…</b>
+            <b class="p">⎿ Grep "refreshToken" - 23 matches</b>
+            <b class="g">⎿ Edit applied: src/auth/rotate.ts</b>
+            <b>$ bun test auth</b>
+            <b class="p">42 pass, 0 fail (1.24s)</b>
+            <b class="y">⚠ deprecated: crypto.createCipher</b>
+            <b>✻ Working… (esc to interrupt)</b>
+            <b class="p">⎿ Read src/auth/session.ts (188 lines)</b>
+          </div></div>
+        </div>
+
+        <div class="tw w2">
+          <div class="bar"><i></i><i></i><i></i><span>iTerm - schema-migration</span></div>
+          <div class="out"><div class="scroll">
+            <b>$ psql -f 0042_tenant_id.sql</b>
+            <b class="p">ALTER TABLE</b>
+            <b class="p">backfilling batch 118/400…</b>
+            <b class="p">backfilling batch 119/400…</b>
+            <b class="g">✓ batch 119 committed (2.1s)</b>
+            <b class="p">backfilling batch 120/400…</b>
+            <b class="y">retry: lock timeout on orders</b>
+            <b class="p">backfilling batch 121/400…</b>
+            <b>$ psql -f 0042_tenant_id.sql</b>
+            <b class="p">ALTER TABLE</b>
+            <b class="p">backfilling batch 118/400…</b>
+            <b class="p">backfilling batch 119/400…</b>
+            <b class="g">✓ batch 119 committed (2.1s)</b>
+            <b class="p">backfilling batch 120/400…</b>
+            <b class="y">retry: lock timeout on orders</b>
+            <b class="p">backfilling batch 121/400…</b>
+          </div></div>
+        </div>
+
+        <div class="tw w3">
+          <div class="bar"><i></i><i></i><i></i><span>tmux: dwmkerr:4 - flaky-test-hunt</span></div>
+          <div class="out"><div class="scroll">
+            <b>$ bun test --rerun-each=5</b>
+            <b class="p">socket.spec.ts (attempt 3/5)</b>
+            <b class="g">✓ reconnects after idle</b>
+            <b class="p">✻ tracing timer leak…</b>
+            <b class="y">⚠ timeout: waitForClose 5000ms</b>
+            <b class="p">socket.spec.ts (attempt 4/5)</b>
+            <b class="p">⎿ Read src/ws/heartbeat.ts</b>
+            <b class="g">✓ heartbeat resumes</b>
+            <b class="p">✻ bisecting seed 0x8842…</b>
+            <b>$ bun test --rerun-each=5</b>
+            <b class="p">socket.spec.ts (attempt 3/5)</b>
+            <b class="g">✓ reconnects after idle</b>
+            <b class="p">✻ tracing timer leak…</b>
+            <b class="y">⚠ timeout: waitForClose 5000ms</b>
+            <b class="p">socket.spec.ts (attempt 4/5)</b>
+            <b class="p">⎿ Read src/ws/heartbeat.ts</b>
+            <b class="g">✓ heartbeat resumes</b>
+            <b class="p">✻ bisecting seed 0x8842…</b>
+          </div></div>
+        </div>
+
+        <!-- the buried one - its amber edge is the only clue, until ⏎ -->
+        <div class="tw w4">
+          <div class="bar"><i></i><i></i><i></i><span>tmux: work:7 - fix-auth-token-…</span></div>
+          <div class="out"><div class="scroll">
+            <b class="y">● Overwrite the token family on reuse?</b>
+            <b class="p">waiting for your input…</b>
+            <b class="p">(y/n)</b>
+            <b class="p">&nbsp;</b>
+            <b class="y">● Overwrite the token family on reuse?</b>
+            <b class="p">waiting for your input…</b>
+            <b class="p">(y/n)</b>
+            <b class="p">&nbsp;</b>
+            <b class="y">● Overwrite the token family on reuse?</b>
+            <b class="p">waiting for your input…</b>
+            <b class="p">(y/n)</b>
+            <b class="p">&nbsp;</b>
+            <b class="y">● Overwrite the token family on reuse?</b>
+            <b class="p">waiting for your input…</b>
+            <b class="p">(y/n)</b>
+            <b class="p">&nbsp;</b>
+          </div></div>
+        </div>
+
+        <div class="tw w5">
+          <div class="bar"><i></i><i></i><i></i><span>opencode - release-notes</span></div>
+          <div class="out"><div class="scroll">
+            <b class="p">reading CHANGELOG.md…</b>
+            <b class="g">✓ 16 entries grouped</b>
+            <b class="p">drafting highlights…</b>
+            <b class="p">writing RELEASE_NOTES.md</b>
+            <b class="g">✓ draft complete</b>
+            <b class="p">idle</b>
+            <b class="p">reading CHANGELOG.md…</b>
+            <b class="g">✓ 16 entries grouped</b>
+            <b class="p">drafting highlights…</b>
+            <b class="p">writing RELEASE_NOTES.md</b>
+            <b class="g">✓ draft complete</b>
+            <b class="p">idle</b>
+          </div></div>
+        </div>
+
+      </div>
+      <div class="cap">somewhere in here, an agent needs you.</div>
+    </div>
+
+    <!-- the divider IS the story: three keys, top to bottom, like a fuse -->
+    <div class="divider">
+      <div class="fuse fa"></div>
+      <div class="fuse fb"></div>
+      <span class="keycap k1">⌃⌥J</span>
+      <span class="keycap k2">↑↓</span>
+      <span class="keycap k3">⏎</span>
+    </div>
+    <div class="pulse"></div>
+
+    <!-- ===================== RIGHT: calm ===================== -->
+    <div class="half">
+      <div class="board">
+        <header>
+          <svg width="16" height="16" viewBox="0 0 20 20" stroke="#B5B5BA" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#B5B5BA" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>
+          signalbox
+          <span class="n">7 sessions</span>
+        </header>
+        <div class="rows">
+          <div class="pill"></div>
+
+          <div class="row">
+            <div class="mark"><div class="spin"></div></div>
+            <div class="glyph"><span class="pi">π</span></div>
+            <div class="txt"><div class="t">schema-migration</div><div class="d">add tenant_id and backfill in batches.</div></div>
+            <span class="age">2m</span>
+          </div>
+
+          <div class="row">
+            <div class="mark"><div class="spin"></div></div>
+            <div class="glyph"><svg class="aglyph" width="22" height="20" viewBox="0 0 22 20"><g stroke="#B5B5BA" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><polygon points="11,1 20,5.5 20,14.5 11,19 2,14.5 2,5.5"/><line x1="11" y1="10" x2="2" y2="5.5"/><line x1="11" y1="10" x2="20" y2="5.5"/><line x1="11" y1="10" x2="11" y2="19"/></g></svg></div>
+            <div class="txt"><div class="t">landing-page</div><div class="d">rebuilding the hero section and pricing grid.</div></div>
+            <span class="age">4m</span>
+          </div>
+
+          <div class="row unread ask-row">
+            <div class="mark"><div class="dot ask"></div></div>
+            <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+            <div class="txt"><div class="t">fix-auth-token-expiry</div><div class="d">Overwrite the token family on reuse? It changes revocation.</div></div>
+            <span class="age">5m</span>
+          </div>
+
+          <div class="row unread">
+            <div class="mark"><div class="dot"></div></div>
+            <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+            <div class="txt"><div class="t">release-notes</div><div class="d">Draft ready in RELEASE_NOTES.md - sixteen entries.</div></div>
+            <span class="age">6m</span>
+          </div>
+
+          <div class="row unread">
+            <div class="mark"><span class="err">✕</span></div>
+            <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+            <div class="txt"><div class="t">flaky-test-hunt</div><div class="d">bun test failed - 3 timeouts in socket.spec.ts.</div></div>
+            <span class="age">9m</span>
+          </div>
+
+          <div class="row">
+            <div class="mark"><div class="ring"></div></div>
+            <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+            <div class="txt"><div class="t">crash-analysis</div><div class="d">Root cause traced to a double-free in the watcher.</div></div>
+            <span class="age">14m</span>
+          </div>
+
+          <div class="row">
+            <div class="mark"><div class="ring"></div></div>
+            <div class="glyph"><svg class="aglyph" width="19" height="19" viewBox="0 0 16 16"><path fill="#B5B5BA" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></div>
+            <div class="txt"><div class="t">deploy · ci.yml</div><div class="d">Run #9182 succeeded in 4m 12s - artifacts published.</div></div>
+            <span class="age">21m</span>
+          </div>
+
+        </div>
+      </div>
+      <div class="cap">three keys, and even the chaos holds still for a second.</div>
+    </div>
+
+  </div>
+</div>
+
+</body></html>

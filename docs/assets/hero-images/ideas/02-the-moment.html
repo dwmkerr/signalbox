@@ -1,0 +1,313 @@
+<!doctype html>
+<!--
+  CONCEPT 2 - THE MOMENT
+  A mini-film in pure CSS keyframes (~8s, loops forever). It tells the core
+  signalbox story in four beats:
+
+    Beat 1 (0-2s)   Two agent terminals grind away in the background - one
+                    Claude Code, one pi - dim output scrolling. The ⌃⌥J
+                    keycap chip fades in at center: the invocation.
+    Beat 2 (2-5s)   The jumplist rises above the terminals: a simplified but
+                    faithful six-row board. The lead row is amber - a session
+                    needs you - its dot pulsing gently under the selection pill.
+    Beat 3 (5-7s)   The ↩ keycap blinks, the board slips away, and the
+                    Claude terminal raises and brightens: you jumped to it.
+                    Its border flashes amber then settles quiet - handled.
+    Beat 4 (7-8s)   Everything eases back to base and the loop breathes again.
+
+  All motion is restrained ease curves, no bounce. Colors, glyphs and row
+  anatomy are copied from specs/hub-jumplist.html: panel #161618 / 16px radius /
+  hairline #ffffff14; amber #FF9F0A needs-you, blue #0A84FF ready, red #FF453A
+  failed, grey ring spinner working; claude sunburst #D97757, opencode terminal
+  with #32D74B chevron, pi blue π, github octocat. No JS, no external requests.
+-->
+<html><head><meta charset="utf-8"><title>signalbox - the moment</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; }
+  body { background:#0d0d0f; display:flex; flex-direction:column; align-items:center; justify-content:center;
+         padding:40px 20px; overflow-x:hidden;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+  .mono { font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* ---------- stage ---------- */
+  .stage { position:relative; width:1120px; max-width:100%; height:640px; }
+  /* faint spotlight so the film has somewhere to happen */
+  .stage::before { content:""; position:absolute; inset:-60px;
+    background:radial-gradient(ellipse 60% 50% at 50% 42%, rgba(255,255,255,.045), transparent 70%);
+    pointer-events:none; }
+
+  /* ---------- terminal cards (beat 1: working) ---------- */
+  .terms { position:absolute; left:0; right:0; bottom:36px; display:flex; justify-content:center; gap:30px; }
+  .term { width:470px; height:296px; background:#101012; border:1px solid #ffffff14; border-radius:12px;
+          box-shadow:0 14px 44px rgba(0,0,0,.55); overflow:hidden; display:flex; flex-direction:column; }
+  .term-head { display:flex; align-items:center; gap:9px; height:36px; padding:0 14px;
+               border-bottom:1px solid #ffffff0d; flex-shrink:0; }
+  .tl { display:flex; gap:6px; margin-right:4px; }
+  .tl i { width:9px; height:9px; border-radius:50%; background:#ffffff1c; }
+  .term-title { font-size:11px; color:#6E6E73; display:flex; align-items:center; gap:7px;
+                white-space:nowrap; overflow:hidden; }
+  .term-title svg, .term-title .piglyph { flex-shrink:0; }
+  .piglyph { font-family:'SF Mono',ui-monospace,Menlo,monospace; color:#0A84FF; font-size:13px; line-height:1; }
+  .term-body { position:relative; flex:1; overflow:hidden; padding:0 16px; }
+  /* dim output lines, two copies scrolling for a seamless loop */
+  .scroll { animation:scrollUp 4s linear infinite; }
+  .scroll .ln { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px; line-height:22px;
+                color:#45454b; white-space:nowrap; }
+  .scroll .ln b { font-weight:400; }
+  .scroll .ln.you { color:#8a8a90; }
+  .ln .cw { color:#8a5646; }   /* claude working glyph, dimmed coral   */
+  .ln .pw { color:#3a5f8f; }   /* pi working glyph, dimmed blue        */
+  @keyframes scrollUp { from { transform:translateY(0); } to { transform:translateY(-50%); } }
+  /* fade the stream at top and bottom of the viewport */
+  .term-body::before, .term-body::after { content:""; position:absolute; left:0; right:0; height:34px; z-index:1; pointer-events:none; }
+  .term-body::before { top:0; background:linear-gradient(#101012, transparent); }
+  .term-body::after { bottom:0; background:linear-gradient(transparent, #101012); }
+
+  /* the film: card A gets jumped to, card B recedes */
+  .term-a { animation:cardA 8s cubic-bezier(.4,0,.2,1) infinite; }
+  .term-b { animation:cardB 8s cubic-bezier(.4,0,.2,1) infinite; }
+  @keyframes cardA {
+    0%, 26%      { transform:none; filter:brightness(1); border-color:#ffffff14;
+                   box-shadow:0 14px 44px rgba(0,0,0,.55); }
+    33%, 70%     { transform:none; filter:brightness(.68); border-color:#ffffff14;
+                   box-shadow:0 14px 44px rgba(0,0,0,.55); }
+    /* the jump: raise, brighten, amber edge - you arrived */
+    78%          { transform:translateY(-12px) scale(1.012); filter:brightness(1.16);
+                   border-color:rgba(255,159,10,.7);
+                   box-shadow:0 24px 60px rgba(0,0,0,.6), 0 0 0 1px rgba(255,159,10,.35), 0 0 36px rgba(255,159,10,.16); }
+    /* amber settles to quiet: handled */
+    88%          { transform:translateY(-12px) scale(1.012); filter:brightness(1.1);
+                   border-color:#ffffff2e; box-shadow:0 24px 60px rgba(0,0,0,.6); }
+    97%, 100%    { transform:none; filter:brightness(1); border-color:#ffffff14;
+                   box-shadow:0 14px 44px rgba(0,0,0,.55); }
+  }
+  @keyframes cardB {
+    0%, 26%   { filter:brightness(1); }
+    33%, 70%  { filter:brightness(.68); }
+    78%, 90%  { filter:brightness(.55); }
+    97%, 100% { filter:brightness(1); }
+  }
+
+  /* ---------- keycaps ---------- */
+  .kc { display:inline-flex; align-items:center; justify-content:center; min-width:38px; height:38px; padding:0 10px;
+        background:linear-gradient(#2e2e33, #26262b); border:1px solid #ffffff22; border-bottom:2.5px solid #ffffff2e;
+        border-radius:9px; box-shadow:0 6px 18px rgba(0,0,0,.5), inset 0 1px 0 #ffffff14;
+        color:#D8D8DC; font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:16px; }
+  .chip { position:absolute; left:50%; top:44%; transform:translate(-50%,-50%); display:flex; gap:8px; z-index:5;
+          opacity:0; animation:chipIn 8s cubic-bezier(.4,0,.2,1) infinite; }
+  @keyframes chipIn {
+    0%, 8%     { opacity:0; transform:translate(-50%,-50%) scale(.92); }
+    15%, 23%   { opacity:1; transform:translate(-50%,-50%) scale(1); }
+    29%, 100%  { opacity:0; transform:translate(-50%,-50%) scale(1.05); }
+  }
+
+  .enter { position:absolute; left:50%; top:416px; transform:translateX(-50%); z-index:6;
+           display:flex; align-items:center; gap:10px; opacity:0;
+           background:rgba(22,22,24,.92); border:1px solid #ffffff14; border-radius:12px;
+           padding:9px 16px 9px 10px; box-shadow:0 12px 34px rgba(0,0,0,.55);
+           animation:enterBlink 8s ease-in-out infinite; }
+  .enter .kc { min-width:44px; height:40px; font-size:17px; }
+  .enter .lbl { color:#98989D; font-size:12px; }
+  @keyframes enterBlink {
+    0%, 60%   { opacity:0; transform:translateX(-50%) translateY(5px); }
+    63%       { opacity:1; transform:translateX(-50%) translateY(0); }
+    66%       { opacity:.3; }
+    69%, 72%  { opacity:1; transform:translateX(-50%) translateY(0); }
+    77%, 100% { opacity:0; transform:translateX(-50%) translateY(0); }
+  }
+
+  /* ---------- the board (beat 2) ---------- */
+  .board { position:absolute; left:50%; top:34px; width:600px; z-index:4;
+           background:#161618; border:1px solid #ffffff14; border-radius:16px;
+           box-shadow:0 26px 70px rgba(0,0,0,.7), 0 2px 8px rgba(0,0,0,.4);
+           opacity:0; transform:translateX(-50%) translateY(14px) scale(.96);
+           animation:boardIn 8s cubic-bezier(.4,0,.2,1) infinite; }
+  @keyframes boardIn {
+    0%, 26%   { opacity:0; transform:translateX(-50%) translateY(14px) scale(.96); }
+    33%, 71%  { opacity:1; transform:translateX(-50%) translateY(0) scale(1); }
+    80%, 100% { opacity:0; transform:translateX(-50%) translateY(-8px) scale(.985); }
+  }
+  .b-head { display:flex; align-items:center; height:44px; padding:0 18px; gap:10px;
+            border-bottom:1px solid #ffffff14; }
+  .brand { color:#B5B5BA; font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .b-search { flex:1; color:#6E6E73; font-size:13px; margin-left:8px; }
+  .b-jump { color:#B5B5BA; font-size:12px; display:flex; align-items:center; gap:6px; }
+  kbd { background:#3a3a3f; border:1px solid #ffffff1a; border-radius:4px; padding:1px 6px;
+        font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#D8D8DC; }
+  .rows { padding:8px 0 6px; }
+  .row { display:flex; align-items:center; gap:10px; margin:0 10px; padding:8px 10px; border-radius:9px; }
+  .row.sel { background:#2C2C31; }
+  .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
+  .glyph { width:22px; display:flex; justify-content:center; flex-shrink:0; }
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:13px; color:#ADADB2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row.unread .txt .t { font-weight:700; color:#EDEDED; }
+  .row.sel .txt .t { color:#fff; }
+  .txt .d { font-size:10.5px; color:#6E6E73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .age { font-size:11px; font-weight:600; color:#98989D; flex-shrink:0; }
+  .dot { width:8.5px; height:8.5px; border-radius:50%; background:#0A84FF; }
+  .dot.ask { background:#FF9F0A; animation:pulseAsk 1.8s ease-in-out infinite; }
+  @keyframes pulseAsk {
+    0%, 100% { box-shadow:0 0 0 0 rgba(255,159,10,.45); transform:scale(1); }
+    50%      { box-shadow:0 0 0 5px rgba(255,159,10,0); transform:scale(1.12); }
+  }
+  .x { color:#FF453A; font-size:11px; font-weight:700; line-height:1; }
+  .spin { width:11px; height:11px; border-radius:50%; border:1.7px solid rgba(152,152,157,.25);
+          border-top-color:#98989D; animation:rot .9s linear infinite; }
+  @keyframes rot { to { transform:rotate(360deg); } }
+  .b-foot { border-top:1px solid #ffffff14; height:30px; display:flex; align-items:center; justify-content:center;
+            color:#6E6E73; font-size:10.5px; gap:4px; }
+  .b-foot b { font-weight:600; }
+  svg.aglyph { display:block; }
+  .pi { font-family:'SF Mono',ui-monospace,Menlo,monospace; color:#0A84FF; font-size:15px; line-height:1; }
+
+  /* ---------- caption ---------- */
+  .caption { margin-top:26px; display:flex; align-items:center; gap:10px; }
+  .caption .word { color:#EDEDED; font-size:15px; font-weight:600; letter-spacing:.2px; }
+  .caption .tag { color:#6E6E73; font-size:13.5px; }
+  .caption .sep { color:#3a3a3f; }
+
+  /* stills read fine too: park the film on beat 2 */
+  @media (prefers-reduced-motion: reduce) {
+    .term-a, .term-b, .board, .chip, .enter, .scroll, .dot.ask { animation:none; }
+    .board { opacity:1; transform:translateX(-50%); }
+    .term-a, .term-b { filter:brightness(.68); }
+    .chip, .enter { opacity:0; }
+  }
+</style></head><body>
+
+<div class="stage">
+
+  <!-- beat 1: two terminals, agents working -->
+  <div class="terms">
+    <div class="term term-a">
+      <div class="term-head">
+        <span class="tl"><i></i><i></i><i></i></span>
+        <span class="term-title">
+          <svg width="13" height="13" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg>
+          claude · fix-auth-token-expiry
+        </span>
+      </div>
+      <div class="term-body">
+        <div class="scroll">
+          <div class="ln you">❯ fix the auth token expiry bug</div>
+          <div class="ln"><b class="cw">✻</b> Thinking…</div>
+          <div class="ln">· Read src/auth/token.ts</div>
+          <div class="ln">· Read src/auth/refresh.ts</div>
+          <div class="ln"><b class="cw">✻</b> expiresAt compares with &gt;= not &gt;</div>
+          <div class="ln">· Edit src/auth/token.ts</div>
+          <div class="ln"><b class="cw">✻</b> Running tests…</div>
+          <div class="ln">· bun test - 42 pass, 1 fail</div>
+          <div class="ln"><b class="cw">✻</b> refresh window is off by one too</div>
+          <div class="ln">· Edit src/auth/refresh.ts</div>
+          <div class="ln you">❯ fix the auth token expiry bug</div>
+          <div class="ln"><b class="cw">✻</b> Thinking…</div>
+          <div class="ln">· Read src/auth/token.ts</div>
+          <div class="ln">· Read src/auth/refresh.ts</div>
+          <div class="ln"><b class="cw">✻</b> expiresAt compares with &gt;= not &gt;</div>
+          <div class="ln">· Edit src/auth/token.ts</div>
+          <div class="ln"><b class="cw">✻</b> Running tests…</div>
+          <div class="ln">· bun test - 42 pass, 1 fail</div>
+          <div class="ln"><b class="cw">✻</b> refresh window is off by one too</div>
+          <div class="ln">· Edit src/auth/refresh.ts</div>
+        </div>
+      </div>
+    </div>
+    <div class="term term-b">
+      <div class="term-head">
+        <span class="tl"><i></i><i></i><i></i></span>
+        <span class="term-title"><span class="piglyph">π</span> pi · crash-analysis</span>
+      </div>
+      <div class="term-body">
+        <div class="scroll">
+          <div class="ln you">π › summarise last night's crash dumps</div>
+          <div class="ln"><b class="pw">…</b> reading 14 dump files</div>
+          <div class="ln"><b class="pw">…</b> clustering stack traces</div>
+          <div class="ln">· fault A: parser.ts:212 null frame</div>
+          <div class="ln">· fault B: lexer.ts:88 range check</div>
+          <div class="ln"><b class="pw">…</b> correlating with commits</div>
+          <div class="ln">· both introduced in 4f2c11d</div>
+          <div class="ln"><b class="pw">…</b> drafting summary</div>
+          <div class="ln">· writing crash-summary.md</div>
+          <div class="ln"><b class="pw">…</b> verifying line numbers</div>
+          <div class="ln you">π › summarise last night's crash dumps</div>
+          <div class="ln"><b class="pw">…</b> reading 14 dump files</div>
+          <div class="ln"><b class="pw">…</b> clustering stack traces</div>
+          <div class="ln">· fault A: parser.ts:212 null frame</div>
+          <div class="ln">· fault B: lexer.ts:88 range check</div>
+          <div class="ln"><b class="pw">…</b> correlating with commits</div>
+          <div class="ln">· both introduced in 4f2c11d</div>
+          <div class="ln"><b class="pw">…</b> drafting summary</div>
+          <div class="ln">· writing crash-summary.md</div>
+          <div class="ln"><b class="pw">…</b> verifying line numbers</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- beat 1: the invocation -->
+  <div class="chip"><span class="kc">⌃</span><span class="kc">⌥</span><span class="kc">J</span></div>
+
+  <!-- beat 2: the board -->
+  <div class="board">
+    <div class="b-head">
+      <span class="brand"><svg width="16" height="16" viewBox="0 0 20 20" stroke="#B5B5BA" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#B5B5BA" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>signalbox</span>
+      <span class="b-search">Search sessions…</span>
+      <span class="b-jump">Jump <kbd>↩</kbd></span>
+    </div>
+    <div class="rows">
+      <div class="row sel unread">
+        <div class="mark"><div class="dot ask"></div></div>
+        <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+        <div class="txt"><div class="t">fix-auth-token-expiry</div><div class="d">auth tokens seem to expire a second early - take a look?</div></div>
+        <span class="age">45s</span>
+      </div>
+      <div class="row">
+        <div class="mark"><div class="spin"></div></div>
+        <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+        <div class="txt"><div class="t">schema-migration</div><div class="d">run the v14 schema migration against staging.</div></div>
+        <span class="age">2m</span>
+      </div>
+      <div class="row unread">
+        <div class="mark"><div class="dot"></div></div>
+        <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+        <div class="txt"><div class="t">release-notes</div><div class="d">Draft ready in RELEASE_NOTES.md - three sections, sixteen entries.</div></div>
+        <span class="age">8m</span>
+      </div>
+      <div class="row unread">
+        <div class="mark"><span class="x">✕</span></div>
+        <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+        <div class="txt"><div class="t">flaky-test-hunt</div><div class="d">Test runner exited 1 - three specs still failing after retry.</div></div>
+        <span class="age">15m</span>
+      </div>
+      <div class="row">
+        <div class="mark"><div class="dot"></div></div>
+        <div class="glyph"><span class="pi">π</span></div>
+        <div class="txt"><div class="t">crash-analysis</div><div class="d">Crash dumps summarised - two distinct faults, both in the parser.</div></div>
+        <span class="age">25m</span>
+      </div>
+      <div class="row">
+        <div class="mark"><div class="dot"></div></div>
+        <div class="glyph"><svg class="aglyph" width="19" height="19" viewBox="0 0 16 16"><path fill="#B5B5BA" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></div>
+        <div class="txt"><div class="t">deploy · ci.yml</div><div class="d">Workflow run succeeded in 4m 12s - plugin published.</div></div>
+        <span class="age">40m</span>
+      </div>
+    </div>
+    <div class="b-foot"><span><b>↩</b> jump &nbsp;·&nbsp; <b>⌃J ⌃K</b> down/up &nbsp;·&nbsp; <b>⇥</b> next unread &nbsp;·&nbsp; <b>esc</b> close</span></div>
+  </div>
+
+  <!-- beat 3: the jump -->
+  <div class="enter"><span class="kc">↩</span><span class="lbl">jump</span></div>
+
+</div>
+
+<div class="caption">
+  <svg width="17" height="17" viewBox="0 0 20 20" stroke="#B5B5BA" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#B5B5BA" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>
+  <span class="word">signalbox</span>
+  <span class="sep">·</span>
+  <span class="tag">every agent session, one keystroke away</span>
+</div>
+
+</body></html>

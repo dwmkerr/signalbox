@@ -1,0 +1,152 @@
+# CI: bun typecheck/test/compile on Linux + macOS, hardcoded-path guard,
+# macOS menu bar app build, and adapter syntax checks.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: install
+        working-directory: components/cli
+        run: bun install --frozen-lockfile
+
+      - name: typecheck
+        working-directory: components/cli
+        run: bunx tsc --noEmit
+
+      - name: test
+        working-directory: components/cli
+        run: bun test
+
+      - name: compile
+        working-directory: components/cli
+        # BUN_NO_CODESIGN_MACHO_BINARY works around oven-sh/bun#29361
+        # (broken signatures on darwin-arm64); harmless elsewhere. The
+        # codesign step is macOS-only.
+        run: |
+          BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify src/main.ts --outfile bin/signalbox
+          if [ "$(uname)" = "Darwin" ]; then
+            codesign --force --sign - bin/signalbox
+            codesign --verify bin/signalbox
+          fi
+          ./bin/signalbox version
+
+  guard-paths:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No hardcoded /Users/ paths
+        # Source must resolve locations at runtime (SIGNALBOX_BIN, PATH scan,
+        # $HOME) - a baked-in developer path breaks every other machine.
+        # Excluded: docs/ legitimately shows example paths, and test files
+        # use synthetic /Users/... values as fixture data.
+        run: |
+          if git grep -n '/Users/' -- \
+              '*.js' '*.ts' '*.swift' '*.plist' '*.sh' \
+              ':(exclude)docs/**' \
+              ':(exclude)components/cli/test/**' \
+              ':(exclude).github/**'; then
+            echo "::error::Hardcoded /Users/ path found (matches above). Resolve paths at runtime instead."
+            exit 1
+          fi
+
+  app:
+    # Package.swift declares swift-tools-version 6.2, which ships with
+    # Xcode 26 (Swift 6.2). Known runner gap: macos-14 tops out at Xcode 16.2
+    # (Swift 6.0) and cannot compile the manifest, so this job runs on
+    # macos-15, whose images include Xcode 26 but default to 16.x - hence the
+    # explicit xcode-select below.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26 (Swift 6.2)
+        run: |
+          # If no Xcode 26 exists on the image the glob stays literal and
+          # xcode-select fails loudly, which is the failure we want.
+          xcode_app="$(printf '%s\n' /Applications/Xcode_26*.app | sort -V | tail -n 1)"
+          sudo xcode-select -s "${xcode_app}/Contents/Developer"
+          swift --version
+
+      - name: swift build
+        working-directory: components/app
+        run: swift build -c release
+
+      - name: make app bundle
+        # app/Makefile's SWIFTPM_CUSTOM_LIBS_DIR workaround targets a stale
+        # CommandLineTools install; under full Xcode it is harmless (removing
+        # *.private.swiftinterface just makes swiftc use the public ones). If
+        # it ever misbehaves on runners, gate manifest-libs on the developer
+        # dir being CommandLineTools.
+        run: make -C components/app
+
+  adapters:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Syntax-check opencode adapter
+        run: node --check components/cli/adapters/opencode/signalbox.js
+
+      - name: Syntax-check pi adapter
+        # signalbox.ts uses only erasable TS syntax (type-only imports,
+        # annotations), so Node >= 23's built-in type stripping lets --check
+        # parse it without a TypeScript toolchain. Verified with Node 24.
+        run: node --check components/cli/adapters/pi/signalbox.ts
+
+  # Dogfood: fire a signalbox event from CI, exactly as any GitHub Actions
+  # user would. There is no hub in the runner, so the event spools and the
+  # step's value is (a) a living example of the wiring and (b) a smoke test
+  # of the fire path on a clean machine. Point SIGNALBOX_URL at a reachable
+  # hub (e.g. a cloud hub, once deployed) and the same step delivers for real.
+  signal:
+    runs-on: ubuntu-latest
+    needs: [cli]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Fire build-complete event
+        working-directory: components/cli
+        run: |
+          bun install --frozen-lockfile
+          bun build --compile src/main.ts --outfile bin/signalbox
+          ./bin/signalbox fire \
+            --agent github \
+            --event done \
+            --session-key "github:${GITHUB_REPOSITORY}/ci" \
+            --title "signalbox CI" \
+            --reply "Build complete - a synthetic message showing how GitHub Actions connects to signalbox." \
+            --origin-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          # fire always exits 0; show where the event went (spool, no hub here).
+          cat ~/.local/state/signalbox/spool.jsonl 2>/dev/null || true

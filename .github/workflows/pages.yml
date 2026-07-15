@@ -1,0 +1,46 @@
+# Publishes the landing page (docs/assets/hero-images/hero.html -> /) and specs/
+# as a static site (https://dwmkerr.github.io/signalbox/specs/... - the
+# markdown specs' nav links point there).
+#
+# The Pages site is public even while the repo is private - accepted.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["components/specs/**", "docs/assets/hero-images/hero.html", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage site
+        run: |
+          mkdir -p site/specs
+          cp -R components/specs/* site/specs/
+          # The landing page is the hero asset.
+          cp docs/assets/hero-images/hero.html site/index.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

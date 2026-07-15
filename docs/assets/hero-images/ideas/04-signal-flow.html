@@ -1,0 +1,290 @@
+<!doctype html>
+<!--
+  CONCEPT 4 - SIGNAL FLOW
+
+  Four small stylized terminal cards sit in a shallow arc along the bottom,
+  one per agent (claude, opencode, pi, github/CI), each with dim shimmering
+  output lines. On a shared 12-second cycle, each card lifts off a colored
+  signal dot - amber from claude (it's asking), blue from the others (done) -
+  which travels a curved SVG path (SMIL animateMotion) up to a macOS menu bar
+  strip at the top. When a dot arrives, the beacon's status dot flashes that
+  color and settles back to amber (highest urgency wins), and the matching
+  dropdown row's mark pulses. Departures at 0/3/6/9s, arrivals at
+  2.4/5.4/8.4/11.4s keep the loop staggered, calm, and mesmerizing.
+  The story: everything reports in.
+
+  Self-contained: inline SVG/CSS only, no external requests.
+  Colors and agent glyphs copied from specs/hub-jumplist.html and
+  specs/menubar.html.
+-->
+<html><head><meta charset="utf-8"><title>signalbox - signal flow</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; color:#c9c9ce;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif;
+         display:flex; flex-direction:column; align-items:center; padding:40px 20px 30px;
+         min-height:100vh; }
+  @media (max-width:1180px) { .stage { zoom:.78; } }
+  @media (max-width:900px)  { .stage { zoom:.58; } }
+
+  .stage { position:relative; width:1120px; height:700px; flex-shrink:0; }
+  /* Faint warmth around the beacon: the board's pull. */
+  .stage::before { content:""; position:absolute; inset:0; pointer-events:none;
+    background:
+      radial-gradient(420px 220px at 800px 30px, rgba(255,159,10,.05), transparent 70%),
+      radial-gradient(700px 380px at 50% 88%, rgba(10,132,255,.04), transparent 70%); }
+
+  /* ---- menu bar strip ---- */
+  .strip { position:absolute; top:14px; left:0; right:0; height:30px; z-index:4;
+           background:rgba(26,26,31,.86); border:1px solid #ffffff14; border-radius:9px;
+           display:flex; align-items:center; font-size:12.5px; color:#E4E4E8;
+           backdrop-filter:blur(10px); }
+  .strip .lhs { display:flex; align-items:center; gap:18px; padding-left:16px; color:#B5B5BA; }
+  .strip .lhs .app { font-weight:700; color:#E4E4E8; }
+  .strip .rhs { margin-left:auto; display:flex; align-items:center; gap:16px; padding-right:16px; }
+  .sbicon { position:relative; display:flex; align-items:center; }
+  .statusdot { position:absolute; top:-3px; right:-5px; width:7px; height:7px; border-radius:50%;
+               border:1.2px solid #1a1a1c; background:#FF9F0A;
+               animation:beaconDot 12s linear infinite; }
+  /* Arrivals at 20 / 45 / 70 / 95% of the cycle; settles amber (highest urgency wins). */
+  @keyframes beaconDot {
+    0%,18.5%           { background:#FF9F0A; box-shadow:0 0 0 0 rgba(255,159,10,0); transform:scale(1); }
+    20%                { background:#FFC155; box-shadow:0 0 11px 4px rgba(255,159,10,.8);  transform:scale(1.5); }
+    24%,43.5%          { background:#FF9F0A; box-shadow:0 0 0 0 rgba(255,159,10,0); transform:scale(1); }
+    45%                { background:#5CADFF; box-shadow:0 0 11px 4px rgba(10,132,255,.8); transform:scale(1.5); }
+    49%,68.5%          { background:#FF9F0A; box-shadow:0 0 0 0 rgba(255,159,10,0); transform:scale(1); }
+    70%                { background:#5CADFF; box-shadow:0 0 11px 4px rgba(10,132,255,.8); transform:scale(1.5); }
+    74%,93.5%          { background:#FF9F0A; box-shadow:0 0 0 0 rgba(255,159,10,0); transform:scale(1); }
+    95%                { background:#5CADFF; box-shadow:0 0 11px 4px rgba(10,132,255,.8); transform:scale(1.5); }
+    99%,100%           { background:#FF9F0A; box-shadow:0 0 0 0 rgba(255,159,10,0); transform:scale(1); }
+  }
+
+  /* ---- dropdown ---- */
+  .menu { position:absolute; top:52px; right:98px; width:264px; z-index:4;
+          background:rgba(30,30,33,.94); border:1px solid #ffffff14; border-radius:9px;
+          box-shadow:0 14px 38px rgba(0,0,0,.55); padding:6px; font-size:12.5px;
+          backdrop-filter:blur(10px); }
+  .mrow { display:flex; align-items:center; gap:9px; padding:6px 9px; border-radius:6px; }
+  .mk { width:8.5px; height:8.5px; border-radius:50%; flex-shrink:0; background:#0A84FF;
+        --g:rgba(10,132,255,.75); animation:rowPulse 12s linear infinite; }
+  .mk.amber { background:#FF9F0A; --g:rgba(255,159,10,.75); }
+  @keyframes rowPulse {
+    0%       { box-shadow:0 0 9px 3px var(--g); transform:scale(1.4); }
+    6%,100%  { box-shadow:0 0 0 0 transparent;  transform:scale(1); }
+  }
+  .agent { width:17px; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; }
+  .agent svg { display:block; }
+  .mt { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        font-weight:700; color:#EDEDED; }
+  .mage { color:#6E6E73; font-size:11.5px; font-variant-numeric:tabular-nums; }
+
+  /* ---- headline (no background: signal paths show through between letters) ---- */
+  .headline { position:absolute; left:96px; top:250px; width:430px; z-index:3; }
+  .headline .brand { display:flex; align-items:center; gap:8px; color:#B5B5BA;
+                     font-size:14px; font-weight:600; margin-bottom:14px; }
+  .headline h1 { color:#EDEDED; font-size:38px; font-weight:700; letter-spacing:-.5px;
+                 line-height:1.15; margin-bottom:12px; }
+  .headline p { color:#6E6E73; font-size:15px; line-height:1.5; max-width:360px; }
+
+  /* ---- signal overlay ---- */
+  svg.flow { position:absolute; inset:0; z-index:2; pointer-events:none; }
+  .guide { fill:none; stroke-width:1.2; stroke-linecap:round; opacity:.13;
+           stroke-dasharray:3 9; animation:flowDash 1.8s linear infinite; }
+  @keyframes flowDash { to { stroke-dashoffset:-12; } }
+
+  /* ---- terminal cards ---- */
+  .card { position:absolute; width:246px; z-index:1; background:#161618;
+          border:1px solid #ffffff14; border-radius:11px; overflow:hidden;
+          box-shadow:0 14px 34px rgba(0,0,0,.45); }
+  .card header { display:flex; align-items:center; gap:8px; height:30px; padding:0 11px;
+                 background:#1e1e21; border-bottom:1px solid #ffffff14; }
+  .tl { display:flex; gap:5px; }
+  .tl i { width:8px; height:8px; border-radius:50%; background:#3a3a3f; }
+  .card header .g { display:flex; align-items:center; margin-left:2px; }
+  .card header .nm { flex:1; color:#B5B5BA; font-size:11px; font-weight:600;
+                     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .led { width:7px; height:7px; border-radius:50%; flex-shrink:0; background:#0A84FF;
+         --g:rgba(10,132,255,.75); animation:rowPulse 12s linear infinite; }
+  .led.amber { background:#FF9F0A; --g:rgba(255,159,10,.75); }
+  .card .out { padding:9px 12px 11px; font-family:'SF Mono',ui-monospace,Menlo,monospace;
+               font-size:10.5px; line-height:1.8; color:#6E6E73; }
+  .ln { white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        animation:shimmer 3.6s ease-in-out infinite; }
+  .ln:nth-child(2) { animation-delay:.7s; }
+  .ln:nth-child(3) { animation-delay:1.4s; }
+  @keyframes shimmer { 0%,100% { opacity:.55; } 50% { opacity:.95; } }
+  .ln .pr { color:#5A5A5F; }
+  .ln .amb { color:#FF9F0A; } .ln .blu { color:#0A84FF; } .ln .grn { color:#32D74B; }
+  .cur { display:inline-block; width:6px; height:11px; vertical-align:-2px;
+         background:#98989D; animation:blink 1.05s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+
+  .caption { color:#6E6E73; font-size:12px; margin-top:14px; text-align:center; }
+</style></head><body>
+
+<div class="stage">
+
+  <!-- signal paths + traveling dots (behind strip, dropdown, and headline text) -->
+  <svg class="flow" viewBox="0 0 1120 700" width="1120" height="700">
+    <!-- faint guides, one per card, in the signal's color -->
+    <path class="guide" stroke="#FF9F0A" d="M146,512 C 128,300 430,58 902,28"/>
+    <path class="guide" stroke="#0A84FF" d="M420,544 C 430,340 610,72 902,29"/>
+    <path class="guide" stroke="#0A84FF" d="M700,544 C 710,370 775,120 903,31"/>
+    <path class="guide" stroke="#0A84FF" d="M974,512 C 1000,330 1032,96 904,32"/>
+
+    <!-- claude - amber, departs 0s, arrives 2.4s -->
+    <g opacity="0">
+      <circle r="7" fill="#FF9F0A" opacity=".22"/>
+      <circle r="3.2" fill="#FF9F0A"/>
+      <animateMotion dur="12s" begin="0s" repeatCount="indefinite" calcMode="linear"
+        keyPoints="0;1;1" keyTimes="0;0.2;1"
+        path="M146,512 C 128,300 430,58 902,28"/>
+      <animate attributeName="opacity" dur="12s" begin="0s" repeatCount="indefinite"
+        values="0;1;1;0;0" keyTimes="0;0.02;0.185;0.205;1"/>
+    </g>
+    <!-- opencode - blue, departs 3s, arrives 5.4s -->
+    <g opacity="0">
+      <circle r="7" fill="#0A84FF" opacity=".22"/>
+      <circle r="3.2" fill="#0A84FF"/>
+      <animateMotion dur="12s" begin="3s" repeatCount="indefinite" calcMode="linear"
+        keyPoints="0;1;1" keyTimes="0;0.2;1"
+        path="M420,544 C 430,340 610,72 902,29"/>
+      <animate attributeName="opacity" dur="12s" begin="3s" repeatCount="indefinite"
+        values="0;1;1;0;0" keyTimes="0;0.02;0.185;0.205;1"/>
+    </g>
+    <!-- pi - blue, departs 6s, arrives 8.4s -->
+    <g opacity="0">
+      <circle r="7" fill="#0A84FF" opacity=".22"/>
+      <circle r="3.2" fill="#0A84FF"/>
+      <animateMotion dur="12s" begin="6s" repeatCount="indefinite" calcMode="linear"
+        keyPoints="0;1;1" keyTimes="0;0.2;1"
+        path="M700,544 C 710,370 775,120 903,31"/>
+      <animate attributeName="opacity" dur="12s" begin="6s" repeatCount="indefinite"
+        values="0;1;1;0;0" keyTimes="0;0.02;0.185;0.205;1"/>
+    </g>
+    <!-- github/CI - blue, departs 9s, arrives 11.4s -->
+    <g opacity="0">
+      <circle r="7" fill="#0A84FF" opacity=".22"/>
+      <circle r="3.2" fill="#0A84FF"/>
+      <animateMotion dur="12s" begin="9s" repeatCount="indefinite" calcMode="linear"
+        keyPoints="0;1;1" keyTimes="0;0.2;1"
+        path="M974,512 C 1000,330 1032,96 904,32"/>
+      <animate attributeName="opacity" dur="12s" begin="9s" repeatCount="indefinite"
+        values="0;1;1;0;0" keyTimes="0;0.02;0.185;0.205;1"/>
+    </g>
+  </svg>
+
+  <!-- macOS menu bar -->
+  <div class="strip">
+    <div class="lhs">
+      <svg width="13" height="15" viewBox="0 0 15 18" fill="#E4E4E8"><path d="M12.6 9.6c0-2 1.6-3 1.7-3-1-1.4-2.4-1.6-2.9-1.6-1.2-.1-2.4.7-3 .7-.6 0-1.6-.7-2.6-.7C4.4 5 3.1 5.8 2.4 7c-1.5 2.6-.4 6.4 1.1 8.5.7 1 1.5 2.2 2.6 2.1 1-.1 1.4-.7 2.7-.7s1.6.7 2.7.7c1.1 0 1.8-1 2.5-2.1.8-1.2 1.1-2.3 1.1-2.4 0 0-2.4-.9-2.5-3.5zM10.6 3.5c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.6.6-1 1.6-.9 2.6 1 .1 1.9-.5 2.5-1.2z"/></svg>
+      <span class="app">Terminal</span><span>File</span><span>Edit</span><span>View</span>
+    </div>
+    <div class="rhs">
+      <span class="sbicon">
+        <svg width="17" height="17" viewBox="0 0 20 20" stroke="#E4E4E8" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#E4E4E8" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>
+        <span class="statusdot"></span>
+      </span>
+      <svg width="17" height="13" viewBox="0 0 16 12" fill="#E4E4E8"><path d="M8 9.6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM8 6c1.7 0 3.2.7 4.3 1.8l-1.4 1.4A4.1 4.1 0 0 0 8 8.1c-1.1 0-2.1.4-2.9 1.1L3.7 7.8A6 6 0 0 1 8 6zM8 2.2c2.7 0 5.2 1.1 7 2.9l-1.4 1.4A7.9 7.9 0 0 0 8 4.2c-2.2 0-4.2.9-5.6 2.3L1 5.1a9.9 9.9 0 0 1 7-2.9z"/></svg>
+      <svg width="24" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="#E4E4E8" stroke-opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="#E4E4E8"/><rect x="22.5" y="4" width="2" height="4" rx="1" fill="#E4E4E8" fill-opacity=".6"/></svg>
+      <span>Tue 14 Jul&nbsp;&nbsp;21:42</span>
+    </div>
+  </div>
+
+  <!-- dropdown, open under the beacon -->
+  <div class="menu">
+    <div class="mrow">
+      <span class="mk amber" style="animation-delay:2.4s"></span>
+      <span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span>
+      <span class="mt">fix-auth-token-expiry</span><span class="mage">45s</span>
+    </div>
+    <div class="mrow">
+      <span class="mk" style="animation-delay:5.4s"></span>
+      <span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+      <span class="mt">release-notes</span><span class="mage">8m</span>
+    </div>
+    <div class="mrow">
+      <span class="mk" style="animation-delay:8.4s"></span>
+      <span class="agent"><span style="font-family:ui-monospace,Menlo,monospace;color:#0A84FF;font-size:13px;line-height:1">&pi;</span></span>
+      <span class="mt">crash-analysis</span><span class="mage">25m</span>
+    </div>
+    <div class="mrow">
+      <span class="mk" style="animation-delay:11.4s"></span>
+      <span class="agent"><svg viewBox="0 0 16 16" width="14" height="14"><path fill="#B5B5BA" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></span>
+      <span class="mt">deploy &middot; ci.yml</span><span class="mage">40m</span>
+    </div>
+  </div>
+
+  <!-- headline -->
+  <div class="headline">
+    <div class="brand">
+      <svg width="16" height="16" viewBox="0 0 20 20" stroke="#B5B5BA" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#B5B5BA" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>
+      signalbox
+    </div>
+    <h1>Everything<br>reports in.</h1>
+    <p>Every agent, terminal, and CI job you run &mdash; one calm board in your menu bar.</p>
+  </div>
+
+  <!-- terminal cards, arced along the bottom -->
+  <div class="card" style="left:23px; top:518px; transform:rotate(-2.5deg)">
+    <header>
+      <span class="tl"><i></i><i></i><i></i></span>
+      <span class="g"><svg viewBox="0 0 20 20" width="13" height="13"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span>
+      <span class="nm">fix-auth-token-expiry</span>
+      <span class="led amber" style="animation-delay:0s"></span>
+    </header>
+    <div class="out">
+      <div class="ln"><span class="pr">&#10095;</span> fix the auth token expiry</div>
+      <div class="ln">updated token TTL in auth.ts</div>
+      <div class="ln"><span class="amb">&#9679;</span> overwrite AUTH_TTL in .env? <span class="cur"></span></div>
+    </div>
+  </div>
+
+  <div class="card" style="left:297px; top:550px; transform:rotate(-1deg)">
+    <header>
+      <span class="tl"><i></i><i></i><i></i></span>
+      <span class="g"><svg viewBox="0 0 20 20" width="13" height="13"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+      <span class="nm">release-notes</span>
+      <span class="led" style="animation-delay:3s"></span>
+    </header>
+    <div class="out">
+      <div class="ln"><span class="pr">&#10095;</span> draft the 0.2.0 release notes</div>
+      <div class="ln"><span class="blu">&#9679;</span> draft ready in RELEASE_NOTES.md</div>
+      <div class="ln">16 entries &middot; highlights added</div>
+    </div>
+  </div>
+
+  <div class="card" style="left:577px; top:550px; transform:rotate(1deg)">
+    <header>
+      <span class="tl"><i></i><i></i><i></i></span>
+      <span class="g"><span style="font-family:ui-monospace,Menlo,monospace;color:#0A84FF;font-size:12px;line-height:1">&pi;</span></span>
+      <span class="nm">crash-analysis</span>
+      <span class="led" style="animation-delay:6s"></span>
+    </header>
+    <div class="out">
+      <div class="ln"><span class="pr">&#10095;</span> summarise last night&rsquo;s crashes</div>
+      <div class="ln">42 dumps &middot; 3 crash groups</div>
+      <div class="ln"><span class="blu">&#9679;</span> root cause isolated in ipc.rs</div>
+    </div>
+  </div>
+
+  <div class="card" style="left:851px; top:518px; transform:rotate(2.5deg)">
+    <header>
+      <span class="tl"><i></i><i></i><i></i></span>
+      <span class="g"><svg viewBox="0 0 16 16" width="13" height="13"><path fill="#B5B5BA" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></span>
+      <span class="nm">deploy &middot; ci.yml</span>
+      <span class="led" style="animation-delay:9s"></span>
+    </header>
+    <div class="out">
+      <div class="ln">push b41c2f9 &rarr; deploy</div>
+      <div class="ln"><span class="grn">&#10003;</span> build &middot; <span class="grn">&#10003;</span> test &middot; <span class="grn">&#10003;</span> publish</div>
+      <div class="ln"><span class="blu">&#9679;</span> run #9182 succeeded &middot; 4m 12s</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="caption">concept 4 &mdash; signal flow &middot; every session reports in to the menu bar</div>
+
+</body></html>

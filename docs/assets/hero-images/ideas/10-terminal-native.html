@@ -1,0 +1,220 @@
+<!--
+  CONCEPT 10 - TERMINAL-NATIVE
+
+  The hero as pure, beautiful terminal art. One elegant macOS terminal window
+  (dark titlebar, traffic lights, soft shadow, 16px radius) shows the tool's
+  real surface: "$ signalbox init" prints the welcome board, "$ signalbox state"
+  prints the live session board - exactly the CLI's output, faithfully colored.
+
+  Ambient life: the two commands type on (CSS steps), boards fade in as if
+  freshly printed, the working row's spinner cycles ◌ ◍ ◉, the amber
+  "needs you" dot breathes, and a block cursor blinks on the final prompt.
+
+  The message: this tool lives where you live. No external requests -
+  inline CSS only, ui-monospace stack, page bg #0d0d0f.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>signalbox - terminal-native hero</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    background: #0d0d0f;
+    min-height: 100vh;
+  }
+
+  body {
+    font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, "Cascadia Mono", monospace;
+    color: #EDEDED;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    /* Faint amber ambience behind the window so the beacon feels alive */
+    background-image: radial-gradient(ellipse 60% 45% at 50% 38%, rgba(255, 159, 10, 0.045), transparent 70%);
+  }
+
+  .terminal {
+    width: 100%;
+    max-width: 880px;
+    background: #161618;
+    border: 1px solid #ffffff14;
+    border-radius: 16px;
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.4),
+      0 24px 64px rgba(0, 0, 0, 0.55),
+      0 48px 120px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+  }
+
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 16px;
+    background: linear-gradient(#1d1d20, #18181a);
+    border-bottom: 1px solid #ffffff14;
+  }
+
+  .light { width: 12px; height: 12px; border-radius: 50%; }
+  .light.red    { background: #FF5F57; }
+  .light.yellow { background: #FEBC2E; }
+  .light.green  { background: #28C840; }
+
+  .titlebar .title {
+    flex: 1;
+    text-align: center;
+    font-size: 12px;
+    color: #6E6E73;
+    /* keep the title optically centered despite the lights on the left */
+    margin-right: 52px;
+    user-select: none;
+  }
+
+  .screen-wrap {
+    overflow-x: auto;
+    padding: 22px 26px 26px;
+  }
+
+  pre.screen {
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #B5B5BA;
+    white-space: pre;
+  }
+
+  /* ---- palette ---- */
+  .bright { color: #EDEDED; }
+  .mid    { color: #B5B5BA; }
+  .dim    { color: #6E6E73; }
+  .amber  { color: #FF9F0A; }
+  .blue   { color: #0A84FF; }
+  .red    { color: #FF453A; }
+  .green  { color: #32D74B; }
+
+  /* ---- type-on commands ---- */
+  .type {
+    display: inline-block;
+    vertical-align: bottom;
+    overflow: hidden;
+    white-space: pre;
+    width: 0;
+  }
+  /* "signalbox init" = 14ch, "signalbox state" = 15ch */
+  .t-init  { animation: type14 0.9s steps(14, end) 0.5s forwards; }
+  .t-state { animation: type15 1.0s steps(15, end) 3.4s forwards; }
+  @keyframes type14 { to { width: 14ch; } }
+  @keyframes type15 { to { width: 15ch; } }
+
+  /* ---- staged reveal, as if freshly printed ---- */
+  .reveal { opacity: 0; animation: appear 0.45s ease forwards; }
+  .r-welcome { animation-delay: 1.7s; }
+  .r-prompt2 { animation-delay: 3.1s; }
+  .r-state   { animation-delay: 4.7s; }
+  .r-prompt3 { animation-delay: 5.4s; }
+  @keyframes appear { to { opacity: 1; } }
+
+  /* ---- ambient life ---- */
+
+  /* amber "needs you" dot breathes */
+  .breathe {
+    animation: breathe 2.4s ease-in-out infinite;
+    animation-delay: 5s;
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 1;   text-shadow: 0 0 8px rgba(255, 159, 10, 0.85); }
+    50%      { opacity: 0.4; text-shadow: 0 0 0   rgba(255, 159, 10, 0); }
+  }
+
+  /* working row spinner cycles through fill states */
+  .spin::after {
+    content: "◌";
+    color: #6E6E73;
+    animation: spin 1.05s steps(1, end) infinite;
+  }
+  @keyframes spin {
+    0%   { content: "◌"; }
+    34%  { content: "◍"; }
+    67%  { content: "◉"; }
+    100% { content: "◌"; }
+  }
+
+  /* block cursor blinks on the final prompt */
+  .cursor {
+    color: #EDEDED;
+    animation: blink 1.1s steps(1, end) infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0; }
+  }
+
+  .caption {
+    margin-top: 26px;
+    font-size: 13px;
+    color: #6E6E73;
+    user-select: all;
+  }
+  .caption .dollar { color: #48484d; user-select: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .type   { width: auto !important; animation: none; }
+    .reveal { opacity: 1; animation: none; }
+    .breathe, .cursor { animation: none; }
+    .spin::after { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="terminal" role="img" aria-label="Terminal showing signalbox init and signalbox state output">
+    <div class="titlebar">
+      <span class="light red"></span>
+      <span class="light yellow"></span>
+      <span class="light green"></span>
+      <span class="title">signalbox - zsh - 96×32</span>
+    </div>
+    <div class="screen-wrap">
+<pre class="screen"><span class="dim">$</span> <span class="type t-init bright">signalbox init</span>
+<span class="reveal r-welcome">
+ <span class="dim">╭───────╮</span>   <span class="bright">Welcome to signalbox</span>
+ <span class="dim">│</span> <span class="amber">((●))</span> <span class="dim">│</span>   <span class="mid">Switch between agent sessions across</span>
+ <span class="dim">╰───────╯</span>   <span class="mid">terminals and machines.</span>
+
+ <span class="bright">signalbox</span>
+   <span class="green">●</span> <span class="mid">Menu bar app installed</span>
+   <span class="green">●</span> <span class="mid">Menu bar app running</span>
+   <span class="green">●</span> <span class="mid">CLI on your PATH</span>
+
+ <span class="bright">Integrations</span>
+   <span class="green">●</span> <span class="mid">Claude Code hooks active</span>
+   <span class="green">●</span> <span class="mid">Cursor hooks active</span>
+   <span class="green">●</span> <span class="mid">VS Code jump-back (automatic)</span>
+   <span class="green">●</span> <span class="mid">OpenCode plugin installed</span>
+   <span class="green">●</span> <span class="mid">pi extension installed</span>
+   <span class="green">●</span> <span class="mid">tmux integration active</span>
+</span>
+<span class="reveal r-prompt2"><span class="dim">$</span> </span><span class="type t-state bright">signalbox state</span>
+<span class="reveal r-state">
+<span class="amber breathe">●</span> <span class="bright">needs you</span>   <span class="mid">claude</span>    <span class="bright">fix-auth-token-expiry</span>  <span class="dim">45s</span>  <span class="dim">auth tokens seem to expire a second early…</span>
+<span class="spin"></span> <span class="mid">working</span>     <span class="mid">claude</span>    <span class="bright">schema-migration</span>       <span class="dim">2m</span>   <span class="dim">migrate the users table to add a timezone…</span>
+<span class="blue">●</span> <span class="bright">ready</span>       <span class="mid">opencode</span>  <span class="bright">release-notes</span>          <span class="dim">8m</span>   <span class="dim">draft the 0.2.0 release notes from the ch…</span>
+<span class="red">✕</span> <span class="red">error</span>       <span class="mid">claude</span>    <span class="bright">flaky-test-hunt</span>        <span class="dim">15m</span>  <span class="dim">Usage limit reached - resets in 42 minutes.</span>
+<span class="blue">●</span> <span class="bright">ready</span>       <span class="mid">pi</span>        <span class="bright">crash-analysis</span>         <span class="dim">25m</span>  <span class="dim">analyse last night's crash dumps</span>
+<span class="blue">●</span> <span class="bright">ready</span>       <span class="mid">github</span>    <span class="bright">deploy · ci.yml</span>        <span class="dim">40m</span>  <span class="dim">push to main (b41c2f9) triggered deploy</span>
+</span>
+<span class="reveal r-prompt3"><span class="dim">$</span> <span class="cursor">▊</span></span></pre>
+    </div>
+  </div>
+
+  <p class="caption"><span class="dollar">$ </span>brew install dwmkerr/tools/signalbox</p>
+
+</body>
+</html>

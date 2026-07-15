@@ -1,0 +1,252 @@
+# Release automation.
+#
+# release-please maintains a release PR from conventional commits (config:
+# release-please-config.json + .release-please-manifest.json). Merging that
+# PR tags vX.Y.Z and creates the GitHub release; the gated jobs below then:
+#   - compile per-target CLI binaries with `bun build --compile` and attach
+#     them (direct download for Linux and headless installs),
+#   - build the universal, signed, notarized Signalbox.app (with the CLI
+#     embedded at Contents/Resources/signalbox) and attach it,
+#   - push the Homebrew CASK to the dwmkerr/homebrew-tools tap
+#     (install: brew install dwmkerr/tools/signalbox - one artifact, the app
+#     owns the hub, the cask symlinks the embedded CLI onto PATH).
+#
+# The build jobs run in THIS workflow, gated on release_created, because tags
+# created with GITHUB_TOKEN do not trigger separate tag-push workflows.
+#
+# Required repository secrets:
+#   HOMEBREW_TAP_GITHUB_TOKEN - a fine-grained PAT with Contents: read+write
+#     on dwmkerr/homebrew-tools only. The default GITHUB_TOKEN cannot push to
+#     another repository, so the cask update fails without it.
+#   MACOS_CERT_P12 - base64 of the "Developer ID Application" identity
+#     exported as .p12 (Keychain Access > export, then `base64 -i cert.p12`).
+#   MACOS_CERT_PASSWORD - the .p12's password.
+#   NOTARY_APPLE_ID / NOTARY_PASSWORD - Apple ID and an app-specific
+#     password for notarytool (team 5TTNE9J58F).
+# npm publishing uses Trusted Publishing (OIDC): the @dwmkerr/signalbox
+# package on npmjs.com is configured to trust this repo's release-please.yml
+# workflow, so no npm token exists anywhere. Provenance attestations are
+# generated automatically.
+#
+# NOTE: the cask's download URL only resolves once this repository is
+# public - publish the first release after flipping visibility.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: .github/release-please-config.json
+          manifest-file: .github/.release-please-manifest.json
+
+  # Darwin targets build on macOS so the binaries can be ad-hoc codesigned
+  # (BUN_NO_CODESIGN_MACHO_BINARY + manual codesign works around
+  # oven-sh/bun#29361); linux targets cross-compile from ubuntu.
+  binaries:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    strategy:
+      matrix:
+        include:
+          - target: bun-darwin-arm64
+            artifact: darwin_arm64
+            os: macos-14
+          - target: bun-darwin-x64
+            artifact: darwin_amd64
+            os: macos-14
+          - target: bun-linux-x64
+            artifact: linux_amd64
+            os: ubuntu-latest
+          - target: bun-linux-arm64
+            artifact: linux_arm64
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Compile
+        working-directory: components/cli
+        run: |
+          bun install --frozen-lockfile
+          BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify \
+            --target=${{ matrix.target }} src/main.ts --outfile bin/signalbox
+          case "${{ matrix.target }}" in
+            bun-darwin-*)
+              codesign --force --sign - bin/signalbox
+              codesign --verify bin/signalbox
+              ;;
+          esac
+
+      - name: Package and upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          version="${TAG#v}"
+          name="signalbox_${version}_${{ matrix.artifact }}"
+          mkdir -p dist
+          cp components/cli/bin/signalbox dist/signalbox
+          cp LICENSE README.md dist/
+          tar -czf "${name}.tar.gz" -C dist signalbox LICENSE README.md
+          shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
+          gh release upload "$TAG" "${name}.tar.gz" "${name}.tar.gz.sha256" --clobber
+
+  # The product artifact: universal Signalbox.app with the CLI embedded,
+  # Developer ID signed, notarized, stapled. This is what the cask installs.
+  app:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    # Package.swift declares swift-tools-version 6.2 (Xcode 26); macos-15
+    # images include it but default to 16.x - hence the explicit select.
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Select Xcode 26 (Swift 6.2)
+        run: |
+          xcode_app="$(printf '%s\n' /Applications/Xcode_26*.app | sort -V | tail -n 1)"
+          sudo xcode-select -s "${xcode_app}/Contents/Developer"
+          swift --version
+
+      - name: Compile universal CLI
+        working-directory: components/cli
+        # bun compiles per-arch; lipo fuses the slices. The result is ad-hoc
+        # signed only so `version` runs here - notarize re-signs it with the
+        # Developer ID and the JIT entitlements.
+        run: |
+          bun install --frozen-lockfile
+          BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify \
+            --target=bun-darwin-arm64 src/main.ts --outfile bin/signalbox-arm64
+          BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify \
+            --target=bun-darwin-x64 src/main.ts --outfile bin/signalbox-x64
+          lipo -create bin/signalbox-arm64 bin/signalbox-x64 -output bin/signalbox
+          codesign --force --sign - bin/signalbox
+          lipo -info bin/signalbox
+          ./bin/signalbox version
+
+      - name: Import signing certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          keychain_pw="$(uuidgen)"
+          security create-keychain -p "$keychain_pw" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$keychain_pw" build.keychain
+          security set-keychain-settings -lut 1800 build.keychain
+          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k build.keychain \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm cert.p12
+          # Let codesign use the key non-interactively.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_pw" build.keychain
+
+      - name: Build, notarize, upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          version="${TAG#v}"
+          xcrun notarytool store-credentials signalbox-notary \
+            --apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" \
+            --team-id 5TTNE9J58F
+          make -C components/app notarize \
+            VERSION="$version" SWIFT_FLAGS="--arch arm64 --arch x86_64"
+          cp components/app/build/Signalbox.zip "Signalbox-${version}.zip"
+          shasum -a 256 "Signalbox-${version}.zip" > "Signalbox-${version}.zip.sha256"
+          gh release upload "$TAG" \
+            "Signalbox-${version}.zip" "Signalbox-${version}.zip.sha256" --clobber
+
+  # Regenerate the cask in dwmkerr/homebrew-tools from the notarized app zip.
+  brew:
+    needs: [release-please, app]
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Update cask
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          version="${TAG#v}"
+          export VERSION="$version"
+          export SHA_APP="$(gh release download "$TAG" \
+            --pattern "Signalbox-${version}.zip.sha256" -O - | cut -d' ' -f1)"
+          envsubst < packaging/signalbox-cask.rb.tmpl > signalbox.rb
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/dwmkerr/homebrew-tools.git" tap
+          mkdir -p tap/Casks
+          cp signalbox.rb tap/Casks/signalbox.rb
+          cd tap
+          # A pre-cask formula, if one was ever pushed, must go: a tap with
+          # both makes `brew install dwmkerr/tools/signalbox` ambiguous.
+          git rm -f Formula/signalbox.rb 2>/dev/null || true
+          git config user.name "dwmkerr"
+          git config user.email "dwmkerr@gmail.com"
+          git add Casks/signalbox.rb
+          git commit -m "chore: update signalbox cask to ${TAG}"
+          git push
+
+  npm:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # OIDC token for npm Trusted Publishing - replaces any npm token.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      # node 24 ships npm 11 (>= 11.5 required for OIDC trusted publishing).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # The package ships the TypeScript source with a bun shebang: it runs
+      # under bun (engines declares this), not node - npm is a convenience
+      # channel next to the brew binaries.
+      - name: Publish @dwmkerr/signalbox
+        working-directory: components/cli
+        run: npm publish --access public

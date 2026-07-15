@@ -1,0 +1,241 @@
+<!doctype html>
+<!--
+  CONCEPT 5 - ISOMETRIC DESK
+
+  A playful flat-design isometric scene (true 2:1 projection). A desk carries
+  three monitors, each running a stylized agent session: Claude Code (rust
+  sunburst mark, amber "asking" dot glowing), pi (blue π mark, working
+  spinner), and opencode (terminal with green chevrons, blue "done" dot).
+  Floating above the desk is the signalbox board as an isometric panel with
+  five compact rows - amber ask first - each row carrying the agent glyph and
+  status mark from the jumplist spec. Dotted lines run from each monitor to
+  its row on the board, and a tiny beacon on the board's top edge radiates
+  arc waves. One gentle ambient animation: the amber ask dots and the beacon
+  pulse together. Stripe/Notion illustration energy, dark theme.
+
+  Iso conventions used throughout (2:1):
+    isoX = (1, .5) down-right, isoY = (-1, .5) down-left, up = (0, -1)
+    top faces:            matrix(1, .5, -1, .5, tx, ty)
+    front faces (screens): matrix(1, .5,  0,  1, tx, ty)  - face lower-left
+    right-end faces:      matrix(1,-.5,  0,  1, tx, ty)  - face lower-right
+-->
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>signalbox - isometric desk hero</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; min-height:100vh; display:flex; flex-direction:column;
+         align-items:center; justify-content:center; padding:36px 20px 56px;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+  .hero { width:100%; max-width:1100px; }
+  svg.scene { display:block; width:100%; height:auto; }
+  .lockup { display:flex; align-items:center; justify-content:center; gap:10px; margin-top:6px; }
+  .lockup .name { color:#EDEDED; font-size:21px; font-weight:650; letter-spacing:-.2px; }
+  .lockup .tag  { color:#6E6E73; font-size:21px; font-weight:400; letter-spacing:-.2px; }
+  @keyframes pulse { 0%,100% { opacity:1; }  50% { opacity:.3; } }
+  @keyframes halo  { 0%,100% { opacity:.28; } 50% { opacity:.04; } }
+  .pulse  { animation:pulse 2.8s ease-in-out infinite; }
+  .pulse2 { animation:pulse 2.8s ease-in-out infinite; animation-delay:.35s; }
+  .halo   { animation:halo 2.8s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    .pulse, .pulse2, .halo { animation:none; }
+  }
+</style></head><body>
+
+<div class="hero">
+<svg class="scene" viewBox="200 95 950 600" fill="none" aria-label="Isometric desk with three agent sessions reporting to a floating signalbox board">
+
+  <defs>
+    <!-- Shared monitor frame: desk shadow, base, post, screen slab (front / top / right-end). -->
+    <g id="mframe">
+      <polygon points="6,5 168,86 148,96 -14,15" fill="#000" opacity=".18"/>
+      <polygon points="40,23 78,30 92,49 54,42" fill="#161619"/>
+      <polygon points="40,20 78,27 92,46 54,39" fill="#242428"/>
+      <polygon points="58,-7 74,1 74,37 58,29" fill="#29292d"/>
+      <polygon points="74,1 78,-1 78,35 74,37" fill="#1c1c1f"/>
+      <polygon points="0,-122 132,-56 142,-61 10,-127" fill="#2e2e33"/>
+      <polygon points="132,-56 142,-61 142,27 132,32" fill="#18181b"/>
+      <polygon points="0,-122 132,-56 132,32 0,-34" fill="#232327" stroke="#ffffff10" stroke-width="1"/>
+    </g>
+  </defs>
+
+  <!-- ============ floor ============ -->
+  <polygon points="240,250 1000,310 1140,730 380,650" fill="#111114"/>
+  <!-- long shadow cast by the desk -->
+  <polygon points="760,636 1020,506 1064,528 804,658" fill="#000" opacity=".28"/>
+
+  <!-- ============ desk ============ -->
+  <!-- legs -->
+  <polygon points="400,456 424,468 424,506 400,494" fill="#141417"/>
+  <polygon points="940,546 964,534 964,572 940,584" fill="#101013"/>
+  <!-- slab sides + top -->
+  <polygon points="300,380 760,610 760,636 300,406" fill="#161618"/>
+  <polygon points="760,610 1020,480 1020,506 760,636" fill="#121216"/>
+  <polygon points="560,250 1020,480 760,610 300,380" fill="#1e1e21" stroke="#ffffff14" stroke-width="1"/>
+  <!-- soft shadow on the desk under the floating board -->
+  <polygon points="900,460 960,470 980,500 920,490" fill="#000" opacity=".3"/>
+
+  <!-- ============ monitor 1 - claude (asking) ============ -->
+  <g transform="translate(540,280)">
+    <use href="#mframe"/>
+    <g transform="matrix(1,.5,0,1,0,0)">
+      <rect x="6" y="-116" width="120" height="76" fill="#0b0b0d"/>
+      <!-- claude sunburst mark -->
+      <g stroke="#D97757" stroke-width="2.2" stroke-linecap="round">
+        <line x1="24" y1="-98" x2="33"    y2="-98"/>
+        <line x1="24" y1="-98" x2="30.36" y2="-91.64"/>
+        <line x1="24" y1="-98" x2="24"    y2="-89"/>
+        <line x1="24" y1="-98" x2="17.64" y2="-91.64"/>
+        <line x1="24" y1="-98" x2="15"    y2="-98"/>
+        <line x1="24" y1="-98" x2="17.64" y2="-104.36"/>
+        <line x1="24" y1="-98" x2="24"    y2="-107"/>
+        <line x1="24" y1="-98" x2="30.36" y2="-104.36"/>
+      </g>
+      <rect x="40" y="-102" width="62" height="4"   rx="2"   fill="#ffffff20"/>
+      <rect x="40" y="-94"  width="44" height="4"   rx="2"   fill="#ffffff14"/>
+      <!-- amber ask: glowing dot + question line -->
+      <circle class="halo"  cx="18" cy="-66" r="9"   fill="#FF9F0A"/>
+      <circle class="pulse" cx="18" cy="-66" r="4.5" fill="#FF9F0A"/>
+      <rect x="30" y="-69" width="58" height="5"   rx="2.5" fill="#FF9F0A" opacity=".8"/>
+      <rect x="30" y="-60" width="74" height="3.5" rx="1.75" fill="#ffffff20"/>
+      <rect x="12" y="-48" width="40" height="3.5" rx="1.75" fill="#ffffff10"/>
+    </g>
+  </g>
+
+  <!-- ============ monitor 2 - pi (working) ============ -->
+  <g transform="translate(630,395)">
+    <use href="#mframe"/>
+    <g transform="matrix(1,.5,0,1,0,0)">
+      <rect x="6" y="-116" width="120" height="76" fill="#0b0b0d"/>
+      <rect x="20" y="-104" width="72" height="4" rx="2" fill="#ffffff16"/>
+      <rect x="20" y="-96"  width="48" height="4" rx="2" fill="#ffffff10"/>
+      <text x="40" y="-58" text-anchor="middle" font-family="'SF Mono',ui-monospace,Menlo,monospace"
+            font-size="32" fill="#0A84FF">&#960;</text>
+      <!-- working spinner: open ring -->
+      <circle cx="86" cy="-72" r="9" stroke="#98989D" stroke-width="2.2"
+              stroke-linecap="round" stroke-dasharray="42 14.5"/>
+      <rect x="20" y="-50" width="60" height="3.5" rx="1.75" fill="#ffffff10"/>
+    </g>
+  </g>
+
+  <!-- ============ monitor 3 - opencode (done) ============ -->
+  <g transform="translate(720,510)">
+    <use href="#mframe"/>
+    <g transform="matrix(1,.5,0,1,0,0)">
+      <rect x="6" y="-116" width="120" height="76" fill="#0b0b0d"/>
+      <circle cx="114" cy="-108" r="4.5" fill="#0A84FF"/>
+      <g stroke="#32D74B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 -110 l4.5 3.5 -4.5 3.5"/>
+        <path d="M14 -94  l4.5 3.5 -4.5 3.5"/>
+        <path d="M14 -78  l4.5 3.5 -4.5 3.5"/>
+      </g>
+      <rect x="26" y="-109" width="54" height="4" rx="2" fill="#ffffff1c"/>
+      <rect x="26" y="-93"  width="66" height="4" rx="2" fill="#ffffff14"/>
+      <rect x="26" y="-77"  width="42" height="4" rx="2" fill="#ffffff1c"/>
+      <rect x="26" y="-58"  width="34" height="4" rx="2" fill="#32D74B" opacity=".55"/>
+    </g>
+  </g>
+
+  <!-- ============ dotted lines: monitor -> board row ============ -->
+  <g stroke-width="1.6" stroke-linecap="round" stroke-dasharray="1.5 6.5">
+    <path d="M 612 182 Q 700 110 812 173" stroke="#FF9F0A" opacity=".45"/>
+    <path d="M 742 318 Q 790 245 812 197" stroke="#98989D" opacity=".4"/>
+    <path d="M 802 418 Q 810 320 812 222" stroke="#0A84FF" opacity=".45"/>
+  </g>
+  <circle cx="612" cy="182" r="2.4" fill="#FF9F0A" opacity=".8"/>
+  <circle cx="742" cy="318" r="2.4" fill="#98989D" opacity=".75"/>
+  <circle cx="802" cy="418" r="2.4" fill="#0A84FF" opacity=".8"/>
+
+  <!-- ============ the floating signalbox board ============ -->
+  <!-- thickness edges -->
+  <polygon points="810,130 1020,235 1028,231 818,126" fill="#2a2a2e"/>
+  <polygon points="1020,235 1028,231 1028,387 1020,391" fill="#19191c"/>
+  <g transform="matrix(1,.5,0,1,810,130)">
+    <rect x="0" y="0" width="210" height="156" fill="#1e1e21" stroke="#ffffff14" stroke-width="1"/>
+    <!-- header: brand beacon + wordmark -->
+    <g stroke="#B5B5BA" stroke-linecap="round">
+      <circle cx="12" cy="14" r="1.8" fill="#B5B5BA" stroke="none"/>
+      <path d="M 8.8 11.2 A 4.4 4.4 0 0 1 15.2 11.2" stroke-width="1.1" opacity=".9"/>
+      <path d="M 6.9 8.9  A 7.4 7.4 0 0 1 17.1 8.9"  stroke-width="1.1" opacity=".5"/>
+    </g>
+    <text x="22" y="17" font-size="9.5" font-weight="600" letter-spacing=".4"
+          fill="#B5B5BA" font-family="-apple-system,sans-serif">signalbox</text>
+    <line x1="4" y1="26" x2="206" y2="26" stroke="#ffffff14" stroke-width="1"/>
+
+    <!-- row 1 - claude, asking (selected) -->
+    <rect x="4" y="30" width="202" height="22" rx="4" fill="#2C2C31"/>
+    <circle class="halo"  cx="16" cy="41" r="8" fill="#FF9F0A"/>
+    <circle class="pulse" cx="16" cy="41" r="4" fill="#FF9F0A"/>
+    <g stroke="#D97757" stroke-width="1.5" stroke-linecap="round">
+      <line x1="34" y1="41" x2="39.5" y2="41"/>
+      <line x1="34" y1="41" x2="37.9" y2="44.9"/>
+      <line x1="34" y1="41" x2="34"   y2="46.5"/>
+      <line x1="34" y1="41" x2="30.1" y2="44.9"/>
+      <line x1="34" y1="41" x2="28.5" y2="41"/>
+      <line x1="34" y1="41" x2="30.1" y2="37.1"/>
+      <line x1="34" y1="41" x2="34"   y2="35.5"/>
+      <line x1="34" y1="41" x2="37.9" y2="37.1"/>
+    </g>
+    <rect x="46" y="36.5" width="68" height="5"   rx="2.5"  fill="#EDEDED" opacity=".92"/>
+    <rect x="46" y="44.5" width="96" height="3.5" rx="1.75" fill="#6E6E73" opacity=".6"/>
+    <rect x="184" y="39" width="16" height="4" rx="2" fill="#98989D" opacity=".5"/>
+
+    <!-- row 2 - pi, working -->
+    <circle cx="16" cy="65" r="4.5" stroke="#98989D" stroke-width="1.6"
+            stroke-linecap="round" stroke-dasharray="20 8.3"/>
+    <text x="34" y="69" text-anchor="middle" font-size="11"
+          font-family="'SF Mono',ui-monospace,Menlo,monospace" fill="#0A84FF">&#960;</text>
+    <rect x="46" y="60.5" width="56" height="5"   rx="2.5"  fill="#ADADB2" opacity=".55"/>
+    <rect x="46" y="68.5" width="84" height="3.5" rx="1.75" fill="#6E6E73" opacity=".45"/>
+    <rect x="184" y="63" width="16" height="4" rx="2" fill="#98989D" opacity=".45"/>
+
+    <!-- row 3 - opencode, output updated -->
+    <circle cx="16" cy="89" r="4" fill="#0A84FF"/>
+    <rect x="28" y="84.5" width="12" height="9.5" rx="2" stroke="#B5B5BA" stroke-width="1.1"/>
+    <path d="M31 87.5 l2.5 2 -2.5 2" stroke="#32D74B" stroke-width="1.2"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <line x1="35.5" y1="91.5" x2="38" y2="91.5" stroke="#B5B5BA" stroke-width="1.1" stroke-linecap="round"/>
+    <rect x="46" y="84.5" width="62" height="5"   rx="2.5"  fill="#EDEDED" opacity=".8"/>
+    <rect x="46" y="92.5" width="90" height="3.5" rx="1.75" fill="#6E6E73" opacity=".45"/>
+    <rect x="184" y="87" width="16" height="4" rx="2" fill="#98989D" opacity=".45"/>
+
+    <!-- row 4 - github actions, failed -->
+    <g stroke="#FF453A" stroke-width="1.8" stroke-linecap="round">
+      <line x1="12.5" y1="109.5" x2="19.5" y2="116.5"/>
+      <line x1="19.5" y1="109.5" x2="12.5" y2="116.5"/>
+    </g>
+    <path transform="translate(29,108) scale(.62)" fill="#B5B5BA" opacity=".85"
+          d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+    <rect x="46" y="108.5" width="50" height="5"   rx="2.5"  fill="#ADADB2" opacity=".5"/>
+    <rect x="46" y="116.5" width="78" height="3.5" rx="1.75" fill="#6E6E73" opacity=".4"/>
+    <rect x="184" y="111" width="16" height="4" rx="2" fill="#98989D" opacity=".45"/>
+
+    <!-- row 5 - custom script, read -->
+    <circle cx="16" cy="137" r="3.5" stroke="#98989D" stroke-width="1.4" opacity=".5"/>
+    <circle cx="34" cy="137" r="4.5" stroke="#B5B5BA" stroke-width="1.3" opacity=".7"/>
+    <rect x="46" y="132.5" width="44" height="5"   rx="2.5"  fill="#ADADB2" opacity=".4"/>
+    <rect x="46" y="140.5" width="70" height="3.5" rx="1.75" fill="#6E6E73" opacity=".35"/>
+    <rect x="184" y="135" width="16" height="4" rx="2" fill="#98989D" opacity=".4"/>
+  </g>
+
+  <!-- beacon on the board's top edge, radiating arcs -->
+  <line x1="915" y1="181" x2="915" y2="173" stroke="#B5B5BA" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="915" cy="169" r="2.8" fill="#FF9F0A"/>
+  <path class="pulse"  d="M 908 164 A 8 8 0 0 1 922 164"   stroke="#FF9F0A" stroke-width="1.6" stroke-linecap="round"/>
+  <path class="pulse2" d="M 903 159 A 13 13 0 0 1 927 159" stroke="#FF9F0A" stroke-width="1.6" stroke-linecap="round" opacity=".55"/>
+</svg>
+
+<div class="lockup">
+  <svg width="22" height="22" viewBox="0 0 20 20" stroke="#B5B5BA" fill="none" stroke-linecap="round" aria-hidden="true">
+    <circle cx="10" cy="10" r="2.2" fill="#B5B5BA" stroke="none"/>
+    <path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"    stroke-width="1.5" opacity=".9"/>
+    <path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"  stroke-width="1.5" opacity=".9"/>
+    <path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4"    stroke-width="1.5" opacity=".55"/>
+    <path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6"  stroke-width="1.5" opacity=".55"/>
+  </svg>
+  <span class="name">signalbox</span><span class="tag">&nbsp;&mdash; one board for every agent you run.</span>
+</div>
+</div>
+
+</body></html>

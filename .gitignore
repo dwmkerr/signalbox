@@ -1,0 +1,5 @@
+bin/
+scratch/
+events.jsonl
+.DS_Store
+pat.ignore

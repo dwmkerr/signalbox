@@ -1,0 +1,263 @@
+import AppKit
+
+// SharedSettings reads/writes ~/.config/signalbox/settings.json - the flat
+// file the CLI hooks also read (cli/src/config.ts), so a toggle flipped here
+// changes hook behaviour without any IPC. Writes merge, never clobber:
+// unknown keys other tools put there survive.
+@MainActor
+enum SharedSettings {
+    private static var url: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/signalbox/settings.json")
+    }
+
+    private static func read() -> [String: Any] {
+        guard let data = try? Data(contentsOf: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        return obj
+    }
+
+    private static func write(_ settings: [String: Any]) {
+        let dir = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(
+            withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]
+        ) {
+            try? data.write(to: url)
+        }
+    }
+
+    static var claudeClearEnds: Bool {
+        get { read()["claudeClearEnds"] as? Bool ?? true }
+        set {
+            var s = read()
+            s["claudeClearEnds"] = newValue
+            write(s)
+        }
+    }
+
+    static var claudeRenameTitle: Bool {
+        get { read()["claudeRenameTitle"] as? Bool ?? true }
+        set {
+            var s = read()
+            s["claudeRenameTitle"] = newValue
+            write(s)
+        }
+    }
+}
+
+// The Settings window: menu bar icon style and behaviour toggles; future
+// prefs (hotkey, notification rules) land here too. Plain AppKit - one
+// window, radio buttons, UserDefaults + the shared settings file.
+@MainActor
+final class SettingsController: NSObject, NSTextFieldDelegate {
+    // The board's tag filter, shared with AppDelegate. Kept in UserDefaults
+    // (a local view preference, not shared config): set it here to a tag and
+    // the jumplist shows only sessions carrying it - the quiet way to flip to
+    // `demo` for a recording and back to real work. Blank = all sessions.
+    static let tagFilterKey = "tagFilter"
+
+    private let onIconChange: @MainActor () -> Void
+    private let onFilterChange: @MainActor () -> Void
+    private var window: NSWindow?
+    private var iconPopup: NSPopUpButton?
+    private var clearCheckbox: NSButton?
+    private var renameCheckbox: NSButton?
+    private var filterField: NSTextField?
+
+    init(
+        onIconChange: @escaping @MainActor () -> Void,
+        onFilterChange: @escaping @MainActor () -> Void
+    ) {
+        self.onIconChange = onIconChange
+        self.onFilterChange = onFilterChange
+        super.init()
+    }
+
+    func show() {
+        if window == nil { build() }
+        // Accessory apps stay background by default; a settings window is a
+        // real window and needs the app frontmost to take keys and clicks.
+        // orderFrontRegardless because activate alone can leave the window
+        // behind the previous app on modern macOS.
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
+    }
+
+    private func build() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 180),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Signalbox Settings"
+        window.isReleasedWhenClosed = false
+        window.center()
+
+        let heading = NSTextField(labelWithString: "Menu bar icon:")
+        heading.font = .systemFont(ofSize: 13)
+        heading.textColor = .secondaryLabelColor
+
+        // A popup, per the settings spec - not radio buttons.
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        for style in MenuBarIconStyle.allCases {
+            popup.addItem(withTitle: style.displayName)
+            popup.lastItem?.image = statusItemImage(style: style, dot: nil)
+            popup.lastItem?.representedObject = style.rawValue
+        }
+        popup.selectItem(at: MenuBarIconStyle.allCases.firstIndex(of: .current) ?? 0)
+        popup.target = self
+        popup.action = #selector(iconStyleChanged(_:))
+        self.iconPopup = popup
+        let iconRow = NSStackView(views: [heading, popup])
+        iconRow.orientation = .horizontal
+        iconRow.spacing = 8
+        let radioViews: [NSView] = [iconRow]
+
+        let caption = NSTextField(
+            wrappingLabelWithString:
+                "A colored dot appears on the icon when sessions wait: "
+                + "amber = needs your input, blue = output updated, red = failed."
+        )
+        caption.font = .systemFont(ofSize: 11)
+        caption.textColor = .secondaryLabelColor
+
+        // Behaviour toggles live in the shared settings file
+        // (~/.config/signalbox/settings.json) so the CLI hooks read the same
+        // choices the app writes.
+        let sessionsHeading = NSTextField(labelWithString: "Sessions")
+        sessionsHeading.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        let clearCheckbox = NSButton(
+            checkboxWithTitle: "Claude Code /clear removes the session from the board",
+            target: self,
+            action: #selector(clearEndsChanged(_:))
+        )
+        clearCheckbox.state = SharedSettings.claudeClearEnds ? .on : .off
+        self.clearCheckbox = clearCheckbox
+
+        let clearCaption = NSTextField(
+            wrappingLabelWithString:
+                "Unchecked, a /clear keeps the old session listed (marked ready) "
+                + "until you hide or remove it - the exchange stays reviewable."
+        )
+        clearCaption.font = .systemFont(ofSize: 11)
+        clearCaption.textColor = .secondaryLabelColor
+
+        let renameCheckbox = NSButton(
+            checkboxWithTitle: "Rename session on Claude Code /rename",
+            target: self,
+            action: #selector(renameTitleChanged(_:))
+        )
+        renameCheckbox.state = SharedSettings.claudeRenameTitle ? .on : .off
+        self.renameCheckbox = renameCheckbox
+
+        let renameCaption = NSTextField(
+            wrappingLabelWithString:
+                "On, a Claude /rename shows on the board as the session name. "
+                + "Off keeps the folder name. Your own ⌃R rename always wins either way."
+        )
+        renameCaption.font = .systemFont(ofSize: 11)
+        renameCaption.textColor = .secondaryLabelColor
+
+        let hotkeyCaption = NSTextField(
+            wrappingLabelWithString:
+                "Jumplist shortcut: ⌃⌥J - override with "
+                + "defaults write com.dwmkerr.signalbox hotkey \"cmd+shift+space\""
+        )
+        hotkeyCaption.font = .systemFont(ofSize: 11)
+        hotkeyCaption.textColor = .secondaryLabelColor
+
+        // Additional filters: tags always applied to the board, on top of any
+        // search. Space-separated for more than one; the board shows only
+        // sessions carrying every tag listed.
+        let filterHeading = NSTextField(labelWithString: "Additional filters")
+        filterHeading.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        let filterField = NSTextField(string: UserDefaults.standard.string(forKey: Self.tagFilterKey) ?? "")
+        filterField.placeholderString = "#tag or name"
+        filterField.delegate = self
+        filterField.target = self
+        filterField.action = #selector(filterChanged(_:))
+        filterField.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        self.filterField = filterField
+
+        let filterCaption = NSTextField(
+            wrappingLabelWithString:
+                "Always applied to the jumplist and menu bar. #tag matches a tag, "
+                + "plain text matches the session name or its last message, ! excludes - e.g. #work !project "
+                + "shows work and hides anything named or tagged project. Blank shows all."
+        )
+        filterCaption.font = .systemFont(ofSize: 11)
+        filterCaption.textColor = .secondaryLabelColor
+
+        let stack = NSStackView(
+            views: [heading] + radioViews
+                + [caption, sessionsHeading, clearCheckbox, clearCaption,
+                   renameCheckbox, renameCaption, hotkeyCaption,
+                   filterHeading, filterField, filterCaption]
+        )
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.setCustomSpacing(16, after: radioViews.last ?? caption)
+        stack.setCustomSpacing(20, after: caption)
+        stack.setCustomSpacing(16, after: clearCaption)
+        stack.setCustomSpacing(16, after: renameCaption)
+        stack.setCustomSpacing(20, after: hotkeyCaption)
+        stack.setCustomSpacing(4, after: filterHeading)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let content = NSView()
+        content.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -20),
+        ])
+        window.contentView = content
+        window.setContentSize(NSSize(width: 400, height: 500))
+        self.window = window
+    }
+
+    @objc private func clearEndsChanged(_ sender: NSButton) {
+        SharedSettings.claudeClearEnds = sender.state == .on
+    }
+
+    @objc private func renameTitleChanged(_ sender: NSButton) {
+        SharedSettings.claudeRenameTitle = sender.state == .on
+    }
+
+    // Persist live - on every keystroke, and on ⏎ - so the filter applies
+    // without a Save button and without depending on the field committing
+    // before the jumplist is opened by its global hotkey. Stored as typed
+    // (space-separated tags); the reader splits, trims, tolerates a leading `#`.
+    private func persistFilter(_ raw: String) {
+        let value = raw.trimmingCharacters(in: .whitespaces)
+        if value.isEmpty { UserDefaults.standard.removeObject(forKey: Self.tagFilterKey) }
+        else { UserDefaults.standard.set(value, forKey: Self.tagFilterKey) }
+        onFilterChange()
+    }
+
+    @objc private func filterChanged(_ sender: NSTextField) {
+        persistFilter(sender.stringValue)
+    }
+
+    func controlTextDidChange(_ note: Notification) {
+        guard let field = note.object as? NSTextField, field === filterField else { return }
+        // During editing the committed stringValue lags; read the field editor.
+        let live = (note.userInfo?["NSFieldEditor"] as? NSText)?.string ?? field.stringValue
+        persistFilter(live)
+    }
+
+    @objc private func iconStyleChanged(_ sender: NSPopUpButton) {
+        guard let raw = sender.selectedItem?.representedObject as? String,
+              let style = MenuBarIconStyle(rawValue: raw) else { return }
+        UserDefaults.standard.set(style.rawValue, forKey: MenuBarIconStyle.defaultsKey)
+        onIconChange()
+    }
+}

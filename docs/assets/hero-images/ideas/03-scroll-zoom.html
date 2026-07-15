@@ -1,0 +1,379 @@
+<!doctype html>
+<!--
+  CONCEPT 3 - SCROLL-ZOOM LANDING (the Linear/Family-style zoom journey)
+
+  A ~4-viewport-height landing page where scroll drives a single continuous
+  zoom narrative through four stages:
+
+    Stage 1  The desk: headline "One board for every agent you run." over a
+             small scene - abstract terminal cards scattered around a tiny
+             signalbox jumplist in the middle.
+    Stage 2  Scroll zooms INTO the jumplist until it fills the viewport.
+             Everything is HTML/SVG so the zoom stays crisp. The amber lead
+             row (fix-auth-token-expiry) glows as we approach.
+    Stage 3  Keep zooming - past the panel into the amber ROW itself: its
+             breadcrumb rendered large ("auth tokens seem to expire a second
+             early - take a look?") with the reply line beneath.
+    Stage 4  Zoom past into a terminal view (dark, mono, a › prompt line),
+             ending on `brew install dwmkerr/tools/signalbox` and the ⌃⌥J keycaps.
+
+  Implementation: a sticky 100vh stage inside a 400vh scroll track; minimal
+  vanilla JS maps scroll progress to a scale+translate on the scene and
+  crossfades the close-up layers (chosen over animation-timeline:scroll() for
+  reliability). Extreme zoom is a crossfade to native-size layers so text
+  never rasterizes blurry. Without JS the page degrades to readable stacked
+  sections: html gets a .js class only when the script runs; all motion CSS
+  is gated behind it.
+
+  Colors, row language, and agent glyphs copied from specs/hub-jumplist.html.
+-->
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>signalbox - one board for every agent you run</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; color:#B5B5BA;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif;
+         overflow-x:hidden; }
+  .mono { font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  kbd { background:#3a3a3f; border:1px solid #ffffff1a; border-radius:4px; padding:1px 6px;
+        font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#D8D8DC; }
+
+  /* ============ scroll track + sticky stage ============ */
+  .journey { height:400vh; position:relative; }
+  html.js .stage { position:sticky; top:0; height:100vh; overflow:hidden; }
+
+  .layer { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
+  html.js .layer { will-change:opacity, transform; }
+
+  /* ============ stage 1 - headline over the desk ============ */
+  .hero-copy { position:absolute; left:0; right:0; top:9vh; text-align:center; z-index:5;
+               pointer-events:none; padding:0 24px; }
+  .hero-copy h1 { color:#EDEDED; font-size:clamp(30px,4.6vw,54px); font-weight:700;
+                  letter-spacing:-.02em; line-height:1.12; }
+  .hero-copy p  { color:#B5B5BA; font-size:clamp(15px,1.6vw,19px); margin-top:14px; }
+  .scroll-cue { position:absolute; left:50%; bottom:26px; transform:translateX(-50%);
+                color:#6E6E73; font-size:12px; letter-spacing:1.5px; z-index:5;
+                display:flex; flex-direction:column; align-items:center; gap:6px; }
+  html.js .scroll-cue svg { animation:cue 1.8s ease-in-out infinite; }
+  @keyframes cue { 0%,100%{transform:translateY(0);opacity:.6} 50%{transform:translateY(5px);opacity:1} }
+  html:not(.js) .scroll-cue { display:none; }
+
+  /* ============ the desk scene (zoom subject) ============ */
+  .scene { position:absolute; left:50%; top:50%; width:1400px; height:800px;
+           margin-left:-700px; margin-top:-400px; transform-origin:50% 50%; }
+  html:not(.js) .scene { position:static; width:auto; height:auto; margin:0 auto;
+                         max-width:720px; padding:40px 16px; }
+
+  /* abstract terminal cards on the desk */
+  .card { position:absolute; background:#101013; border:1px solid #ffffff10; border-radius:10px;
+          padding:12px 14px; box-shadow:0 12px 34px rgba(0,0,0,.5); opacity:.8; }
+  .card .lights { display:flex; gap:5px; margin-bottom:9px; }
+  .card .lights i { width:7px; height:7px; border-radius:50%; background:#3a3a3f; }
+  .card .cap { color:#5A5A5F; font-size:10px; margin-bottom:8px;
+               font-family:'SF Mono',ui-monospace,Menlo,monospace; white-space:nowrap; }
+  .card .ln { height:6px; border-radius:3px; background:#ffffff0d; margin-bottom:7px; }
+  .card .ln.g { background:#32d74b22; }
+  .card .ln.a { background:#ff9f0a22; }
+  html:not(.js) .cards { display:none; }
+
+  /* ============ the jumplist panel - language from specs/hub-jumplist.html ============ */
+  .panel { position:absolute; left:50%; top:50%; width:600px; transform:translate(-50%,-50%);
+           background:#161618; border:1px solid #ffffff14; border-radius:16px;
+           box-shadow:0 24px 70px rgba(0,0,0,.65); overflow:hidden; user-select:none;
+           font-size:13px; line-height:normal; }
+  html:not(.js) .panel { position:static; transform:none; width:auto; margin:0 auto; }
+  .panel header { display:flex; align-items:center; justify-content:space-between; padding:0 20px;
+                  height:46px; border-bottom:1px solid #ffffff14; }
+  .panel header .brand { color:#B5B5BA; font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .panel header .search { flex:1; margin:0 16px; color:#6E6E73; font-size:13px; }
+  .panel header .verbs { display:flex; align-items:center; gap:10px; color:#B5B5BA; font-size:12px; }
+  .panel h3 { color:#6E6E73; font-size:10px; letter-spacing:1.5px; font-weight:600; padding:12px 24px 8px; }
+  .row { display:flex; align-items:center; gap:10px; margin:0 10px; padding:8px 10px; border-radius:9px; }
+  .row.lead { background:#2C2C31; }
+  .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
+  .glyph { width:22px; display:flex; justify-content:center; flex-shrink:0; }
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:13px; color:#ADADB2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row.unread .txt .t { font-weight:700; color:#EDEDED; }
+  .txt .d { font-size:10.5px; color:#6E6E73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .age { font-size:11px; font-weight:600; color:#98989D; flex-shrink:0; }
+  .dot { width:8.5px; height:8.5px; border-radius:50%; background:#0A84FF; }
+  .dot.ask { background:#FF9F0A; }
+  .ring { width:8px; height:8px; border-radius:50%; border:1.4px solid rgba(152,152,157,.55); }
+  .x { color:#FF453A; font-size:12px; font-weight:700; line-height:1; }
+  .spin { width:11px; height:11px; border-radius:50%; border:1.7px solid rgba(152,152,157,.25);
+          border-top-color:#98989D; animation:rot .9s linear infinite; }
+  @keyframes rot { to { transform:rotate(360deg); } }
+  .panel footer { border-top:1px solid #ffffff14; height:34px; display:flex; align-items:center;
+                  justify-content:center; color:#6E6E73; font-size:10.5px; gap:4px;
+                  position:relative; margin-top:10px; }
+  .panel footer .cog { position:absolute; right:14px; color:#6E6E73; font-size:14px; line-height:1; }
+  svg.aglyph { display:block; }
+
+  /* ============ stage 3 - the amber row, close up ============ */
+  .l-row { z-index:8; pointer-events:none; }
+  html.js .l-row { opacity:0; }
+  .rowzoom { max-width:920px; padding:0 32px; }
+  .rowzoom .eyebrow { display:flex; align-items:center; gap:10px; color:#6E6E73; font-size:14px;
+                      margin-bottom:26px; font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .rowzoom .eyebrow .dot { width:10px; height:10px; }
+  .rowzoom .eyebrow b { color:#EDEDED; font-weight:700; }
+  .rowzoom .crumb { color:#EDEDED; font-size:clamp(26px,4.2vw,48px); font-weight:700;
+                    letter-spacing:-.015em; line-height:1.22; }
+  .rowzoom .crumb .q { color:#FF9F0A; }
+  .rowzoom .reply { margin-top:34px; display:flex; align-items:center; gap:10px;
+                    border:1px solid #ffffff14; background:#161618; border-radius:12px;
+                    padding:14px 18px; color:#6E6E73; font-size:15px;
+                    font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .rowzoom .reply .pr { color:#98989D; }
+  .caret { display:inline-block; width:8px; height:1.15em; vertical-align:text-bottom;
+           background:#98989D; }
+  html.js .caret { animation:blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .rowzoom .act { margin-top:16px; font-size:12px; color:#6E6E73; display:flex; align-items:center;
+                  gap:6px; flex-wrap:wrap; }
+  .rowzoom .act .need { color:#FF9F0A; font-weight:600; }
+
+  /* ============ stage 4 - the terminal ============ */
+  .l-term { z-index:9; background:#0a0a0b; pointer-events:none; }
+  html.js .l-term { opacity:0; }
+  html:not(.js) .l-term { background:none; }
+  .terminal { max-width:860px; width:100%; padding:0 32px;
+              font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .terminal .dim { color:#5A5A5F; font-size:14px; line-height:2; }
+  .terminal .dim .ok { color:#32D74B; }
+  .terminal .prompt { color:#EDEDED; font-size:clamp(17px,2.6vw,27px); margin:26px 0 6px;
+                      line-height:1.5; word-break:break-all; }
+  .terminal .prompt .ch { color:#FF9F0A; margin-right:12px; }
+  .terminal .keys { margin-top:44px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .keycaps { display:flex; gap:6px; }
+  .keycap { min-width:44px; height:44px; padding:0 12px; display:flex; align-items:center;
+            justify-content:center; background:#1c1c1f; border:1px solid #ffffff1f;
+            border-bottom:2.5px solid #ffffff2b; border-radius:9px; color:#EDEDED;
+            font-size:18px; box-shadow:0 4px 14px rgba(0,0,0,.45); }
+  .terminal .keys .cap { color:#6E6E73; font-size:14px;
+                         font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+  .terminal .foot { margin-top:52px; color:#5A5A5F; font-size:12.5px;
+                    font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+  .terminal .foot b { color:#98989D; font-weight:600; }
+
+  /* ============ no-JS fallback: readable stacked sections ============ */
+  html:not(.js) .layer { position:static; min-height:0; padding:64px 24px; }
+  html:not(.js) .journey { height:auto; }
+  html:not(.js) .hero-copy { position:static; padding:72px 24px 8px; }
+  html:not(.js) .l-scene { display:block; }
+</style></head><body>
+
+<div class="journey" id="journey">
+  <div class="stage">
+
+    <!-- stage 1 copy -->
+    <div class="hero-copy" id="heroCopy">
+      <h1>One board for every agent you run.</h1>
+      <p>Switch between agent sessions across terminals and machines.</p>
+    </div>
+
+    <!-- stages 1-2: the desk scene we zoom through -->
+    <div class="layer l-scene">
+      <div class="scene" id="scene">
+        <div class="cards" id="cards">
+          <div class="card" style="left:60px;   top:96px;  width:270px; transform:rotate(-2deg)">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="cap">iTerm - tmux work:7</div>
+            <div class="ln" style="width:78%"></div><div class="ln g" style="width:52%"></div>
+            <div class="ln" style="width:66%"></div><div class="ln" style="width:40%"></div>
+          </div>
+          <div class="card" style="right:64px;  top:70px;  width:250px; transform:rotate(1.6deg)">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="cap">ssh build-01 - tmux ci:2</div>
+            <div class="ln" style="width:62%"></div><div class="ln a" style="width:74%"></div>
+            <div class="ln" style="width:48%"></div>
+          </div>
+          <div class="card" style="left:110px;  bottom:88px; width:240px; transform:rotate(1.2deg)">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="cap">Ghostty - repo/api</div>
+            <div class="ln" style="width:70%"></div><div class="ln" style="width:44%"></div>
+            <div class="ln g" style="width:58%"></div>
+          </div>
+          <div class="card" style="right:96px;  bottom:110px; width:262px; transform:rotate(-1.4deg)">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="cap">ssh mac-mini - tmux home:1</div>
+            <div class="ln" style="width:56%"></div><div class="ln" style="width:72%"></div>
+            <div class="ln" style="width:38%"></div>
+          </div>
+          <div class="card" style="right:330px; top:8px; width:200px; transform:rotate(.8deg); opacity:.55">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="cap">Terminal - dwmkerr:2</div>
+            <div class="ln" style="width:64%"></div><div class="ln" style="width:46%"></div>
+          </div>
+        </div>
+
+        <!-- the jumplist -->
+        <div class="panel" id="panel">
+          <header>
+            <span class="brand"><svg width="16" height="16" viewBox="0 0 20 20" stroke="#B5B5BA" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#B5B5BA" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>signalbox</span>
+            <span class="search">Search sessions…</span>
+            <span class="verbs">Jump <kbd>↩</kbd></span>
+          </header>
+          <h3>SESSIONS</h3>
+
+          <div class="row unread lead" id="leadRow">
+            <div class="mark"><div class="dot ask"></div></div>
+            <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+            <div class="txt"><div class="t">fix-auth-token-expiry</div><div class="d">auth tokens seem to expire a second early - take a look?</div></div>
+            <span class="age">45s</span>
+          </div>
+
+          <div class="row">
+            <div class="mark"><div class="spin"></div></div>
+            <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+            <div class="txt"><div class="t">schema-migration</div><div class="d">run the migration against staging and verify row counts.</div></div>
+            <span class="age">2m</span>
+          </div>
+
+          <div class="row unread">
+            <div class="mark"><div class="dot"></div></div>
+            <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+            <div class="txt"><div class="t">release-notes</div><div class="d">Draft ready in RELEASE_NOTES.md - three sections, sixteen entries.</div></div>
+            <span class="age">8m</span>
+          </div>
+
+          <div class="row unread">
+            <div class="mark"><span class="x">✕</span></div>
+            <div class="glyph"><svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></div>
+            <div class="txt"><div class="t">flaky-test-hunt</div><div class="d">3 tests still flaky after retry - bisect stopped at 4e1a9c2.</div></div>
+            <span class="age">15m</span>
+          </div>
+
+          <div class="row">
+            <div class="mark"><div class="ring"></div></div>
+            <div class="glyph"><span class="mono" style="color:#0A84FF;font-size:15px">π</span></div>
+            <div class="txt"><div class="t">crash-analysis</div><div class="d">Summary written - two distinct stacks, both in the reducer.</div></div>
+            <span class="age">25m</span>
+          </div>
+
+          <div class="row">
+            <div class="mark"><div class="ring"></div></div>
+            <div class="glyph"><svg class="aglyph" width="19" height="19" viewBox="0 0 16 16"><path fill="#B5B5BA" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></div>
+            <div class="txt"><div class="t">deploy · ci.yml</div><div class="d">Workflow run succeeded in 4m 12s - 2 artifacts.</div></div>
+            <span class="age">40m</span>
+          </div>
+
+          <footer>
+            <span>type to search &nbsp;·&nbsp; <b>⌃J ⌃K</b> down/up &nbsp;·&nbsp; <b>⇥</b> next unread &nbsp;·&nbsp; <b>↩</b> jump &nbsp;·&nbsp; <b>esc</b> close</span>
+            <span class="cog">⚙</span>
+          </footer>
+        </div>
+      </div>
+    </div>
+
+    <!-- stage 3: the amber row, close up -->
+    <div class="layer l-row" id="lRow">
+      <div class="rowzoom">
+        <div class="eyebrow"><div class="dot ask"></div><b>fix-auth-token-expiry</b><span>· claude · 45s · needs your input</span></div>
+        <div class="crumb"><span class="q">“</span>auth tokens seem to expire a second early - take a look?<span class="q">”</span></div>
+        <div class="reply"><span class="pr">›</span> reply from the board<span class="caret"></span></div>
+        <div class="act"><kbd>↩</kbd> Jump to iTerm (tmux auth-service:1) on localhost &nbsp;·&nbsp; <span class="need">needs your input</span></div>
+      </div>
+    </div>
+
+    <!-- stage 4: the terminal -->
+    <div class="layer l-term" id="lTerm">
+      <div class="terminal">
+        <div class="dim">› fix-auth-token-expiry <span class="ok">⇢</span> jumped to iTerm (tmux auth-service:1)</div>
+        <div class="prompt"><span class="ch">›</span>brew install dwmkerr/tools/signalbox<span class="caret" style="background:#EDEDED"></span></div>
+        <div class="keys">
+          <div class="keycaps"><span class="keycap">⌃</span><span class="keycap">⌥</span><span class="keycap">J</span></div>
+          <span class="cap">summons the board from anywhere</span>
+        </div>
+        <div class="foot"><b>signalbox</b> - a macOS menu-bar board for AI coding-agent sessions · local-first · open source</div>
+      </div>
+    </div>
+
+    <div class="scroll-cue">SCROLL
+      <svg width="14" height="8" viewBox="0 0 14 8" fill="none" stroke="#6E6E73" stroke-width="1.6" stroke-linecap="round"><path d="M1 1 L7 7 L13 1"/></svg>
+    </div>
+  </div>
+</div>
+
+<script>
+document.documentElement.classList.add("js");
+
+const $ = id => document.getElementById(id);
+const scene = $("scene"), panel = $("panel"), leadRow = $("leadRow"),
+      cards = $("cards"), heroCopy = $("heroCopy"), lRow = $("lRow"),
+      lTerm = $("lTerm"), journey = $("journey"),
+      cue = document.querySelector(".scroll-cue"),
+      sceneLayer = document.querySelector(".l-scene");
+
+const clamp = (v,a,b) => Math.min(Math.max(v,a),b);
+const seg = (p,a,b) => clamp((p-a)/(b-a), 0, 1);
+const ease = t => t < .5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2;
+const lerp = (a,b,t) => a + (b - a) * t;
+
+// Measured once (and on resize): where the zoom is headed, in scene coords.
+let M = {};
+function measure() {
+  const pw = panel.offsetWidth, ph = panel.offsetHeight;
+  // The panel is visually centered in the scene (left/top:50% + -50% translate),
+  // so its center IS the scene center; the row's offsets are relative to the
+  // panel (its positioned ancestor) and unaffected by the scene transform.
+  M.panelT = { x: 0, y: 0 };
+  M.rowT   = { x: leadRow.offsetLeft + leadRow.offsetWidth/2  - pw/2,
+               y: leadRow.offsetTop  + leadRow.offsetHeight/2 - ph/2 };
+  M.s0 = Math.min(.55, (window.innerWidth - 40) / 1400);          // whole desk visible
+  M.s1 = clamp(Math.min(window.innerWidth / (panel.offsetWidth + 90),
+                        window.innerHeight / (panel.offsetHeight + 90)), 1.05, 2.1); // panel fills viewport
+  M.s2 = M.s1 * 4;                                                // into the row
+}
+
+function frame() {
+  const max = journey.offsetHeight - window.innerHeight;
+  const p = max > 0 ? clamp(window.scrollY / max, 0, 1) : 0;
+
+  // Stage 1 copy drifts up and out as the zoom begins.
+  const hOut = ease(seg(p, .06, .17));
+  heroCopy.style.opacity = 1 - hOut;
+  heroCopy.style.transform = `translateY(${-40 * hOut}px)`;
+  cue.style.opacity = 1 - seg(p, .02, .08);
+
+  // Stages 1→2→3: one continuous scale, target sliding from panel to row.
+  const zoomIn  = ease(seg(p, .12, .42));   // desk → panel fills viewport
+  const zoomRow = ease(seg(p, .44, .64));   // panel → the amber row
+  const s  = zoomRow > 0 ? lerp(M.s1, M.s2, zoomRow) : lerp(M.s0, M.s1, zoomIn);
+  const tt = ease(seg(p, .38, .56));        // aim drifts toward the row
+  const tx = lerp(M.panelT.x, M.rowT.x, tt), ty = lerp(M.panelT.y, M.rowT.y, tt);
+  scene.style.transform = `scale(${s}) translate(${-tx}px, ${-ty}px)`;
+
+  // Cards fall away as we fly past them into the panel.
+  cards.style.opacity = 1 - ease(seg(p, .16, .34));
+
+  // The amber lead row glows as it becomes the destination.
+  const glow = ease(seg(p, .3, .46));
+  leadRow.style.boxShadow = `inset 0 0 0 1px rgba(255,159,10,${.4 * glow})`;
+
+  // Crossfade to the native-size row close-up before scaled text can soften.
+  sceneLayer.style.opacity = 1 - ease(seg(p, .56, .66));
+  const rIn = ease(seg(p, .56, .66)), rOut = ease(seg(p, .72, .8));
+  lRow.style.opacity = rIn * (1 - rOut);
+  lRow.style.transform = `scale(${lerp(.86, 1, rIn) + .5 * rOut})`;
+
+  // Zoom past the row into the terminal; hold there to the end.
+  const tIn = ease(seg(p, .78, .9));
+  lTerm.style.opacity = tIn;
+  lTerm.style.transform = `scale(${lerp(.94, 1, tIn)})`;
+}
+
+let queued = false;
+function onScroll() {
+  if (queued) return;
+  queued = true;
+  requestAnimationFrame(() => { queued = false; frame(); });
+}
+addEventListener("scroll", onScroll, { passive: true });
+addEventListener("resize", () => { measure(); frame(); });
+measure(); frame();
+</script>
+</body></html>

@@ -1,0 +1,147 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>signalbox settings</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; color:#c9c9ce; font-size:16px; line-height:1.6;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Arial,sans-serif;
+         display:flex; flex-direction:column; align-items:center; padding:48px 20px; }
+  .page { width:760px; max-width:100%; }
+  .nav { color:#6E6E73; font-size:13px; margin-bottom:18px; }
+  .nav a { color:#0A84FF; text-decoration:none; }
+  h1 { color:#EDEDED; font-size:26px; margin-bottom:6px; }
+  .subtitle { color:#98989D; font-size:15px; margin-bottom:8px; }
+  .subtitle a { color:#0A84FF; text-decoration:none; }
+  .note-line { color:#c9c9ce; font-size:14px; margin-bottom:22px; }
+  kbd { background:#3a3a3f; border:1px solid #ffffff1a; border-radius:4px; padding:1px 6px;
+        font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:12px; color:#D8D8DC; }
+  .prose { margin-top:30px; }
+  .prose h2 { color:#EDEDED; font-size:19px; font-weight:600; margin:26px 0 10px;
+              padding-bottom:6px; border-bottom:1px solid #ffffff1a; }
+  .prose p { margin-bottom:10px; }
+  .prose ul { padding-left:22px; margin-bottom:10px; }
+  .prose li { margin-bottom:4px; }
+  .prose code { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:13.5px;
+                background:#ffffff12; border-radius:4px; padding:1px 5px; color:#D8D8DC; }
+  .prose table { border-collapse:collapse; margin:10px 0; }
+  .prose th, .prose td { border:1px solid #ffffff1e; padding:6px 12px; text-align:left; font-size:14.5px; }
+  .prose th { color:#EDEDED; }
+  .prose a { color:#0A84FF; text-decoration:none; }
+
+  /* The settings window mockup: a plain macOS preferences window. */
+  .win { width:420px; background:#28282c; border:1px solid #ffffff22; border-radius:10px;
+         box-shadow:0 18px 50px rgba(0,0,0,.6); overflow:hidden;
+         font-size:13px; line-height:normal; }
+  .titlebar { height:36px; display:flex; align-items:center; padding:0 12px; position:relative;
+              background:linear-gradient(#2e2e33,#292930); border-bottom:1px solid #00000055; }
+  .lights { display:flex; gap:8px; }
+  .lights span { width:12px; height:12px; border-radius:50%; }
+  .titlebar .title { position:absolute; left:0; right:0; text-align:center; color:#D8D8DC;
+                     font-size:13px; font-weight:600; pointer-events:none; }
+  .content { padding:16px 20px 20px; color:#D8D8DC; }
+  .frow { display:flex; align-items:center; min-height:30px; gap:10px; }
+  .frow .lbl { color:#B5B5BA; flex-shrink:0; }
+  .frow .ctl { flex:1; display:flex; align-items:center; gap:8px; }
+  .sect { color:#EDEDED; font-size:13px; font-weight:600; margin:14px 0 4px; }
+  .subnote { color:#8E8E93; font-size:11px; margin:2px 0 8px; line-height:1.5; }
+  .field { background:#1d1d20; border:1px solid #ffffff14; border-radius:6px; padding:4px 10px;
+           font-size:12px; color:#6E6E73; width:200px; display:inline-block; }
+  .popup { display:inline-flex; align-items:center; gap:6px; background:#48484c; border:1px solid #ffffff14;
+           border-radius:6px; padding:3px 4px 3px 10px; color:#EDEDED; font-size:12px; }
+  .popup .chev { line-height:5px; font-size:7px; background:#0A84FF; border-radius:4px; padding:2px 3px; color:#fff; }
+  .check { width:14px; height:14px; border-radius:3.5px; border:1.5px solid #98989D; display:inline-flex;
+           align-items:center; justify-content:center; font-size:10.5px; color:#fff; flex-shrink:0; }
+  .check.on { background:#0A84FF; border-color:#0A84FF; }
+</style></head><body>
+
+<div class="page">
+<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | settings | <a href="menubar.html">menu bar</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
+<h1>Specification: signalbox settings</h1>
+<div class="subtitle">Open from the menu bar (Settings…), or from the jumplist with <kbd>⌘</kbd><kbd>,</kbd> or its footer cog.</div>
+<div class="note-line"><b>Note:</b> the mockup below is the living specification for the signalbox settings window: a plain macOS preferences window, nothing more.</div>
+
+<div class="win">
+  <div class="titlebar">
+    <div class="lights"><span style="background:#FF5F57"></span><span style="background:#FEBC2E"></span><span style="background:#28C840"></span></div>
+    <div class="title">Signalbox Settings</div>
+  </div>
+  <div class="content">
+    <div class="frow">
+      <span class="lbl">Menu bar icon:</span>
+      <span class="ctl"><span class="popup">
+        <svg width="16" height="16" viewBox="0 0 20 20" stroke="#E4E4E8" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#E4E4E8" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>
+        Beacon <span class="chev">⌃<br>⌄</span>
+      </span></span>
+    </div>
+    <div class="subnote">A colored dot appears on the icon when sessions wait: amber = needs your input, blue = output updated, red = failed.</div>
+
+    <div class="sect">Sessions</div>
+    <div class="frow">
+      <span class="ctl"><span class="check on">✓</span> Claude Code /clear removes the session from the board</span>
+    </div>
+    <div class="subnote">Unchecked, a /clear keeps the old session listed (marked ready) until you hide or remove it - the exchange stays reviewable.</div>
+
+    <div class="frow">
+      <span class="ctl"><span class="check on">✓</span> Rename session on Claude Code /rename</span>
+    </div>
+    <div class="subnote">On, a Claude /rename shows on the board as the session name. Off keeps the folder name. Your own ⌃R rename always wins either way.</div>
+
+    <div class="subnote" style="margin-top:12px">Jumplist shortcut: ⌃⌥J - override with defaults write com.dwmkerr.signalbox hotkey "cmd+shift+space"</div>
+
+    <div class="sect">Additional filters</div>
+    <div class="frow">
+      <span class="ctl"><span class="field">#tag or name</span></span>
+    </div>
+    <div class="subnote">Always applied to the jumplist and menu bar. #tag matches a tag, plain text matches the session name or its last message, ! excludes - e.g. #work !project shows work and hides anything named or tagged project. Blank shows all.</div>
+  </div>
+</div>
+
+<div class="prose">
+  <h2>What this is</h2>
+  <p>The app's settings window. A plain macOS preferences window: a popup for the icon choice,
+  checkboxes for toggles, a text field for the filters, short grey captions under each control. Keep
+  it small; new settings are new rows.</p>
+
+  <h2>Additional filters</h2>
+  <p>The filter field narrows the board everywhere - the jumplist and the menu bar dropdown share it,
+  so the two never disagree. Tokens are space- or comma-separated: <code>#tag</code> matches a tag,
+  plain text matches the session name or its last message, and a leading
+  <code>!</code> excludes either. A session shows when it matches every include token and no exclude
+  token. The field applies live as you type (no Save button) and persists across restarts
+  (<code>tagFilter</code> below). It is also settable at launch:
+  <code>open Signalbox.app --args --filter demo</code> restarts straight into a filtered view, and
+  <code>--filter</code> with no value clears it back to all.</p>
+
+  <h2>The jumplist shortcut</h2>
+  <p>Today the shortcut is shown as a caption: <code>⌃⌥J</code> by default, overridden with
+  <code>defaults write com.dwmkerr.signalbox hotkey "cmd+shift+space"</code>. If the combo is taken
+  by another app, signalbox falls back and notifies. macOS has a well-defined pattern for a proper
+  control here: a recorder well, as in System Settings under Keyboard Shortcuts - click the well, it
+  focuses, press a combination, it captures it (and shows a clear button). The de facto
+  implementation is the
+  <a href="https://github.com/sindresorhus/KeyboardShortcuts">KeyboardShortcuts</a> Swift package,
+  which provides the recorder control, persistence, and the global listener in one - it would replace
+  our hand-rolled Carbon code and the defaults-write override.</p>
+
+  <h2>Where settings are stored</h2>
+  <table>
+    <tr><th>Store</th><th>What</th><th>Why</th></tr>
+    <tr><td><code>UserDefaults</code></td><td>menu bar icon (<code>menuBarIcon</code>), jumplist shortcut (<code>hotkey</code>), board tag filter (<code>tagFilter</code>), jumplist zoom (<code>uiScale</code>, 0.8-1.6, set with ⌘+/⌘−/⌘0), login-item one-shot (<code>didRegisterLoginItem</code> - the app registers itself as a login item once, on first launch from /Applications, and never re-adds it if you remove it in System Settings)</td><td>only the app needs these; the filter and zoom are local view preferences, not shared config</td></tr>
+    <tr><td><code>~/.config/signalbox/settings.json</code></td><td>toggles the CLI hooks must also see, currently <code>claudeClearEnds</code> and <code>claudeRenameTitle</code></td><td>the app writes the file and the hook path reads it on every fire, so a change applies immediately with no IPC</td></tr>
+  </table>
+  <p>Writes to the shared file merge key by key, so unknown keys survive. A missing or broken file
+  means defaults, and must never break the hook path.</p>
+
+  <h2>The /clear toggle</h2>
+  <p>Claude Code fires <code>SessionEnd</code> with reason <code>clear</code> when you type
+  <code>/clear</code>.</p>
+  <ul>
+    <li>Checked (default): the session ends and leaves the board, the same as quitting.</li>
+    <li>Unchecked: the hook maps it to <code>done</code> instead, so the old session stays listed with
+    its last exchange until you hide it (<kbd>⌃X</kbd>), remove it (<kbd>⌃⌫</kbd>), or it expires.
+    The fresh post-clear session appears as a new row alongside it.</li>
+  </ul>
+  <p>For scripting, <code>SIGNALBOX_CLEAR_ENDS=0|1</code> overrides the file.</p>
+</div>
+</div>
+</body></html>

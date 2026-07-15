@@ -1,0 +1,354 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>signalbox jumplist</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  /* Page prose renders like a GitHub markdown file: default-ish sizes,
+     readable line height. The panel mockup keeps its own compact metrics. */
+  body { background:#0d0d0f; color:#c9c9ce; font-size:16px; line-height:1.6;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif;
+         display:flex; flex-direction:column; align-items:center; padding:48px 20px; }
+  .page { width:960px; max-width:100%; }
+  .nav { color:#6E6E73; font-size:13px; margin-bottom:18px; }
+  .nav a { color:#0A84FF; text-decoration:none; }
+  h1 { color:#EDEDED; font-size:26px; margin-bottom:6px; }
+  .subtitle { color:#98989D; font-size:15px; margin-bottom:8px; }
+  .subtitle a { color:#0A84FF; text-decoration:none; }
+  .interactive-note { color:#c9c9ce; font-size:14px; margin-bottom:22px; }
+  .prose { max-width:760px; margin-top:30px; }
+  .prose h2 { color:#EDEDED; font-size:19px; font-weight:600; margin:26px 0 10px;
+              padding-bottom:6px; border-bottom:1px solid #ffffff1a; }
+  .prose p { margin-bottom:10px; }
+  .prose ul { padding-left:22px; margin-bottom:10px; }
+  .prose li { margin-bottom:4px; }
+  .prose code { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:13.5px;
+                background:#ffffff12; border-radius:4px; padding:1px 5px; color:#D8D8DC; }
+  .prose table { border-collapse:collapse; margin:10px 0; }
+  .prose th, .prose td { border:1px solid #ffffff1e; padding:6px 12px; text-align:left; font-size:14.5px; }
+  .prose th { color:#EDEDED; }
+  .prose a { color:#0A84FF; text-decoration:none; }
+  .amber { color:#FF9F0A; } .blue { color:#0A84FF; } .red { color:#FF453A; }
+
+  /* ---- the panel mockup ---- */
+  .panel { width:100%; background:#1e1e21; border:1px solid #ffffff20; border-radius:16px;
+           box-shadow:0 18px 50px rgba(0,0,0,.6); overflow:hidden; user-select:none;
+           font-size:13px; line-height:normal; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:0 20px; height:46px;
+           border-bottom:1px solid #ffffff14; }
+  header .brand { color:#B5B5BA; font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  header .search { flex:1; margin:0 16px; background:none; border:none; outline:none;
+                   color:#EDEDED; font-size:13px; font-family:inherit; }
+  header .search::placeholder { color:#6E6E73; }
+  header .verbs { display:flex; align-items:center; gap:10px; color:#B5B5BA; font-size:12px; }
+  kbd { background:#3a3a3f; border:1px solid #ffffff1a; border-radius:4px; padding:1px 6px;
+        font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#D8D8DC; }
+  kbd.sc, b.sc { font-variant:small-caps; letter-spacing:.5px; }
+  .body { display:flex; }
+  .list { width:430px; border-right:1px solid #ffffff14; padding:10px 0 12px; }
+  .list h3 { color:#6E6E73; font-size:10px; letter-spacing:1.5px; font-weight:600; padding:10px 24px 8px; }
+  .row { display:flex; align-items:center; gap:10px; margin:0 10px; padding:8px 10px; border-radius:9px; cursor:pointer; }
+  .row.sel { background:#2C2C31; }
+  .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
+  .glyph { width:22px; display:flex; justify-content:center; flex-shrink:0; }
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:13px; color:#ADADB2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row.unread .txt .t { font-weight:700; color:#EDEDED; }
+  .row.sel .txt .t { color:#fff; }
+  .txt .d { font-size:10.5px; color:#6E6E73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .right { text-align:right; flex-shrink:0; }
+  .age { font-size:11px; font-weight:600; color:#98989D; }
+  .dot { width:8.5px; height:8.5px; border-radius:50%; background:#0A84FF; }
+  .dot.ask { background:#FF9F0A; }
+  .ring { width:8px; height:8px; border-radius:50%; border:1.4px solid rgba(152,152,157,.55); }
+  .spin { width:11px; height:11px; border-radius:50%; border:1.7px solid rgba(152,152,157,.25);
+          border-top-color:#98989D; animation:rot .9s linear infinite; }
+  @keyframes rot { to { transform:rotate(360deg); } }
+  /* The preview is full black: a window into the terminal it quotes. */
+  .preview { flex:1; padding:18px 22px; min-height:360px; background:#000; }
+  .term { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.75; color:#C8C8CC; }
+  .term .you { color:#98989D; white-space:pre-wrap; }
+  .term .you::before { content:"❯ "; color:#5A5A5F; }
+  .term .gap { height:12px; }
+  .term .resp { display:flex; gap:8px; }
+  .term .resp .b { color:#0A84FF; }
+  .term .resp.askb .b { color:#FF9F0A; }
+  .term .resp .body-t { white-space:pre-wrap; color:#D8D8DC; }
+  .term .working { color:#E8B339; }
+  .term .working .spinch { display:inline-block; width:14px; color:#E8B339; }
+  .actline { margin-top:16px; font-size:11px; color:#6E6E73;
+             font-family:-apple-system,sans-serif; display:flex; align-items:center; gap:6px; }
+  .actline kbd { font-size:10.5px; }
+  footer { border-top:1px solid #ffffff14; height:34px; display:flex; align-items:center; justify-content:center;
+           color:#6E6E73; font-size:10.5px; gap:4px; position:relative; }
+  footer .keys { white-space:pre; }
+  footer .cog { position:absolute; right:14px; top:50%; transform:translateY(-50%); color:#6E6E73;
+                font-size:14px; cursor:pointer; line-height:1; }
+  footer .cog:hover { color:#B5B5BA; }
+  .labelbar { position:absolute; inset:0; background:#1e1e21; border-top:1px solid #ffffff14;
+              display:none; align-items:center; gap:8px; padding:0 20px; }
+  .labelbar.show { display:flex; }
+  .labelbar .p { color:#B5B5BA; font-size:11px; font-weight:600; }
+  .labelbar input { flex:1; background:none; border:none; outline:none; color:#EDEDED; font-size:12px;
+                    font-family:inherit; }
+  .toast { position:fixed; bottom:36px; left:50%; transform:translateX(-50%); background:#2160D0; color:#fff;
+           font-size:12px; padding:8px 18px; border-radius:10px; opacity:0; transition:opacity .18s; pointer-events:none; }
+  .toast.show { opacity:1; }
+  svg.aglyph { display:block; }
+</style></head><body>
+
+<div class="page">
+<div class="nav">signalbox specifications: jumplist | <a href="settings.html">settings</a> | <a href="menubar.html">menu bar</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
+<h1>Specification: signalbox jumplist</h1>
+<div class="subtitle">Open with <kbd>⌃</kbd><kbd>⌥</kbd><kbd>J</kbd> (change this in <a href="settings.html">settings</a>).</div>
+<div class="interactive-note"><b>Note:</b> the mockup below is interactive and operates as the living specification for the signalbox jumplist.</div>
+
+<div class="panel">
+  <header>
+    <span class="brand"><svg width="16" height="16" viewBox="0 0 20 20" stroke="#B5B5BA" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#B5B5BA" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>signalbox</span>
+    <input class="search" id="search" placeholder="Search sessions…" autocomplete="off" spellcheck="false">
+    <span class="verbs">Jump <kbd>↩</kbd></span>
+  </header>
+  <div class="body">
+    <div class="list"><h3>SESSIONS</h3><div id="rows"></div></div>
+    <div class="preview">
+      <div class="term" id="term"></div>
+    </div>
+  </div>
+  <footer>
+    <span class="keys">type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump  ·  esc clear/close</span>
+    <span class="cog" title="Settings (⌘,)">⚙</span>
+    <div class="labelbar" id="labelbar"><span class="p">Rename:</span><input id="labelinput" placeholder="session label - empty clears, ↩ saves, esc cancels"></div>
+  </footer>
+</div>
+
+<div class="prose">
+  <h2>What this is</h2>
+  <p>The jumplist shows every agent session in one place and jumps you to the one you pick: the right
+  terminal window and tmux pane, or the browser for remote work like CI runs. It is a floating panel
+  that takes keys without stealing focus from your app, and dismisses on <kbd class="sc">esc</kbd>, the shortcut,
+  or a click elsewhere. The panel is fixed in place like Spotlight - it cannot be dragged.</p>
+
+  <h2>Status marks</h2>
+  <ul>
+    <li><span class="amber">● amber</span> - needs your input (act)</li>
+    <li><span class="blue">● blue</span> - output updated (look)</li>
+    <li><span class="red">✕ red</span> - failed (fix)</li>
+    <li><span class="spin" style="display:inline-block;vertical-align:-1px"></span> spinner - working</li>
+    <li>○ faint ring - read; dealt with, the row keeps its place</li>
+  </ul>
+  <p>A bold title means unread. There is no extra badge: the amber mark alone means the session is
+  asking for you.</p>
+
+  <h2>Subtext</h2>
+  <p>The line under each name is the latest line of the exchange. While a session works you see your
+  prompt (what it is working on); once it finishes, asks, or fails you see its reply (what came
+  back). The preview on the right highlights the same line with the colored bullet, so the list and
+  the preview always agree.</p>
+
+  <h2>Icons</h2>
+  <p>The icon on each row shows the originator. It comes straight from the event's <code>agent</code>
+  field (see the <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a>): there is no separate icon metadata, each surface
+  maps the agent name to its glyph. Known agents today, and the fallback for everything else:</p>
+  <table>
+    <tr><th>Icon</th><th>Agent</th></tr>
+    <tr><td><svg width="18" height="18" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.7" y2="15.7"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.3" y2="15.7"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.3" y2="4.3"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.7" y2="4.3"/></g></svg></td><td><code>claude</code> - Claude Code</td></tr>
+    <tr><td><svg width="18" height="18" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></td><td><code>opencode</code> - OpenCode</td></tr>
+    <tr><td><span style="font-family:ui-monospace;color:#0A84FF;font-size:16px">π</span></td><td><code>pi</code> - pi</td></tr>
+    <tr><td><svg width="19" height="18" viewBox="0 0 22 20"><g fill="none" stroke="#B5B5BA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3.5 L16.63 6.75 L16.63 13.25 L11 16.5 L5.37 13.25 L5.37 6.75 Z"/><path d="M11 10 L11 3.5 M11 10 L16.63 13.25 M11 10 L5.37 13.25"/></g></svg></td><td><code>cursor</code> - Cursor's own agent (the isometric-cube mark alone)</td></tr>
+    <tr><td><svg width="19" height="18" viewBox="0 0 22 20"><g fill="none" stroke="#B5B5BA" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3.5 L16.63 6.75 L16.63 13.25 L11 16.5 L5.37 13.25 L5.37 6.75 Z"/><path d="M11 10 L11 3.5 M11 10 L16.63 13.25 M11 10 L5.37 13.25"/></g><circle cx="17" cy="16" r="6" fill="#0d0d0f"/><g stroke="#D97757" stroke-width="1.05" stroke-linecap="round"><line x1="16" y1="14.5" x2="20" y2="14.5"/><line x1="16" y1="14.5" x2="18.83" y2="17.33"/><line x1="16" y1="14.5" x2="16" y2="18.5"/><line x1="16" y1="14.5" x2="13.17" y2="17.33"/><line x1="16" y1="14.5" x2="12" y2="14.5"/><line x1="16" y1="14.5" x2="13.17" y2="11.67"/><line x1="16" y1="14.5" x2="16" y2="10.5"/><line x1="16" y1="14.5" x2="18.83" y2="11.67"/></g></svg></td><td><code>cursor/&lt;agent&gt;</code> - an agent hosted in Cursor's terminal (e.g. <code>cursor/claude</code>): the Cursor mark with the sub-agent's glyph badged bottom-right in a clear halo</td></tr>
+    <tr><td><svg width="17" height="17" viewBox="0 0 16 16"><path fill="#B5B5BA" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></td><td><code>github</code> - GitHub Actions</td></tr>
+    <tr><td><svg width="18" height="18" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5" fill="none" stroke="#B5B5BA" stroke-width="1.6"/></svg></td><td>anything else (<code>script</code>, custom agents) - a plain ring, the fallback</td></tr>
+  </table>
+
+  <h2>Search and selection</h2>
+  <p>The top of the panel is a search bar and it is always focused: any printable key filters the list
+  live, matching the name, the prompt breadcrumb, the reply, and the agent. A query starting with
+  <code>#</code> switches to tag mode - <code>#demo</code> shows only sessions carrying that tag
+  (case-insensitive, exact match); clearing it restores all. Every open starts with an empty
+  search. Any <a href="settings.html">additional filters</a> apply underneath the search, to this
+  list and the menu bar dropdown alike.</p>
+  <p>Rows keep the order you work in (most recently engaged first, like the app switcher); status
+  never reorders them. The panel opens with the topmost unread row selected, and selection stays
+  topmost-unread within the filtered rows.</p>
+
+  <h2>Preview</h2>
+  <p>The right pane is the last exchange, on black like the terminal it quotes: your prompt, then the
+  agent's reply - the bullet is amber for asks and blue for finished work. While a session works you
+  see a live <code>✻ Working…</code> line with the runtime. The line above the footer says exactly
+  where <kbd>↩</kbd> takes you, for example "Jump to iTerm (tmux dwmkerr:1) on localhost".</p>
+
+  <h2>Shortcuts</h2>
+  <p>Typing is searching, so list commands use the control key:</p>
+  <table>
+    <tr><th>Keys</th><th>Action</th></tr>
+    <tr><td><kbd>↩</kbd></td><td>Jump to the selected session (marks it seen)</td></tr>
+    <tr><td><kbd>⌃J</kbd> <kbd>⌃K</kbd> or arrows</td><td>Down / up</td></tr>
+    <tr><td><kbd>⌃1</kbd> <kbd>⌃2</kbd> …</td><td>Jump directly to a session</td></tr>
+    <tr><td><kbd>⇥</kbd></td><td>Next unread</td></tr>
+    <tr><td><kbd>⌃R</kbd></td><td>Rename session (your own name for it; empty clears)</td></tr>
+    <tr><td><kbd>⌃X</kbd></td><td>Hide until the session speaks again</td></tr>
+    <tr><td><kbd>⌃⌫</kbd></td><td>Remove now</td></tr>
+    <tr><td><kbd>⌘,</kbd></td><td>Open Settings (same as the footer cog)</td></tr>
+    <tr><td><kbd>⌘+</kbd> <kbd>⌘−</kbd> <kbd>⌘0</kbd></td><td>Zoom the jumplist in / out / reset (0.8×-1.6×, persists)</td></tr>
+    <tr><td><kbd class="sc">esc</kbd></td><td>Clear the search, then close</td></tr>
+  </table>
+  <p>Zoom scales the whole panel - geometry and text together, text stays crisp - for
+  readability on dense screens or recordings. The footer keys strip stays unchanged
+  (⌘+/−/0 are universal conventions and the strip is already full).</p>
+</div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+const SESSIONS = [
+  {key:"claude:7786", agent:"claude", title:"work-project", state:"working", ageSeconds:6, tags:["work"],
+   prompt:"yes please send it. please also mark the old batches as read.", reply:null,
+   loc:"Jump to iTerm (tmux work-project:1) on localhost"},
+  {key:"claude:1f72", agent:"claude", title:"dwmkerr-toolkit", state:"ask", ageSeconds:16,
+   prompt:"good enough. commit work for now.",
+   reply:"I've generated the style config. Overwrite the existing writing-style.yml with this version? It changes tone rules you wrote manually.",
+   loc:"Jump to iTerm (tmux work-project:1) on localhost"},
+  {key:"claude:bbfc", agent:"claude", title:"writing-studio-dashboard", state:"unread", ageSeconds:8,
+   prompt:"add a per-post traffic panel with the substack numbers.",
+   reply:"Done - the dashboard now shows per-post traffic with a 30-day sparkline. Build is green, preview at http://localhost:4321.",
+   loc:"Jump to iTerm (tmux work:7) on localhost"},
+  {key:"github:run-9182", agent:"github", title:"claude-toolkit-deploy", state:"unread", ageSeconds:1260,
+   prompt:"push to main (b41c2f9) triggered deploy",
+   reply:"Workflow run #9182 succeeded in 4m 12s - plugin published. 2 artifacts.",
+   loc:"Open on GitHub (Actions run #9182)"},
+  {key:"pi:3ace", agent:"pi", title:"terminal-agent-notifier", state:"read", ageSeconds:108,
+   prompt:"summarise the crash dumps from last night's run.",
+   reply:"All set earlier - nothing new since you last looked.",
+   loc:"Jump to iTerm (tmux dwmkerr:7) on localhost"},
+  {key:"opencode:9d1", agent:"opencode", title:"release-notes", state:"unread", ageSeconds:340, tags:["work"],
+   prompt:"draft the 0.2.0 release notes from the changelog.",
+   reply:"Draft ready in RELEASE_NOTES.md - three sections, sixteen entries, and a short highlights paragraph.",
+   loc:"Jump to iTerm (tmux dwmkerr:2) on localhost"},
+];
+// Topmost-unread default selection (fallback: top row).
+const needsCheck = s => s.state==="ask" || s.state==="unread" || s.state==="failed";
+let query = "";
+const visible = () => SESSIONS.map((s,i)=>i).filter(i => {
+  if (!query) return true;
+  const s2 = SESSIONS[i], q = query.toLowerCase();
+  // A `#tag` query switches to tag mode: only sessions carrying that tag.
+  if (q.startsWith("#")) {
+    const tag = q.slice(1).trim();
+    if (!tag) return true;
+    return (s2.tags||[]).some(t => t.toLowerCase() === tag);
+  }
+  return (s2.label||s2.title).toLowerCase().includes(q) || (s2.prompt||"").toLowerCase().includes(q) || (s2.reply||"").toLowerCase().includes(q) || s2.agent.includes(q);
+});
+function defaultSel(){ const v = visible(); return v.find(i=>needsCheck(SESSIONS[i])) ?? v[0] ?? -1; }
+let sel = -1;
+let editing = false;
+
+const AG = {
+  claude: '<svg class="aglyph" width="20" height="20" viewBox="0 0 20 20">' +
+    Array.from({length:8},(_,i)=>{const a=i*Math.PI/4;return `<line x1="10" y1="10" x2="${10+8*Math.cos(a)}" y2="${10+8*Math.sin(a)}" stroke="#D97757" stroke-width="2.1" stroke-linecap="round"/>`}).join('') + '</svg>',
+  opencode: '<svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  github: '<svg class="aglyph" width="19" height="19" viewBox="0 0 16 16"><path fill="#B5B5BA" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>',
+  pi: '<span style="font-family:ui-monospace;color:#0A84FF;font-size:15px">π</span>',
+  generic: '<svg class="aglyph" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6.5" fill="none" stroke="#B5B5BA" stroke-width="1.6"/></svg>',
+};
+function ageStr(s){ if(s<60) return s+"s"; if(s<3600) return Math.floor(s/60)+"m"; return Math.floor(s/3600)+"h"; }
+function markHTML(st){
+  if(st==="working") return '<div class="spin"></div>';
+  if(st==="ask") return '<div class="dot ask"></div>';
+  if(st==="unread") return '<div class="dot"></div>';
+  return '<div class="ring"></div>';
+}
+function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+// The freshest half of the exchange: prompt while working, reply once the
+// session has finished, asked, or failed.
+function subtext(s){ return (s.state==="working" || !s.reply) ? s.prompt : s.reply; }
+
+function renderList(){
+  const v = visible();
+  if (!v.includes(sel)) sel = defaultSel();
+  document.getElementById("rows").innerHTML = v.map(i=>{const s=SESSIONS[i];return `
+    <div class="row ${i===sel?"sel":""} ${needsCheck(s)?"unread":""}" onclick="select(${i})">
+      <div class="mark">${markHTML(s.state)}</div>
+      <div class="glyph">${AG[s.agent]||AG.generic}</div>
+      <div class="txt"><div class="t">${esc(s.label||s.title)}</div><div class="d">${esc(subtext(s))}</div></div>
+      <div class="right"><span class="age">${ageStr(s.ageSeconds)}</span></div>
+    </div>`}).join("") || '<div style="color:#6E6E73;font-size:12px;padding:14px 24px">No matches</div>';
+}
+const GLYPHS = ["·","✢","✳","∗","✻","✽"]; let gi = 0;
+setInterval(()=>{ gi=(gi+1)%GLYPHS.length; const el=document.querySelector(".spinch"); if(el) el.textContent=GLYPHS[gi];
+  SESSIONS.forEach(s=>s.ageSeconds++); const v=visible(); document.querySelectorAll(".row .age").forEach((el,i)=>el.textContent=ageStr(SESSIONS[v[i]].ageSeconds)); }, 1000);
+
+function renderPreview(){
+  const s = SESSIONS[sel];
+  if (!s) { document.getElementById("term").innerHTML = ""; return; }
+  let h = `<div class="you">${esc(s.prompt)}</div><div class="gap"></div>`;
+  let act = `<div class="actline"><kbd>↩</kbd> ${esc(s.loc)}</div>`;
+  if (s.state === "working") {
+    h += `<div class="working"><span class="spinch">✻</span> Working… (${ageStr(s.ageSeconds)})</div>`;
+  } else if (s.state === "ask") {
+    h += `<div class="resp askb"><span class="b">●</span><span class="body-t">${esc(s.reply)}</span></div>`;
+    act = `<div class="actline"><kbd>↩</kbd> ${esc(s.loc)} · <span style="color:#FF9F0A;font-weight:600">needs your input</span></div>`;
+  } else if (s.state === "unread") {
+    h += `<div class="resp"><span class="b">●</span><span class="body-t">${esc(s.reply)}</span></div>`;
+  } else {
+    h += `<div class="resp"><span class="b" style="color:#5A5A5F">●</span><span class="body-t" style="color:#8E8E93">${esc(s.reply)}</span></div>`;
+  }
+  document.getElementById("term").innerHTML = h + act;
+}
+function select(i){ sel = i; renderList(); renderPreview(); }
+function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 1300); }
+
+function beginLabel(){
+  editing = true;
+  const bar = document.getElementById("labelbar"), input = document.getElementById("labelinput");
+  bar.classList.add("show");
+  input.value = SESSIONS[sel].label || SESSIONS[sel].title;
+  input.focus(); input.select();
+}
+function endLabel(commit){
+  const bar = document.getElementById("labelbar"), input = document.getElementById("labelinput");
+  if (commit) {
+    SESSIONS[sel].label = input.value.trim();
+    toast(SESSIONS[sel].label ? `renamed to "${SESSIONS[sel].label}" (signalbox label)` : "name cleared");
+    renderList();
+  }
+  editing = false; bar.classList.remove("show"); input.blur();
+}
+document.getElementById("labelinput").addEventListener("keydown", e => {
+  e.stopPropagation();
+  if (e.key === "Enter") endLabel(true);
+  else if (e.key === "Escape") endLabel(false);
+});
+
+function moveSel(delta){
+  const v = visible(); if (!v.length) return;
+  const pos = Math.max(0, v.indexOf(sel));
+  select(v[Math.min(Math.max(pos+delta,0), v.length-1)]);
+}
+const searchEl = document.getElementById("search");
+searchEl.addEventListener("input", () => { query = searchEl.value.trim(); sel = defaultSel(); renderList(); renderPreview(); });
+
+document.addEventListener("keydown", e => {
+  if (editing) return;
+  const ctrl = e.ctrlKey;
+  if (ctrl && (e.key==="j"||e.key==="J")) { e.preventDefault(); moveSel(1); }
+  else if (ctrl && (e.key==="k"||e.key==="K")) { e.preventDefault(); moveSel(-1); }
+  else if (e.key==="ArrowDown") { e.preventDefault(); moveSel(1); }
+  else if (e.key==="ArrowUp") { e.preventDefault(); moveSel(-1); }
+  else if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); const v=visible(); const i=parseInt(e.key)-1; if (i<v.length) select(v[i]); }
+  else if (e.key==="Tab") { e.preventDefault();
+    const un = visible().filter(i=>needsCheck(SESSIONS[i]));
+    if (un.length) select(un[(un.indexOf(sel)+1) % un.length] ?? un[0]); }
+  else if (e.key==="Enter") { const s=SESSIONS[sel]; if (s) toast(s.loc.startsWith("Open") ? "would open in the browser" : "would jump to the tmux pane"); }
+  else if (ctrl && (e.key==="r"||e.key==="R")) { e.preventDefault(); beginLabel(); }
+  else if (ctrl && (e.key==="x"||e.key==="X")) { e.preventDefault(); if (sel>=0) { SESSIONS[sel].state="read"; renderList(); renderPreview(); toast("hidden until it speaks (mock: shown as read)"); } }
+  else if (ctrl && e.key==="Backspace") { e.preventDefault(); if (sel>=0) { SESSIONS.splice(sel,1); sel=defaultSel(); renderList(); renderPreview(); toast("removed"); } }
+  else if (e.key==="Escape") {
+    if (query) { searchEl.value=""; query=""; sel=defaultSel(); renderList(); renderPreview(); toast("search cleared"); }
+    else toast("would dismiss the jumplist");
+  }
+  else if (document.activeElement !== searchEl && e.key.length===1 && !e.metaKey && !ctrl) searchEl.focus();
+});
+sel = defaultSel(); renderList(); renderPreview(); searchEl.focus();
+</script></body></html>

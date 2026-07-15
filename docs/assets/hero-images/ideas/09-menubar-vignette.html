@@ -1,0 +1,183 @@
+<!doctype html>
+<!--
+  CONCEPT 9 - MENU BAR VIGNETTE
+
+  An animated micro-story (~7s CSS loop) told entirely in the top-right corner
+  of a macOS menu bar, zoomed to 2x so every detail reads. Beat 1: everything
+  quiet - wifi, battery, clock, and a plain signalbox beacon. Beat 2: an amber
+  status dot blooms on the beacon (an agent needs you) and a single radar
+  ripple rings out. Beat 3: the cursor slides in and clicks; the dropdown
+  unrolls - five live sessions with status marks, per-agent glyphs, names and
+  ages, then Refresh / Settings… / Quit beneath a separator. Beat 4: the amber
+  row highlights, click, the dropdown closes and the dot fades back to quiet.
+
+  The story: ambient awareness. You never had to look for it - signalbox
+  surfaced it, you dealt with it, the bar went quiet again.
+
+  Menu bar strip, beacon glyph, status dot, and dropdown reproduced from
+  specs/menubar.html; agent glyphs (claude sunburst, opencode terminal, pi,
+  github) and the working spinner from specs/hub-jumplist.html.
+  Self-contained: inline SVG/CSS only, no external requests, no JS required.
+  With prefers-reduced-motion the loop freezes on the open-dropdown beat.
+-->
+<html><head><meta charset="utf-8"><title>signalbox - menu bar vignette</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; min-height:100vh; display:flex; flex-direction:column;
+         align-items:center; justify-content:center; padding:48px 20px; gap:26px;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+
+  /* Soft page vignette so the corner card floats. */
+  .halo { position:relative; }
+  .halo::before { content:""; position:absolute; inset:-90px; border-radius:50%;
+                  background:radial-gradient(closest-side, rgba(90,110,200,.10), transparent 70%);
+                  pointer-events:none; }
+
+  /* The stage: a 480x280 scene scaled 2x so menu-bar details read. */
+  .stage { width:960px; max-width:100%; aspect-ratio:960/560; position:relative; }
+  .scene { width:480px; height:280px; transform:scale(2); transform-origin:top left;
+           position:absolute; top:0; left:0; border-radius:12px; overflow:hidden;
+           border:.5px solid #ffffff20;
+           background:linear-gradient(160deg,#1b2a4a 0%,#2b2a52 55%,#3b2a58 100%);
+           box-shadow:0 14px 45px rgba(0,0,0,.55); }
+  @media (max-width:1000px) { .stage { transform:scale(min(1,calc((100vw - 40px)/960))); transform-origin:top center; } }
+  .scene::after { content:""; position:absolute; inset:0; pointer-events:none;
+                  background:radial-gradient(120% 90% at 78% -10%, rgba(255,255,255,.07), transparent 55%); }
+
+  /* ---- The macOS menu bar strip (from specs/menubar.html) ---- */
+  .strip { position:absolute; top:0; left:0; right:0; display:flex; align-items:center;
+           justify-content:flex-end; gap:14px; height:30px; padding:0 14px;
+           background:rgba(20,20,24,.78); backdrop-filter:blur(6px);
+           color:#E4E4E8; font-size:12.5px; line-height:normal; z-index:2; }
+  .sbicon { display:flex; align-items:center; position:relative; }
+  .statusdot { position:absolute; top:-2px; right:-4px; width:7px; height:7px;
+               border-radius:50%; border:1.2px solid #1a1a1c; background:#FF9F0A;
+               animation:dotlife 7s ease-in-out infinite; }
+  .ripple { position:absolute; top:-2px; right:-4px; width:7px; height:7px; border-radius:50%;
+            border:1.3px solid #FF9F0A; pointer-events:none;
+            animation:ripple 7s ease-out infinite; }
+
+  /* ---- The dropdown (light, opaque - from specs/menubar.html) ---- */
+  .menu { position:absolute; top:34px; right:118px; width:300px; z-index:3;
+          background:#f5f5f7; border:1px solid #00000022; border-radius:8px;
+          box-shadow:0 12px 34px rgba(0,0,0,.45); padding:5px;
+          font-size:13px; color:#1d1d1f; line-height:normal;
+          transform-origin:top; animation:menulife 7s ease infinite; }
+  .mrow { display:flex; align-items:center; gap:9px; padding:5px 10px; border-radius:5px; }
+  .mrow.hot { animation:rowhot 7s ease infinite; }
+  .mk { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .mk.ring { background:none; border:1.5px solid #00000055; }
+  .mk.spin { background:none; border:1.6px solid rgba(0,0,0,.14); border-top-color:#6e6e73;
+             width:11px; height:11px; margin:-1px; animation:rot .9s linear infinite; }
+  @keyframes rot { to { transform:rotate(360deg); } }
+  .agent { color:#6e6e73; width:16px; flex-shrink:0; display:inline-flex;
+           align-items:center; justify-content:center; }
+  .agent svg { display:block; }
+  .t { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:inherit; }
+  .t.unread { font-weight:700; }
+  .t.read { color:#6e6e73; }
+  .mage { color:#8e8e93; font-size:12px; font-variant-numeric:tabular-nums; }
+  .mrow.hot .mage { color:inherit; opacity:.72; }
+  .msep { height:1px; background:#00000018; margin:5px 10px; }
+
+  /* ---- The cursor: outer node moves, inner node click-pulses ---- */
+  .cur { position:absolute; top:0; left:0; z-index:5; will-change:transform;
+         animation:curmove 7s ease-in-out infinite; }
+  .cur .press { display:block; transform-origin:3px 3px; animation:curclick 7s linear infinite; }
+
+  /* ================= the 7-second timeline =================
+     0-17%  beat 1  quiet
+     17-34% beat 2  dot blooms, one radar ripple
+     26-50% beat 3  cursor in, click, dropdown unrolls
+     56-84% beat 4  cursor to the amber row, highlight, click
+     84-100%        dropdown closes, dot fades, quiet again  */
+
+  @keyframes dotlife {
+    0%, 16%   { opacity:0; transform:scale(.2); }
+    19%       { opacity:1; transform:scale(1.35); }
+    22%       { opacity:1; transform:scale(1); }
+    86%       { opacity:1; transform:scale(1); }
+    93%, 100% { opacity:0; transform:scale(.5); }
+  }
+  @keyframes ripple {
+    0%, 17%   { opacity:0; transform:scale(.5); }
+    20%       { opacity:.85; }
+    36%, 100% { opacity:0; transform:scale(5.5); }
+  }
+  @keyframes curmove {
+    0%, 24%   { transform:translate(140px,262px); opacity:0; }
+    30%       { opacity:1; }
+    40%, 56%  { transform:translate(338px,13px); opacity:1; }
+    66%, 84%  { transform:translate(200px,49px); opacity:1; }
+    92%, 100% { transform:translate(285px,165px); opacity:0; }
+  }
+  @keyframes curclick {
+    0%, 41%   { transform:scale(1); }
+    42.5%     { transform:scale(.8); }
+    44%       { transform:scale(1); }
+    78.5%     { transform:scale(1); }
+    80%       { transform:scale(.8); }
+    81.5%, 100% { transform:scale(1); }
+  }
+  @keyframes menulife {
+    0%, 44%   { opacity:0; transform:scaleY(.62); }
+    46.5%     { opacity:1; }
+    50%, 82%  { opacity:1; transform:scaleY(1); }
+    86%, 100% { opacity:0; transform:scaleY(.94); }
+  }
+  @keyframes rowhot {
+    0%, 71%   { background:transparent; color:#1d1d1f; }
+    74%, 82%  { background:#0A84FF; color:#fff; }
+    85%, 100% { background:transparent; color:#1d1d1f; }
+  }
+  /* Reduced motion: freeze the story on its clearest beat - dropdown open. */
+  @media (prefers-reduced-motion: reduce) {
+    .statusdot, .ripple, .menu, .mrow.hot, .cur, .cur .press, .mk.spin { animation:none; }
+    .ripple, .cur { opacity:0; }
+  }
+
+  .caption { color:#98989D; font-size:15px; max-width:620px; text-align:center; line-height:1.55; }
+  .caption b { color:#EDEDED; font-weight:600; }
+</style></head><body>
+
+<div class="halo">
+<div class="stage"><div class="scene">
+
+  <!-- menu bar, top-right of the screen -->
+  <div class="strip">
+    <span class="sbicon">
+      <svg width="17" height="17" viewBox="0 0 20 20" stroke="#E4E4E8" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#E4E4E8" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>
+      <span class="ripple"></span>
+      <span class="statusdot"></span>
+    </span>
+    <svg width="17" height="13" viewBox="0 0 16 12" fill="#E4E4E8"><path d="M8 9.6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM8 6c1.7 0 3.2.7 4.3 1.8l-1.4 1.4A4.1 4.1 0 0 0 8 8.1c-1.1 0-2.1.4-2.9 1.1L3.7 7.8A6 6 0 0 1 8 6zM8 2.2c2.7 0 5.2 1.1 7 2.9l-1.4 1.4A7.9 7.9 0 0 0 8 4.2c-2.2 0-4.2.9-5.6 2.3L1 5.1a9.9 9.9 0 0 1 7-2.9z"/></svg>
+    <svg width="24" height="12" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="#E4E4E8" stroke-opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="#E4E4E8"/><rect x="22.5" y="4" width="2" height="4" rx="1" fill="#E4E4E8" fill-opacity=".6"/></svg>
+    <span>14:32</span>
+  </div>
+
+  <!-- the dropdown, hanging from the beacon -->
+  <div class="menu">
+    <div class="mrow hot"><span class="mk" style="background:#FF9F0A"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span><span class="t unread">fix-auth-token-expiry</span><span class="mage">45s</span></div>
+    <div class="mrow"><span class="mk spin"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span><span class="t read">schema-migration</span><span class="mage">2m</span></div>
+    <div class="mrow"><span class="mk" style="background:#0A84FF"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#6e6e73" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#34C759" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#6e6e73" stroke-width="1.6" stroke-linecap="round"/></svg></span><span class="t unread">release-notes</span><span class="mage">8m</span></div>
+    <div class="mrow"><span class="mk ring"></span><span class="agent"><span style="font-family:ui-monospace,Menlo,monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">crash-analysis</span><span class="mage">25m</span></div>
+    <div class="mrow"><span class="mk" style="background:#0A84FF"></span><span class="agent"><svg viewBox="0 0 16 16" width="14" height="14"><path fill="#6e6e73" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></span><span class="t unread">deploy · ci.yml</span><span class="mage">40s</span></div>
+    <div class="msep"></div>
+    <div class="mrow"><span class="t">Refresh</span><span class="mage">⌘R</span></div>
+    <div class="mrow"><span class="t">Settings…</span><span class="mage">⌘,</span></div>
+    <div class="mrow"><span class="t">Quit Signalbox</span><span class="mage">⌘Q</span></div>
+  </div>
+
+  <!-- the cursor: hotspot at the arrow tip (top-left of the svg) -->
+  <div class="cur"><span class="press">
+    <svg width="15" height="15" viewBox="0 0 24 24"><path d="M5.5 3.2 v17.3 c0 .5.6.7.9.3 l4.5-4.9 h6.6 c.5 0 .7-.6.4-.9 L6.4 2.8 c-.3-.3-.9-.1-.9.4Z" fill="#000" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>
+  </span></div>
+
+</div></div>
+</div>
+
+<div class="caption"><b>Ambient awareness.</b> An agent needed you - the beacon said so, you dealt
+with it, and the bar went quiet. You never had to go looking.</div>
+
+</body></html>
