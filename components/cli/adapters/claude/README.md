@@ -28,7 +28,8 @@ signal itself leaves the machine.
 
 ## Install
 
-`signalbox init --agent claude` prints the exact `hooks` block to merge into
-`~/.claude/settings.json` (the same block lives in
-[hooks-settings.json](hooks-settings.json)). `signalbox` must be on `PATH`
-(or use the absolute path to the binary in each `command`).
+`signalbox init --agent claude` merges the `hooks` block into
+`~/.claude/settings.json` for you (timestamped backup, atomic write; the
+same block lives in [hooks-settings.json](hooks-settings.json) to apply by
+hand). `signalbox` must be on `PATH` (or use the absolute path to the binary
+in each `command`).

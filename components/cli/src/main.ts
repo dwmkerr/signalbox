@@ -23,6 +23,25 @@ import {
 // A plain const stamped by release-please; the compiled binary carries it.
 const version = "0.1.1"; // x-release-please-version
 
+// The short help: what a person types. Plumbing (hooks, tmux glue, drain)
+// and env vars live in `signalbox help` - the first screen a new user sees
+// should fit in one glance.
+function shortUsage(): string {
+  return `signalbox ${version} - one board for everything you run
+
+usage: signalbox <command> [flags]
+
+  init         guided setup: the app, coding-agent hooks, tmux
+  state        show the board
+  jump <key>   jump to a session's origin and mark it seen
+  pick         pick a waiting session interactively and jump to it
+  fire         fire an event from a script, cron job, or CI
+  hub          run the hub in the foreground (the app runs one for you)
+
+'signalbox help' lists every command, flag, and environment variable.
+`;
+}
+
 function usage(): string {
   return `signalbox ${version} - one board for everything you run
 
@@ -529,7 +548,16 @@ async function runDrain(): Promise<void> {
 // ---- dispatch -------------------------------------------------------------------
 
 function fatal(err: unknown): never {
-  console.error(`signalbox: ${err instanceof Error ? err.message : err}`);
+  const msg = err instanceof Error ? err.message : String(err);
+  // A refused connection to the hub is the common new-user stumble - name
+  // the actual fix instead of relaying the socket error.
+  const code = (err as any)?.code ?? "";
+  if (msg.includes("Unable to connect") || code === "ECONNREFUSED" || code === "ConnectionRefused") {
+    console.error(`signalbox: the hub isn't running (${hubURL()})`);
+    console.error("open the Signalbox app (it runs the hub), or run: signalbox hub");
+    process.exit(1);
+  }
+  console.error(`signalbox: ${msg}`);
   process.exit(1);
 }
 
@@ -621,12 +649,14 @@ switch (cmd) {
     console.log(version);
     break;
   case "help":
+    process.stdout.write(usage());
+    break;
   case "-h":
   case "--help":
-    process.stdout.write(usage());
+    process.stdout.write(shortUsage());
     break;
   default:
     if (cmd) console.error(`signalbox: unknown command ${JSON.stringify(cmd)}\n`);
-    process.stderr.write(usage());
+    process.stderr.write(shortUsage());
     process.exit(2);
 }

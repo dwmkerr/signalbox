@@ -41,9 +41,10 @@ describe("install claude-hook detection", () => {
     expect(out).not.toContain("merge the JSON block");
   });
 
-  test("no hooks asks to merge", () => {
+  test("no hooks merges them in, with a backup", () => {
     const out = runInstall({}, ["--agent", "claude"]);
-    expect(out).toContain("merge the JSON block");
+    expect(out).toContain("\u2714 Claude Code");
+    expect(out).toContain("(backup: ");
   });
 });
 

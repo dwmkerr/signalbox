@@ -54,6 +54,7 @@ app: build
 	mkdir -p "$(CONTENTS)/MacOS" "$(CONTENTS)/Resources"
 	cp "$$(swift build -c release $(SWIFT_FLAGS) --show-bin-path)/$(APP)" "$(CONTENTS)/MacOS/$(APP)"
 	cp Info.plist "$(CONTENTS)/Info.plist"
+	cp Resources/AppIcon.icns "$(CONTENTS)/Resources/AppIcon.icns"
 	printf 'APPL????' > "$(CONTENTS)/PkgInfo"
 	@if [ -n "$(VERSION)" ]; then \
 		/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" "$(CONTENTS)/Info.plist"; \
