@@ -52,7 +52,7 @@ Or see running sessions in the menu bar:
 
 A (janky) video showing how to manage sessions with signalbox:
 
-https://github.com/user-attachments/assets/5ea8539f-a08e-47e0-af6f-637c9f014c87
+https://github.com/user-attachments/assets/2f45c187-e90a-4151-bc40-19ddfa48d89a
 
 ## Features
 
