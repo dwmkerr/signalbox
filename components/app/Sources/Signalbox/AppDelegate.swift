@@ -78,6 +78,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        // Newest instance wins: launching a rebuilt bundle (or the installed
+        // copy over a dev build) quits any older instance instead of running
+        // two menu bar icons that fight over hub ownership. The old app takes
+        // its hub child down on terminate; our supervisor respawns within its
+        // tick, and the board state survives in the event log.
+        let others = NSRunningApplication.runningApplications(
+            withBundleIdentifier: Bundle.main.bundleIdentifier ?? ""
+        ).filter { $0 != NSRunningApplication.current }
+        others.forEach { $0.terminate() }
+
         applyLaunchFilter()
 
         // Start the hub before the stream connects - the stream loop's
