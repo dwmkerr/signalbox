@@ -20,6 +20,14 @@ describe("grouped command dispatch", () => {
     expect(code).toBe(2);
   });
 
+  test("unknown hook agent warns but exits 0 - a hook must never block its host", () => {
+    // A config wired by a newer signalbox than the installed binary (e.g. a
+    // new agent adapter) must degrade to a warning, not a blocked agent turn.
+    const { out, code } = run(["hook", "nosuchagent"]);
+    expect(out).toContain("unknown subcommand");
+    expect(code).toBe(0);
+  });
+
   test("session rename with no key logs usage, exits 0 (hook-safe)", () => {
     // Hook-path commands always exit 0; with a dead hub it just spools/logs.
     const { code } = run(["session", "rename"]);

@@ -116,8 +116,10 @@ export function mergeHookCommand(
   for (const ev of events) {
     const groups = (hooks[ev] ??= []);
     if (!Array.isArray(groups)) continue;
+    // "Mentions signalbox" (not the exact command) matches the init scan's
+    // wired test, so a user's signalbox-calling dispatcher is never doubled.
     const present = groups.some((g: any) =>
-      (g?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes(command)),
+      (g?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes("signalbox")),
     );
     if (present) continue;
     groups.push({ matcher: "*", hooks: [{ type: "command", command }] });
@@ -175,7 +177,9 @@ export function mergeCursorHooks(
   for (const ev of events) {
     const arr = (hooks[ev] ??= []);
     if (!Array.isArray(arr)) continue;
-    if (arr.some((h: any) => typeof h?.command === "string" && h.command.includes(command))) continue;
+    // Same "mentions signalbox" wired test as the init scan - a dispatcher
+    // that calls signalbox is never doubled.
+    if (arr.some((h: any) => typeof h?.command === "string" && h.command.includes("signalbox"))) continue;
     arr.push({ command });
     changed.push(ev);
   }

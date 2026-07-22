@@ -209,36 +209,30 @@ class Setup {
     } catch (err) {
       return { status: statusNeeds, name, detail: `cannot read ${settingsPath}: ${err}` };
     }
-    // Every event calls signalbox directly - the canonical setup.
+    // Every event routes to signalbox (directly or via a command that
+    // mentions it) - the canonical setup.
     if (scan.ours.length === claudeHookEvents.length) {
       return { status: statusDone, name, detail: settingsPath };
     }
-    // Every event has *some* hook, but not the literal signalbox command:
-    // the user routes through a wrapper/dispatcher (e.g. a dotfiles script
-    // that calls signalbox). We cannot verify what a script does, and
-    // merging would double-fire every hook - so report it as
-    // present-but-unverified, never as missing, and never write.
-    if (scan.empty.length === 0) {
-      return {
-        status: statusDone,
-        name,
-        detail: `${settingsPath} (hooks present via a wrapper - ensure it calls 'signalbox hook claude')`,
-      };
-    }
+    // An event whose hooks never mention signalbox is missing, even when the
+    // user has their own hook there (a bell, a logger): hook arrays compose,
+    // so signalbox is appended alongside and cannot double-fire. Only a
+    // command that mentions signalbox counts as wired.
+    const missing = claudeHookEvents.filter((ev) => !scan.ours.includes(ev));
     if (!this.confirm(`merge the signalbox hooks into ${settingsPath} (backup taken)`)) {
       return {
         status: statusNeeds,
         name,
         detail: `merge the JSON block below into ${settingsPath}`,
-        after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${scan.empty.join(", ")}):\n${claudeHooksBlock}`,
+        after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${missing.join(", ")}):\n${claudeHooksBlock}`,
       };
     }
     try {
-      // Only the events with no hooks at all are touched (scan.empty) -
-      // anything the user routes elsewhere is left exactly as it was.
+      // Appends a signalbox entry to each missing event; the user's own
+      // entries are left exactly as they were.
       const backup = mergeJSONFile(settingsPath, (settings) => {
         settings.hooks ??= {};
-        for (const ev of scan.empty) {
+        for (const ev of missing) {
           settings.hooks[ev] ??= [];
           settings.hooks[ev].push({ hooks: [{ type: "command", command: "signalbox hook claude" }] });
         }
@@ -249,7 +243,7 @@ class Setup {
         status: statusNeeds,
         name,
         detail: `could not merge (${err}) - apply the block below by hand`,
-        after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${scan.empty.join(", ")}):\n${claudeHooksBlock}`,
+        after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${missing.join(", ")}):\n${claudeHooksBlock}`,
       };
     }
   }
@@ -268,29 +262,23 @@ class Setup {
     if (scan.ours.length === cursorHookEvents.length) {
       return { status: statusDone, name, detail: hooksPath };
     }
-    // Every event already routes somewhere but not through the literal
-    // signalbox command - assume a wrapper and report present-but-unverified,
-    // never missing (merging would double-fire the hooks).
-    if (scan.empty.length === 0) {
-      return {
-        status: statusDone,
-        name,
-        detail: `${hooksPath} (hooks present via a wrapper - ensure it calls 'signalbox hook cursor')`,
-      };
-    }
+    // Same append policy as Claude's hooks: an event is missing unless one of
+    // its commands mentions signalbox; unrelated hooks compose, so appending
+    // alongside them cannot double-fire.
+    const missing = cursorHookEvents.filter((ev) => !scan.ours.includes(ev));
     if (!this.confirm(`merge the signalbox hooks into ${hooksPath} (backup taken)`)) {
       return {
         status: statusNeeds,
         name,
         detail: `merge the JSON block below into ${hooksPath}`,
-        after: `Cursor hooks - merge this into ${hooksPath} (missing: ${scan.empty.join(", ")}):\n${cursorHooksBlock}`,
+        after: `Cursor hooks - merge this into ${hooksPath} (missing: ${missing.join(", ")}):\n${cursorHooksBlock}`,
       };
     }
     try {
       const backup = mergeJSONFile(hooksPath, (cfg) => {
         cfg.version ??= 1;
         cfg.hooks ??= {};
-        for (const ev of scan.empty) {
+        for (const ev of missing) {
           cfg.hooks[ev] ??= [];
           cfg.hooks[ev].push({ command: "signalbox hook cursor" });
         }
@@ -301,7 +289,7 @@ class Setup {
         status: statusNeeds,
         name,
         detail: `could not merge (${err}) - apply the block below by hand`,
-        after: `Cursor hooks - merge this into ${hooksPath} (missing: ${scan.empty.join(", ")}):\n${cursorHooksBlock}`,
+        after: `Cursor hooks - merge this into ${hooksPath} (missing: ${missing.join(", ")}):\n${cursorHooksBlock}`,
       };
     }
   }
@@ -348,21 +336,15 @@ class Setup {
     if (scan.ours.length === codexHookEvents.length) {
       return { status: statusDone, name, detail: hooksPath };
     }
-    // Every event routes somewhere but not through the literal signalbox command
-    // (a wrapper, e.g. koi) - report present-but-unverified, never missing, since
-    // printing the block would double-fire the hooks.
-    if (scan.empty.length === 0) {
-      return {
-        status: statusDone,
-        name,
-        detail: `${hooksPath} (hooks present via a wrapper - ensure it calls 'signalbox hook codex')`,
-      };
-    }
+    // Same append policy as Claude's hooks: an event is missing unless one of
+    // its commands mentions signalbox - a user's unrelated hook there does not
+    // count as wired, and entries compose so adding ours cannot double-fire.
+    const missing = codexHookEvents.filter((ev) => !scan.ours.includes(ev));
     return {
       status: statusNeeds,
       name,
       detail: `merge the JSON block below into ${hooksPath}`,
-      after: `Codex hooks - merge this into ${hooksPath} (needs [features] hooks = true in ~/.codex/config.toml; missing: ${scan.empty.join(", ")}):\n${codexHooksBlock}`,
+      after: `Codex hooks - merge this into ${hooksPath} (needs [features] hooks = true in ~/.codex/config.toml; missing: ${missing.join(", ")}):\n${codexHooksBlock}`,
     };
   }
 
@@ -587,16 +569,17 @@ function mergeJSONFile(path: string, mutate: (obj: any) => void): string | null 
 const claudeHookEvents = ["Notification", "Stop", "UserPromptSubmit", "SessionStart", "SessionEnd"];
 
 interface HookScan {
-  ours: string[]; // events whose hook calls signalbox directly
-  other: string[]; // events with some hook, but not the signalbox command
+  ours: string[]; // events with a command that mentions signalbox
+  other: string[]; // events with only unrelated hooks - still need signalbox
   empty: string[]; // events with no hook at all
 }
 
 // scanClaudeHooks classifies each hook event. Parsed leniently so user
 // settings with matchers still read fine. "ours" recognises both the literal
-// `signalbox claude-hook` and any command that mentions signalbox, so a
+// `signalbox hook claude` and any command that mentions signalbox, so a
 // dispatcher named e.g. signalbox-hook.sh still counts; a generic wrapper
-// (agent-notify.sh) lands in "other", which the caller treats as present.
+// (agent-notify.sh) lands in "other" and still gets signalbox appended
+// alongside - an unrelated hook is not evidence signalbox is wired.
 function scanClaudeHooks(settingsPath: string): HookScan {
   let settings: any = {};
   try {

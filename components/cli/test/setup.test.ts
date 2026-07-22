@@ -6,17 +6,17 @@ import { join } from "node:path";
 // scanClaudeHooks is not exported; exercise the observable behaviour instead
 // by driving runSetup with a fake HOME and capturing stdout. Lighter: just
 // assert the classification via a settings fixture through the public runSetup
-// output. We check the three cases: ours, wrapper (other), empty.
+// output. We check the three cases: ours, unrelated hook (other), empty.
 
-function runInstall(settings: object | null, args: string[]): string {
+function runInstall(settings: object | null, args: string[]): { out: string; home: string } {
   const home = mkdtempSync(join(tmpdir(), "sbhome-"));
   mkdirSync(join(home, ".claude"), { recursive: true });
   if (settings) writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(settings));
-  const out = Bun.spawnSync(
+  const p = Bun.spawnSync(
     [process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "install", "--yes", ...args],
     { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" }
   );
-  return out.stdout.toString() + out.stderr.toString();
+  return { out: p.stdout.toString() + p.stderr.toString(), home };
 }
 
 const hookBlock = (cmd: string) => ({
@@ -30,19 +30,32 @@ const hookBlock = (cmd: string) => ({
 
 describe("install claude-hook detection", () => {
   test("direct signalbox command reads as done", () => {
-    const out = runInstall(hookBlock("signalbox hook claude"), ["--agent", "claude"]);
+    const { out } = runInstall(hookBlock("signalbox hook claude"), ["--agent", "claude"]);
     expect(out).toContain("✔ Claude Code");
     expect(out).not.toContain("merge the JSON block");
   });
 
-  test("a wrapper script reads as present, never asks to merge", () => {
-    const out = runInstall(hookBlock("~/.claude/hooks/agent-notify.sh"), ["--agent", "claude"]);
-    expect(out).toContain("hooks present via a wrapper");
+  test("a command mentioning signalbox counts as wired - never doubled", () => {
+    const { out, home } = runInstall(hookBlock("~/.claude/hooks/signalbox-dispatch.sh"), ["--agent", "claude"]);
     expect(out).not.toContain("merge the JSON block");
+    const settings = JSON.parse(require("node:fs").readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+    const cmds = settings.hooks.Stop.flatMap((e: any) => e.hooks.map((h: any) => h.command));
+    expect(cmds).toEqual(["~/.claude/hooks/signalbox-dispatch.sh"]);
+  });
+
+  test("an unrelated hook gets signalbox appended alongside, untouched", () => {
+    const { out, home } = runInstall(hookBlock("~/.claude/hooks/agent-notify.sh"), ["--agent", "claude"]);
+    expect(out).toContain("✔ Claude Code");
+    expect(out).toContain("(backup: ");
+    const settings = JSON.parse(require("node:fs").readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+    for (const ev of ["Notification", "Stop", "UserPromptSubmit", "SessionStart", "SessionEnd"]) {
+      const cmds = settings.hooks[ev].flatMap((e: any) => e.hooks.map((h: any) => h.command));
+      expect(cmds).toEqual(["~/.claude/hooks/agent-notify.sh", "signalbox hook claude"]);
+    }
   });
 
   test("no hooks merges them in, with a backup", () => {
-    const out = runInstall({}, ["--agent", "claude"]);
+    const { out } = runInstall({}, ["--agent", "claude"]);
     expect(out).toContain("\u2714 Claude Code");
     expect(out).toContain("(backup: ");
   });
@@ -50,20 +63,20 @@ describe("install claude-hook detection", () => {
 
 describe("install scope flags", () => {
   test("--agent claude runs only the agents group", () => {
-    const out = runInstall(hookBlock("signalbox hook claude"), ["--agent", "claude"]);
+    const { out } = runInstall(hookBlock("signalbox hook claude"), ["--agent", "claude"]);
     expect(out).toContain("Claude Code");
     expect(out).not.toContain("tmux integration");
     expect(out).not.toContain("Menu bar app");
   });
 
   test("--app runs only the app group", () => {
-    const out = runInstall(null, ["--app"]);
+    const { out } = runInstall(null, ["--app"]);
     expect(out).toContain("Menu bar app");
     expect(out).not.toContain("Claude Code");
   });
 
   test("unknown agent errors", () => {
-    const out = runInstall(null, ["--agent", "nosuchagent"]);
+    const { out } = runInstall(null, ["--agent", "nosuchagent"]);
     expect(out).toContain("unknown agent");
   });
 });
