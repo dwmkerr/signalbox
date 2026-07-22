@@ -22,6 +22,11 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { renderStatus, runPicker, type Component } from "./initui";
+import {
+  writeManagedBlock, removeManagedBlock, previewManagedBlock,
+  mergeHookCommand, removeHookCommand, mergeCursorHooks, removeCursorHooks,
+  detectCodexHooksOwner, recordManaged, forgetManaged,
+} from "./managed";
 
 const statusDone = "✓"; // already in place, nothing touched
 const statusInstalled = "installed"; // applied this run
@@ -51,6 +56,20 @@ const cursorHooksBlock = `{
     "subagentStop": [{ "command": "signalbox hook cursor" }],
     "beforeShellExecution": [{ "command": "signalbox hook cursor" }],
     "beforeMCPExecution": [{ "command": "signalbox hook cursor" }]
+  }
+}`;
+
+// The ~/.codex/hooks.json block (Codex hooks; needs `[features] hooks = true`
+// in ~/.codex/config.toml). Printed for the user to merge, never edited - it is
+// their config and may already hold hooks (e.g. koi's). Same shape as Claude's
+// settings.json hooks; Codex records a trust hash on first run.
+const codexHooksBlock = `{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }]
   }
 }`;
 
@@ -315,6 +334,49 @@ class Setup {
     }
   }
 
+  // Codex's hooks.json is the user's file (like Claude's settings.json and
+  // Cursor's hooks.json): the block is printed, never merged.
+  stepCodexHooks(): StepResult {
+    const name = "Codex hooks";
+    const hooksPath = join(this.home, ".codex", "hooks.json");
+    let scan: HookScan;
+    try {
+      scan = scanCodexHooks(hooksPath);
+    } catch (err) {
+      return { status: statusNeeds, name, detail: `cannot read ${hooksPath}: ${err}` };
+    }
+    if (scan.ours.length === codexHookEvents.length) {
+      return { status: statusDone, name, detail: hooksPath };
+    }
+    // Every event routes somewhere but not through the literal signalbox command
+    // (a wrapper, e.g. koi) - report present-but-unverified, never missing, since
+    // printing the block would double-fire the hooks.
+    if (scan.empty.length === 0) {
+      return {
+        status: statusDone,
+        name,
+        detail: `${hooksPath} (hooks present via a wrapper - ensure it calls 'signalbox hook codex')`,
+      };
+    }
+    return {
+      status: statusNeeds,
+      name,
+      detail: `merge the JSON block below into ${hooksPath}`,
+      after: `Codex hooks - merge this into ${hooksPath} (needs [features] hooks = true in ~/.codex/config.toml; missing: ${scan.empty.join(", ")}):\n${codexHooksBlock}`,
+    };
+  }
+
+  unstepCodexHooks(): StepResult {
+    const name = "Codex hooks";
+    const hooksPath = join(this.home, ".codex", "hooks.json");
+    return {
+      status: statusNeeds,
+      name,
+      detail: `remove the signalbox hooks from ${hooksPath}`,
+      after: `Codex hooks - remove every hook whose command is "signalbox hook codex" from ${hooksPath}.`,
+    };
+  }
+
   // tmux config is the user's file: the snippet is printed, not merged.
   // Detection is broad on purpose - a live server counts (the option may have
   // been set with set-option, not written to a file), and both the classic
@@ -558,6 +620,34 @@ function scanClaudeHooks(settingsPath: string): HookScan {
   return scan;
 }
 
+const codexHookEvents = ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "SessionEnd"];
+
+// Codex's ~/.codex/hooks.json has the same shape as Claude's settings.json hooks
+// (`{ hooks: { <Event>: [{ hooks: [{ command }] }] } }`), so the same lenient
+// classification applies: "ours" matches any command mentioning signalbox.
+function scanCodexHooks(hooksPath: string): HookScan {
+  let cfg: any = {};
+  try {
+    cfg = JSON.parse(readFileSync(hooksPath, "utf8"));
+  } catch (err: any) {
+    if (err?.code === "ENOENT") return { ours: [], other: [], empty: [...codexHookEvents] };
+    throw err;
+  }
+  const scan: HookScan = { ours: [], other: [], empty: [] };
+  for (const evName of codexHookEvents) {
+    const entries = cfg?.hooks?.[evName];
+    const commands: string[] = Array.isArray(entries)
+      ? entries.flatMap((e: any) => (e?.hooks ?? []).map((h: any) => h?.command)).filter(
+          (c: unknown): c is string => typeof c === "string"
+        )
+      : [];
+    if (commands.some((c) => c.includes("signalbox"))) scan.ours.push(evName);
+    else if (commands.length > 0) scan.other.push(evName);
+    else scan.empty.push(evName);
+  }
+  return scan;
+}
+
 const cursorHookEvents = ["sessionStart", "stop", "subagentStop", "beforeShellExecution", "beforeMCPExecution"];
 
 interface CursorHookScan {
@@ -590,7 +680,7 @@ function scanCursorHooks(hooksPath: string): CursorHookScan {
   return scan;
 }
 
-const knownAgents = ["claude", "cursor", "opencode", "pi"];
+const knownAgents = ["claude", "cursor", "codex", "opencode", "pi"];
 
 // One entry per thing init sets up: a category and label for display, an id
 // that matches its scope flag, a one-line description for the details view,
@@ -629,6 +719,10 @@ function compDefs(s: Setup): CompDef[] {
       info: "Fires events as Cursor's own agent works - asks, finishes, errors - so its sessions show and update on your board. Uses Cursor 1.7 Hooks (beta).",
       done: "Cursor hooks active", miss: "hooks not set up, Cursor events won't fire",
       step: (x) => x.stepCursorHooks(), unstep: (x) => x.unstepCursorHooks() },
+    { id: "codex", flag: "--agent codex", category: "Integrations", label: "Codex",
+      info: "Fires events as Codex works - asks, finishes, needs approval - so its sessions show and update on your board. Uses Codex hooks (config `[features] hooks = true`).",
+      done: "Codex hooks active", miss: "hooks not set up, Codex events won't fire",
+      step: (x) => x.stepCodexHooks(), unstep: (x) => x.unstepCodexHooks() },
     { id: "vscode", flag: "", category: "Integrations", label: "VS Code (testing)",
       info: "Jump-back to agents running in VS Code's integrated terminal - automatic, no setup (detected via TERM_PROGRAM). VS Code's own agent is not wired (no hook API yet).",
       done: "VS Code jump-back (automatic)", miss: "",
@@ -703,6 +797,92 @@ function removeByIds(ids: string[]): { lines: string[]; afters: string[] } {
   return { lines, afters };
 }
 
+// Components whose setup lives in a config file signalbox can write directly
+// (behind consent), rather than a symlink it owns or a print-only step.
+const userConfigIds = new Set(["tmux", "claude", "cursor", "codex"]);
+
+// writeUserConfigFor writes signalbox's edit into a user-owned config file it
+// fully understands (behind --write-user-config / consent), backing it up and
+// recording it in the manifest so it stays idempotent and reversible. Returns
+// null for components with no writable user config (symlink-owned, or print-only
+// like a koi-managed Codex hooks.json), which fall back to the normal step.
+function writeUserConfigFor(
+  id: string, home: string, dryRun: boolean,
+): { label: string; result: string; wrote: boolean } | null {
+  const done = (label: string, result: string, wrote: boolean) => ({ label, result, wrote });
+  switch (id) {
+    case "tmux": {
+      const f = join(home, ".tmux.conf");
+      if (dryRun) return done("tmux", previewManagedBlock(f, tmuxSnippet), false);
+      const r = writeManagedBlock(f, tmuxSnippet);
+      if (r.changed) recordManaged({ file: f, kind: "text", backup: r.backup });
+      return done("tmux", r.changed ? `wrote ${f}${r.backup ? `  (backup: ${r.backup})` : ""}` : `already current (${f})`, true);
+    }
+    case "codex": {
+      const owner = detectCodexHooksOwner(join(home, ".codex", "config.toml"));
+      // A koi-managed hooks.json is print-by-default: a blind rewrite breaks the
+      // Codex trust hash. Fall back to the normal (print) step.
+      if (owner) return null;
+      return writeHooksJson(id, join(home, ".codex", "hooks.json"), "Codex", codexHookEvents, "signalbox hook codex", dryRun);
+    }
+    case "claude":
+      return writeHooksJson(id, join(home, ".claude", "settings.json"), "Claude Code", claudeHookEvents, "signalbox hook claude", dryRun);
+    case "cursor": {
+      const f = join(home, ".cursor", "hooks.json");
+      const cmd = "signalbox hook cursor";
+      const m = mergeCursorHooks(f, cursorHookEvents, cmd);
+      if (dryRun) return done("Cursor", m.changed.length ? `add signalbox to ${m.changed.join(", ")} in ${f}` : `already present (${f})`, false);
+      if (!m.changed.length) return done("Cursor", `already present (${f})`, true);
+      const { backup } = m.write();
+      recordManaged({ file: f, kind: "json", command: cmd, managedEvents: cursorHookEvents, backup });
+      return done("Cursor", `wrote ${f}${backup ? `  (backup: ${backup})` : ""}`, true);
+    }
+    default:
+      // opencode/pi (symlink), app/vscode: no user-config write - the normal
+      // step handles them.
+      return null;
+  }
+}
+
+function writeHooksJson(
+  id: string, file: string, label: string, events: string[], command: string, dryRun: boolean,
+): { label: string; result: string; wrote: boolean } {
+  const m = mergeHookCommand(file, events, command);
+  if (dryRun) {
+    return { label, result: m.changed.length ? `add signalbox to ${m.changed.join(", ")} in ${file}` : `already present (${file})`, wrote: false };
+  }
+  if (!m.changed.length) return { label, result: `already present (${file})`, wrote: true };
+  const { backup } = m.write();
+  recordManaged({ file, kind: "json", command, managedEvents: events, backup });
+  return { label, result: `wrote ${file}${backup ? `  (backup: ${backup})` : ""}`, wrote: true };
+}
+
+// reverseUserConfigFor removes only signalbox's own edit from a user file.
+function reverseUserConfigFor(id: string, home: string): string | null {
+  const strip = (file: string, cmd: string) => {
+    const r = removeHookCommand(file, cmd);
+    if (r.changed) forgetManaged(file);
+    return r.changed ? `removed signalbox hooks from ${file}${r.backup ? `  (backup: ${r.backup})` : ""}` : null;
+  };
+  switch (id) {
+    case "tmux": {
+      const f = join(home, ".tmux.conf");
+      const r = removeManagedBlock(f);
+      if (r.changed) forgetManaged(f);
+      return r.changed ? `removed signalbox block from ${f}${r.backup ? `  (backup: ${r.backup})` : ""}` : null;
+    }
+    case "codex": return strip(join(home, ".codex", "hooks.json"), "signalbox hook codex");
+    case "claude": return strip(join(home, ".claude", "settings.json"), "signalbox hook claude");
+    case "cursor": {
+      const f = join(home, ".cursor", "hooks.json");
+      const r = removeCursorHooks(f, "signalbox hook cursor");
+      if (r.changed) forgetManaged(f);
+      return r.changed ? `removed signalbox hooks from ${f}${r.backup ? `  (backup: ${r.backup})` : ""}` : null;
+    }
+    default: return null;
+  }
+}
+
 export async function runSetup(args: string[]): Promise<void> {
   const yes = args.includes("--yes") || args.includes("-y");
   const verbose = args.includes("-v") || args.includes("--verbose");
@@ -726,15 +906,62 @@ export async function runSetup(args: string[]): Promise<void> {
 
   const defs = compDefs(new Setup(false, true));
 
-  // Scoped run: act on exactly the named components. `--remove` turns them
-  // off (init is the way both in and out); otherwise it sets them up.
+  // Scoped run: act on exactly the named components. `--remove`/`--reverse` turn
+  // them off; `--write-user-config` writes the user's config directly (with a
+  // backup + manifest) instead of printing a block; `--dry-run` previews it.
   if (scoped) {
-    const remove = args.includes("--remove");
+    const remove = args.includes("--remove") || args.includes("--reverse");
+    const write = args.includes("--write-user-config");
+    const dryRun = args.includes("--dry-run");
+    const home = homedir();
     const ids: string[] = [];
     if (wantApp) ids.push("app");
     if (wantTmux) ids.push("tmux");
     for (const a of agents) ids.push(a);
-    const { lines, afters } = remove ? removeByIds(ids) : applyByIds(ids);
+
+    if (remove) {
+      // A user-config component's edit is reversed directly (its own step only
+      // prints removal instructions, which would be stale here). Everything else
+      // goes through the normal symlink/step undo.
+      const rest: string[] = [];
+      for (const id of ids) {
+        if (userConfigIds.has(id)) {
+          const rev = reverseUserConfigFor(id, home);
+          console.log(rev ? `✓ ${rev}` : `✓ ${id} - no signalbox edit to remove`);
+        } else {
+          rest.push(id);
+        }
+      }
+      const { lines, afters } = removeByIds(rest);
+      for (const l of lines) console.log(l);
+      for (const a of afters) console.log(`\n${a}`);
+      return;
+    }
+
+    if (write || dryRun) {
+      // A safe write for files signalbox understands and no other tool manages;
+      // anything else falls back to the printed block, and the summary counts it
+      // honestly as "needs a manual step" - never a blanket "done".
+      let configured = 0, manual = 0;
+      for (const id of ids) {
+        const wr = writeUserConfigFor(id, home, dryRun);
+        if (wr) {
+          console.log(`${dryRun ? "" : "✔ "}${wr.label}: ${wr.result}`);
+          configured++;
+          continue;
+        }
+        const { lines, afters } = applyByIds([id]);
+        for (const l of lines) console.log(l);
+        for (const a of afters) console.log(`\n${a}`);
+        if (afters.length) manual++; else configured++;
+      }
+      const bits = [`${configured} configured`];
+      if (manual) bits.push(`${manual} need a manual step`);
+      console.log(`\n${dryRun ? "(dry run) " : ""}${bits.join(" · ")}`);
+      return;
+    }
+
+    const { lines, afters } = applyByIds(ids);
     for (const l of lines) console.log(l);
     for (const a of afters) console.log(`\n${a}`);
     return;
@@ -758,14 +985,55 @@ export async function runSetup(args: string[]): Promise<void> {
     return;
   }
 
-  // Interactive: the picker. It hands back what to install and what to remove.
+  // Interactive: the picker. Toggling a component on and pressing apply IS the
+  // consent to edit that file, so here init WRITES a user config it understands
+  // (naming the file + backup in the output), prints for anything a another tool
+  // manages, and reconciles honestly at the end - never a blanket "Done".
+  const home = homedir();
   await runPicker(components, async (changes) => {
-    const add = applyByIds(changes.install.map((c) => c.id));
-    const drop = removeByIds(changes.remove.map((c) => c.id));
-    const lines = [...add.lines, ...drop.lines];
-    // Snippets (tmux/claude add or remove instructions) print under the list.
-    const afters = [...add.afters, ...drop.afters];
-    if (afters.length) lines.push("", ...afters);
-    return lines;
+    const out: string[] = [];
+    const afters: string[] = [];
+    let configured = 0, manual = 0, removed = 0;
+
+    for (const c of changes.install) {
+      const wr = writeUserConfigFor(c.id, home, false);
+      if (wr) {
+        out.push(`✔ ${wr.label}  ${wr.result}`);
+        configured++;
+        continue;
+      }
+      // Symlink-owned (opencode/pi/app) or print-only (koi-managed codex): use
+      // the normal step. A step that returns a snippet needs a manual paste.
+      const r = applyByIds([c.id]);
+      if (r.afters.length) {
+        out.push(`⚠ ${c.label} - needs a manual step (below)`);
+        afters.push(...r.afters);
+        manual++;
+      } else {
+        out.push(...r.lines.map((l) => l.replace(/^○/, "✔")));
+        configured++;
+      }
+    }
+
+    for (const c of changes.remove) {
+      if (userConfigIds.has(c.id)) {
+        const rev = reverseUserConfigFor(c.id, home);
+        out.push(rev ? `✓ ${rev}` : `✓ ${c.label} - no signalbox edit to remove`);
+      } else {
+        const r = removeByIds([c.id]);
+        out.push(...r.lines);
+        afters.push(...r.afters);
+      }
+      removed++;
+    }
+
+    if (afters.length) out.push("", ...afters);
+    const bits: string[] = [];
+    if (configured) bits.push(`${configured} configured`);
+    if (manual) bits.push(`${manual} need a manual step`);
+    if (removed) bits.push(`${removed} removed`);
+    out.push("", bits.length ? bits.join(" · ") : "no changes");
+    if (manual) out.push("Run signalbox init --status to see what is left.");
+    return out;
   });
 }

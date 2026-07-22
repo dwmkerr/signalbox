@@ -117,6 +117,143 @@ describe("lifecycle", () => {
   });
 });
 
+describe("show", () => {
+  test("returns a hidden row to its place, not the top, without acking", () => {
+    const s = new Store();
+    s.apply(mk("a", ev.Busy, t(0), 1));
+    s.apply(mk("b", ev.Done, t(1), 2));
+    s.apply(mk("c", ev.Busy, t(2), 3));
+    expect(keys(s)).toEqual(["c", "b", "a"]);
+    const hide = ev.newHide("b");
+    hide.ts = t(3);
+    s.apply(hide);
+    expect(s.list().find((e) => e.session_key === "b")?.hidden).toBe(true);
+    // A show much later must not float b to the top or bump its engagement.
+    const show = ev.newShow("b");
+    show.ts = t(9);
+    s.apply(show);
+    expect(keys(s)).toEqual(["c", "b", "a"]);
+    const row = s.list().find((e) => e.session_key === "b")!;
+    expect(row.hidden).toBeUndefined();
+    expect(row.acked).toBeUndefined();
+    expect(row.engaged_ts).toBe(t(1));
+  });
+
+  test("show on a non-hidden row is a no-op (idempotent)", () => {
+    const s = new Store();
+    s.apply(mk("a", ev.Done, t(0), 1));
+    s.apply(ev.newShow("a"));
+    const row = s.list()[0];
+    expect(row.hidden).toBeUndefined();
+    expect(row.acked).toBeUndefined();
+  });
+
+  test("show/pin/unpin on unknown sessions are no-ops", () => {
+    const s = new Store();
+    s.apply(ev.newShow("ghost"));
+    s.apply(ev.newPin("ghost"));
+    s.apply(ev.newUnpin("ghost"));
+    expect(s.list().length).toBe(0);
+  });
+});
+
+describe("pin", () => {
+  test("pin floats a row above a more-recently-engaged unpinned row", () => {
+    const s = new Store();
+    s.apply(mk("a", ev.Busy, t(0), 1)); // engaged t0
+    s.apply(mk("b", ev.Busy, t(5), 2)); // engaged t5, currently on top
+    expect(keys(s)).toEqual(["b", "a"]);
+    s.apply(ev.newPin("a"));
+    // Pinned partition sorts first even though b engaged more recently.
+    expect(keys(s)).toEqual(["a", "b"]);
+    const row = s.list()[0];
+    expect(row.pinned).toBe(true);
+    // Pin neither acks nor bumps engagement.
+    expect(row.acked).toBeUndefined();
+    expect(row.engaged_ts).toBe(t(0));
+  });
+
+  test("engagement-MRU still orders within the pinned partition", () => {
+    const s = new Store();
+    s.apply(mk("a", ev.Busy, t(0), 1));
+    s.apply(mk("b", ev.Busy, t(1), 2));
+    s.apply(mk("c", ev.Busy, t(2), 3));
+    s.apply(ev.newPin("a"));
+    s.apply(ev.newPin("b"));
+    // a and b pinned (b engaged after a), c the only unpinned row.
+    expect(keys(s)).toEqual(["b", "a", "c"]);
+  });
+
+  test("unpin restores engagement order; pin and unpin are idempotent", () => {
+    const s = new Store();
+    s.apply(mk("a", ev.Busy, t(0), 1));
+    s.apply(mk("b", ev.Busy, t(5), 2));
+    s.apply(ev.newPin("a"));
+    s.apply(ev.newPin("a")); // idempotent
+    expect(keys(s)).toEqual(["a", "b"]);
+    s.apply(ev.newUnpin("a"));
+    s.apply(ev.newUnpin("a")); // idempotent
+    expect(keys(s)).toEqual(["b", "a"]);
+    expect(s.list().find((e) => e.session_key === "a")?.pinned).toBeUndefined();
+  });
+
+  test("a pin survives agent events, unlike acked/hidden", () => {
+    const s = new Store();
+    s.apply(mk("a", ev.Busy, t(0), 1));
+    s.apply(ev.newPin("a"));
+    s.apply(mk("a", ev.Done, t(1), 2)); // new activity
+    expect(s.list()[0].pinned).toBe(true);
+    // And persists across a rebuild-from-log: replaying the same event
+    // sequence through a fresh reducer reconstructs the pin.
+    const replay = new Store();
+    replay.apply(mk("a", ev.Busy, t(0), 1));
+    replay.apply(ev.newPin("a"));
+    replay.apply(mk("a", ev.Done, t(1), 2));
+    expect(replay.list()[0].pinned).toBe(true);
+  });
+
+  test("hide drops a pin, then applies its normal rule", () => {
+    // Pinned + not busy: hide unpins and hides.
+    const s = new Store();
+    s.apply(mk("a", ev.Done, t(0), 1));
+    s.apply(ev.newPin("a"));
+    const hide = ev.newHide("a");
+    hide.ts = t(1);
+    s.apply(hide);
+    let row = s.list()[0];
+    expect(row.pinned).toBeUndefined();
+    expect(row.hidden).toBe(true);
+
+    // Pinned + busy: hide unpins and downgrades to seen (stays visible).
+    const s2 = new Store();
+    s2.apply(mk("b", ev.Busy, t(0), 1));
+    s2.apply(ev.newPin("b"));
+    const hide2 = ev.newHide("b");
+    hide2.ts = t(2);
+    s2.apply(hide2);
+    row = s2.list()[0];
+    expect(row.pinned).toBeUndefined();
+    expect(row.hidden).toBeUndefined();
+    expect(row.acked).toBe(true);
+  });
+
+  test("ended removes a pinned session; a pin does not resurrect it", () => {
+    const s = new Store();
+    s.apply(mk("a", ev.Busy, t(0), 1));
+    s.apply(ev.newPin("a"));
+    s.apply(mk("a", ev.Ended, t(1), 2));
+    expect(s.list().length).toBe(0);
+  });
+
+  test("an agent event cannot smuggle pinned onto a new session", () => {
+    const s = new Store();
+    const e = mk("a", ev.Busy, t(0), 1);
+    e.pinned = true;
+    s.apply(e);
+    expect(s.list()[0].pinned).toBeUndefined();
+  });
+});
+
 describe("carry", () => {
   test("detail, reply, origin and proc carry across omitting events", () => {
     const s = new Store();

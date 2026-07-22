@@ -23,7 +23,7 @@
 
 ## Quickstart
 
-Install and then run `signalbox init` - your coding agents across Cursor, Claude Code, OpenCode, pi and more will now report their progress to a local hub while you work.
+Install and then run `signalbox init` - your coding agents across Cursor, Claude Code, Codex, OpenCode, pi and more will now report their progress to a local hub while you work.
 
 ```sh
 # Install Signalbox: the menu bar app (it runs the hub) and the CLI.
@@ -48,6 +48,22 @@ Or see running sessions in the menu bar:
   <img width="480" src="docs/images/menubar.png" alt="The signalbox menu bar dropdown: a status dot on the icon, one row per session with its agent glyph and age">
 </p>
 
+## On your phone
+
+Pair with a QR code and use the mobile app to see your sessions on your phone.
+
+<p align="center">
+  <img width="860" src="docs/images/ios-pairing.svg" alt="Pairing signalbox: the Connect Phone window on the Mac shows a QR code, and next to it the iOS app shows the board - one card per agent session with its status, glyph and latest exchange">
+</p>
+
+While the Apple App Store review is ongoing, you can build the app locally to test it - see the [Developer Guide](#developer-guide) below.
+
+<!-- TODO(dave): next pass -
+  - [ ] Verify the interactive `signalbox init` end to end (config-editing + honest states).
+  - [ ] Codex: promote from "still in testing" to Stable in docs/integrations.md once bedded in.
+  - [ ] Hero/landing animation: add a mobile visual when there's a good frame for it.
+-->
+
 ## Video Demo
 
 A (janky) video showing how to manage sessions with signalbox:
@@ -59,7 +75,7 @@ https://github.com/user-attachments/assets/2f45c187-e90a-4151-bc40-19ddfa48d89a
 - A single command to install, uninstall or configure coding agent integrations: `signalbox init`
 - `⌃⌥J` opens the jumplist: see sessions and their status, jump to sessions, search sessions, rename sessions, hide sessions
 - Menu bar session list for quick access
-- [Integrations](docs/integrations.md) for Cursor, Claude Code, OpenCode, pi and VS Code
+- [Integrations](docs/integrations.md) for Cursor, Claude Code, Codex, OpenCode, pi and VS Code
 - A native [tmux jump list](docs/tmux.md) (`<Leader>J`)
 - Events can be sent via the `signalbox fire` command allowing you to build your own integrations or workflows
 - Easily develop by iterating on the [specs](components/specs/) then letting your coding agent update them
@@ -78,6 +94,16 @@ make app           # builds the menu bar app (embeds the CLI; the app runs the h
 open components/app/build/Signalbox.app
 signalbox init
 ```
+
+Build and run the iOS app (in testing while App Store review is ongoing):
+
+```bash
+open components/ios/Signalbox.xcodeproj
+# pick a simulator or your iPhone in Xcode and press Run
+# (a device build needs your signing team under Signing & Capabilities)
+```
+
+On the simulator the app connects to your Mac's hub automatically. On a real device, pair with a QR code: run `signalbox pair` (or choose "Connect Phone" in the menu bar app) and scan it from Settings > Scan to Connect. The full guide - command-line builds, device signing, dev hooks - is [Building the mobile app](docs/mobile.md); the UI spec is [ios.html](components/specs/ios.html).
 
 Check with your coding agent on how to work with the menubar / app.
 

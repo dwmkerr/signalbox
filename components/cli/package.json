@@ -8,6 +8,9 @@
     "test": "bun test",
     "build": "BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify src/main.ts --outfile bin/signalbox && codesign --force --sign - bin/signalbox"
   },
+  "dependencies": {
+    "qrcode": "1.5.4"
+  },
   "devDependencies": {
     "bun-types": "^1.3.14",
     "typescript": "^6.0.3"

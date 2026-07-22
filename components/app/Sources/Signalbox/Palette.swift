@@ -30,6 +30,17 @@ struct PaletteRow {
     let engagedDate: Date
     // Discreet session tags; matched by `#tag` search, never rendered.
     let tags: [String]
+    // User-pinned: draws a quiet pin mark. Order is the hub's (pinned-first);
+    // this flag never sorts locally.
+    let pinned: Bool
+    // A hidden session: drawn dimmed under the Hidden divider, and inert (not
+    // selectable, not reachable by keys). It resurfaces when the agent speaks
+    // again, or on a click that fires `show`.
+    var isHidden = false
+    // The "Hidden (N)" divider row itself. Not a session; carries the count and
+    // toggles the section open on click.
+    var isDivider = false
+    var hiddenCount = 0
 }
 
 // Mark tints per the amber scheme: amber = needs your input (act), blue =
@@ -76,6 +87,7 @@ enum Theme {
     static let accent = NSColor(hex: 0x0A84FF)
     static let green = NSColor(hex: 0x32D74B)
     static let rust = NSColor(hex: 0xD97757) // claude sunburst
+    static let vscode = NSColor(hex: 0x007ACC) // VS Code blue (host mark)
     static let amber = NSColor(hex: 0xE8B339) // Working… line
     // The scheme's "act" temperature (design/amber-scheme.svg) - hotter than
     // the Working… amber so an ask reads distinctly from ambient work.
@@ -427,13 +439,19 @@ final class AgentGlyphView: NSView {
     // and the menu bar list (rendered to an image below). The context is
     // top-left origin (flipped) in both, so the fixed coordinates line up.
     static func drawGlyph(_ agent: String) {
-        // Cursor: "cursor" is Cursor's own agent (the mark alone); "cursor/<sub>"
-        // is an agent hosted in Cursor's terminal (e.g. cursor/claude) - the
-        // Cursor mark with the sub-agent badged bottom-right.
+        // Editor-hosted agents carry a "<host>/<sub>" display name (e.g.
+        // cursor/claude, vscode/claude): the editor's mark with the sub-agent
+        // badged bottom-right. The bare host name draws the mark alone.
         if agent == "cursor" { drawCursor(); return }
         if agent.hasPrefix("cursor/") {
             drawCursor()
             drawBadge(String(agent.dropFirst("cursor/".count)))
+            return
+        }
+        if agent == "vscode" { drawVSCode(); return }
+        if agent.hasPrefix("vscode/") {
+            drawVSCode()
+            drawBadge(String(agent.dropFirst("vscode/".count)))
             return
         }
         switch agent {
@@ -441,6 +459,7 @@ final class AgentGlyphView: NSView {
         case "opencode": drawOpencode()
         case "github": drawGithub()
         case "pi": drawPi()
+        case "codex": drawCodex()
         default: drawGeneric()
         }
     }
@@ -495,6 +514,23 @@ final class AgentGlyphView: NSView {
         cursor.line(to: CGPoint(x: 15.5, y: 13))
         Theme.textMid.setStroke()
         cursor.stroke()
+    }
+
+    private static func drawCodex() {
+        // A hexagon in OpenAI green - a simple stand-in for Codex's mark.
+        let center = CGPoint(x: 11, y: 10)
+        let radius: CGFloat = 8
+        let path = NSBezierPath()
+        for i in 0..<6 {
+            let angle = CGFloat(i) * .pi / 3
+            let point = CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
+            if i == 0 { path.move(to: point) } else { path.line(to: point) }
+        }
+        path.close()
+        path.lineWidth = 1.7
+        path.lineJoinStyle = .round
+        NSColor(hex: 0x10A37F).setStroke()
+        path.stroke()
     }
 
     private static func drawGithub() {
@@ -557,8 +593,34 @@ final class AgentGlyphView: NSView {
         y.stroke()
     }
 
-    // A sub-agent glyph badged into the bottom-right corner over the Cursor
-    // mark - for an agent hosted in Cursor's terminal (cursor/claude etc).
+    // VS Code's folded-ribbon mark, hand-drawn (not the shipped asset, per the
+    // task): a spine on the right with two flaps folding to a point at the
+    // left, filled in VS Code blue. Recognizably VS Code without embedding
+    // Microsoft's logo - the counterpart to drawCursor for vscode/<sub>.
+    private static func drawVSCode() {
+        let ribbon = NSBezierPath()
+        let points: [CGPoint] = [
+            CGPoint(x: 16.5, y: 2.5),   // spine top
+            CGPoint(x: 16.5, y: 17.5),  // spine bottom
+            CGPoint(x: 9.5, y: 12.3),   // lower inner fold
+            CGPoint(x: 5.3, y: 15.2),   // lower flap, outer corner
+            CGPoint(x: 3.6, y: 13.9),   // lower flap, tip
+            CGPoint(x: 10.6, y: 10.0),  // centre fold
+            CGPoint(x: 3.6, y: 6.1),    // upper flap, tip
+            CGPoint(x: 5.3, y: 4.8),    // upper flap, outer corner
+            CGPoint(x: 9.5, y: 7.7),    // upper inner fold
+        ]
+        ribbon.move(to: points[0])
+        for p in points.dropFirst() { ribbon.line(to: p) }
+        ribbon.close()
+        ribbon.lineJoinStyle = .round
+        Theme.vscode.setFill()
+        ribbon.fill()
+    }
+
+    // A sub-agent glyph badged into the bottom-right corner over the host mark
+    // (Cursor or VS Code) - for an agent hosted in that editor's terminal
+    // (cursor/claude, vscode/claude etc).
     private static func drawBadge(_ sub: String) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         // Punch a clear halo so the badge reads as a separate mark, not part of
@@ -645,19 +707,43 @@ final class PalettePanel: NSPanel {
     }
 }
 
+// The session list. Right-clicking a row builds a context menu for that row,
+// the mouse-discoverable form of the keyboard row actions (pin/rename/hide/
+// remove). Keys still belong to the panel (refusesFirstResponder), so this
+// only adds the menu.
+final class PaletteTableView: NSTableView {
+    var onContextMenu: ((Int) -> NSMenu?)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        let clicked = row(at: point)
+        guard clicked >= 0 else { return nil }
+        return onContextMenu?(clicked)
+    }
+}
+
 @MainActor
 final class PaletteController: NSObject {
     private let rowsProvider: @MainActor () -> [PaletteRow]
     private let onJump: @MainActor (String) -> Void
     private let onHide: @MainActor (String) -> Void
+    // Unhide a session (fires `show`), used by a click on a hidden row.
+    private let onShow: @MainActor (String) -> Void
     private let onRemove: @MainActor (String) -> Void
     private let onLabel: @MainActor (String, String) -> Void
+    // Desired pinned state (true = pin, false = unpin) for the given session.
+    private let onPin: @MainActor (String, Bool) -> Void
     private let onSettings: @MainActor () -> Void
 
     // All rows from the provider, and the slice that survives the search
     // filter - every selection/cycle operation works on the filtered view.
     private var allRows: [PaletteRow] = []
     private var rows: [PaletteRow] = []
+    // Leading count of selectable rows in `rows` - the visible sessions sit at
+    // the front, then the Hidden divider and any hidden rows, which are inert.
+    private var visibleCount = 0
+    // Whether the Hidden section is expanded. A search reveals it regardless.
+    private var hiddenExpanded = false
     private var query = ""
     private var panel: PalettePanel!
     private var tableView: NSTableView!
@@ -694,15 +780,19 @@ final class PaletteController: NSObject {
         rowsProvider: @escaping @MainActor () -> [PaletteRow],
         onJump: @escaping @MainActor (String) -> Void,
         onHide: @escaping @MainActor (String) -> Void,
+        onShow: @escaping @MainActor (String) -> Void,
         onRemove: @escaping @MainActor (String) -> Void,
         onLabel: @escaping @MainActor (String, String) -> Void,
+        onPin: @escaping @MainActor (String, Bool) -> Void,
         onSettings: @escaping @MainActor () -> Void
     ) {
         self.rowsProvider = rowsProvider
         self.onJump = onJump
         self.onHide = onHide
+        self.onShow = onShow
         self.onRemove = onRemove
         self.onLabel = onLabel
+        self.onPin = onPin
         self.onSettings = onSettings
         super.init()
         buildPanel()
@@ -719,7 +809,7 @@ final class PaletteController: NSObject {
         searchField.stringValue = ""
         query = ""
         reload(preservingSelection: false)
-        position()
+        restorePosition()
         startTicking()
         // Nonactivating panel takes key focus while the previous app stays
         // active - Spotlight's pattern. Never call NSApp.activate here.
@@ -763,7 +853,7 @@ final class PaletteController: NSObject {
         let previousKey = selectedKey()
         let previousIndex = tableView.selectedRow
         allRows = rowsProvider()
-        rows = filteredRows()
+        rows = composeRows()
         tableView.reloadData()
         emptyLabel.stringValue = allRows.isEmpty ? "No sessions" : "No matches"
         emptyLabel.isHidden = !rows.isEmpty
@@ -773,15 +863,19 @@ final class PaletteController: NSObject {
         }
         if preservingSelection,
            let previousKey,
-           let index = rows.firstIndex(where: { $0.sessionKey == previousKey }) {
+           let index = rows.firstIndex(where: { $0.sessionKey == previousKey && !$0.isHidden && !$0.isDivider }) {
             // Never move the cursor under the user: follow the session_key
             // across reorders.
             select(index)
         } else if preservingSelection {
             // The selected row vanished (hidden or removed): land on the
             // round-robin next thing to deal with, else hold position.
-            select(nextToCheckIndex() ?? min(max(previousIndex, 0), rows.count - 1))
-        } else {
+            if let next = nextToCheckIndex() {
+                select(next)
+            } else if visibleCount > 0 {
+                select(min(max(previousIndex, 0), visibleCount - 1))
+            }
+        } else if visibleCount > 0 {
             select(defaultSelectionIndex())
         }
         // selectRowIndexes only notifies on change; re-render explicitly so an
@@ -800,33 +894,61 @@ final class PaletteController: NSObject {
     // The filter matches what the row shows: name, prompt breadcrumb, agent.
     // A `#tag` query switches to tag mode - the discreet, no-new-UI way to
     // narrow the board to one tag (e.g. `#demo`); clearing it restores all.
-    private func filteredRows() -> [PaletteRow] {
+    // Does a row survive the current search? An empty query matches everything;
+    // a `#tag` query narrows to that tag.
+    private func matchesQuery(_ row: PaletteRow) -> Bool {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return allRows }
+        guard !q.isEmpty else { return true }
         if q.hasPrefix("#") {
             let tag = String(q.dropFirst()).trimmingCharacters(in: .whitespaces)
-            guard !tag.isEmpty else { return allRows }
-            return allRows.filter { row in
-                row.tags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame }
-            }
+            guard !tag.isEmpty else { return true }
+            return row.tags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame }
         }
-        return allRows.filter { row in
-            row.name.localizedCaseInsensitiveContains(q)
-                || (row.detail ?? "").localizedCaseInsensitiveContains(q)
-                || (row.reply ?? "").localizedCaseInsensitiveContains(q)
-                || row.agent.localizedCaseInsensitiveContains(q)
+        return row.name.localizedCaseInsensitiveContains(q)
+            || (row.detail ?? "").localizedCaseInsensitiveContains(q)
+            || (row.reply ?? "").localizedCaseInsensitiveContains(q)
+            || row.agent.localizedCaseInsensitiveContains(q)
+    }
+
+    // The display rows: matching visible sessions first (the selectable span,
+    // recorded in visibleCount), then a "Hidden (N)" divider and, when the
+    // section is open or a search is running, the matching hidden rows. A search
+    // reveals hidden matches so the board never hides what it knows about.
+    private func composeRows() -> [PaletteRow] {
+        let matching = allRows.filter { matchesQuery($0) }
+        let visible = matching.filter { !$0.isHidden }
+        let hidden = matching.filter { $0.isHidden }
+        visibleCount = visible.count
+        var display = visible
+        // Always show the Hidden divider once the board has any session, even at
+        // "Hidden (0)", so it is always clear whether a session is set aside (a
+        // missing row is otherwise a mystery). A truly empty board shows the empty
+        // state instead. A zero count is inert (no chevron, nothing to expand).
+        if !matching.isEmpty {
+            var divider = PaletteRow(
+                sessionKey: "", mark: .working, statusWord: "", isAsking: false,
+                isUnread: false, isRead: false, agent: "", name: "", ageStart: Date(),
+                detail: nil, reply: nil, location: "", needsCheck: false,
+                engagedDate: Date(), tags: [], pinned: false
+            )
+            divider.isDivider = true
+            divider.hiddenCount = hidden.count
+            display.append(divider)
+            let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+            if !hidden.isEmpty && (hiddenExpanded || searching) { display.append(contentsOf: hidden) }
         }
+        return display
     }
 
     // Query changes reset the cursor to the topmost unread within the
     // filtered rows - searching is re-asking "what needs me in here".
     private func applyQuery(_ newQuery: String) {
         query = newQuery
-        rows = filteredRows()
+        rows = composeRows()
         tableView.reloadData()
         emptyLabel.stringValue = allRows.isEmpty ? "No sessions" : "No matches"
         emptyLabel.isHidden = !rows.isEmpty
-        if !rows.isEmpty { select(defaultSelectionIndex()) }
+        if visibleCount > 0 { select(defaultSelectionIndex()) }
         renderPreview()
     }
 
@@ -838,17 +960,22 @@ final class PaletteController: NSObject {
     // "Next to check": the first unread row from the top - reading order, so
     // where the cursor lands is always where the eye already is.
     private func nextToCheckIndex(excluding key: String? = nil) -> Int? {
-        rows.indices.first { rows[$0].needsCheck && rows[$0].sessionKey != key }
+        rows.indices.first {
+            rows[$0].needsCheck && !rows[$0].isHidden && !rows[$0].isDivider
+                && rows[$0].sessionKey != key
+        }
     }
 
     private func selectedKey() -> String? {
         let index = tableView.selectedRow
-        guard rows.indices.contains(index) else { return nil }
+        guard rows.indices.contains(index), !rows[index].isHidden, !rows[index].isDivider else { return nil }
         return rows[index].sessionKey
     }
 
+    // Selection only ever lands on a visible session row (the leading span);
+    // the Hidden divider and hidden rows are inert.
     private func select(_ index: Int) {
-        guard rows.indices.contains(index) else { return }
+        guard index >= 0, index < visibleCount, rows.indices.contains(index) else { return }
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         tableView.scrollRowToVisible(index)
     }
@@ -936,8 +1063,9 @@ final class PaletteController: NSObject {
         case "k": moveSelection(-1)
         case "x": hideSelected()
         case "r": beginLabelEdit()
+        case "p": togglePinSelected()
         default:
-            guard let digit = Int(chars), (1...9).contains(digit), digit <= rows.count else {
+            guard let digit = Int(chars), (1...9).contains(digit), digit <= visibleCount else {
                 return event
             }
             jumpRow(digit - 1)
@@ -946,19 +1074,16 @@ final class PaletteController: NSObject {
     }
 
     private func moveSelection(_ delta: Int) {
-        guard !rows.isEmpty else { return }
+        guard visibleCount > 0 else { return }
         let current = tableView.selectedRow
-        guard rows.indices.contains(current) else {
-            select(0)
-            return
-        }
-        select(min(max(current + delta, 0), rows.count - 1))
+        let base = (current >= 0 && current < visibleCount) ? current : 0
+        select(min(max(base + delta, 0), visibleCount - 1))
     }
 
     // Tab cycles unread rows in list order, top to bottom - same reading
     // order as the topmost-unread default selection.
     private func cycleNeedsCheck() {
-        let cycle = rows.indices.filter { rows[$0].needsCheck }
+        let cycle = rows.indices.filter { rows[$0].needsCheck && !rows[$0].isHidden && !rows[$0].isDivider }
         guard !cycle.isEmpty else { return }
         if let position = cycle.firstIndex(of: tableView.selectedRow) {
             select(cycle[(position + 1) % cycle.count])
@@ -972,7 +1097,7 @@ final class PaletteController: NSObject {
     }
 
     private func jumpRow(_ index: Int) {
-        guard rows.indices.contains(index) else { return }
+        guard rows.indices.contains(index), !rows[index].isDivider, !rows[index].isHidden else { return }
         hide()
         onJump(rows[index].sessionKey)
     }
@@ -988,6 +1113,58 @@ final class PaletteController: NSObject {
         onRemove(key)
         parkSelection(leaving: key)
     }
+
+    // ⌃P / context menu: toggle the pin. Fires optimistically; the hub echoes
+    // pin/unpin over SSE (mark updates) and returns pinned-first order on the
+    // next /state, so the row keeps its slot until that resync.
+    private func togglePinSelected() {
+        guard let key = selectedKey(),
+              let index = rows.firstIndex(where: { $0.sessionKey == key }) else { return }
+        onPin(key, !rows[index].pinned)
+    }
+
+    // MARK: - Right-click context menu
+
+    // Right-click exposes the keyboard row actions to the mouse. The clicked
+    // row is selected first so the menu items (which act on the selection) and
+    // the keyboard bindings always target the same row.
+    private func contextMenu(forRow row: Int) -> NSMenu? {
+        guard rows.indices.contains(row) else { return nil }
+        // The Hidden divider has no menu; a hidden row offers only Unhide.
+        if rows[row].isDivider { return nil }
+        if rows[row].isHidden {
+            let menu = NSMenu()
+            let item = NSMenuItem(title: "Unhide", action: #selector(contextUnhide(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = rows[row].sessionKey
+            menu.addItem(item)
+            return menu
+        }
+        select(row)
+        renderPreview()
+        let menu = NSMenu()
+        func add(_ title: String, _ action: Selector) {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        add(rows[row].pinned ? "Unpin" : "Pin", #selector(contextPin))
+        add("Rename…", #selector(contextRename))
+        menu.addItem(.separator())
+        add("Hide", #selector(contextHide))
+        add("Remove", #selector(contextRemove))
+        return menu
+    }
+
+    @objc private func contextPin() { togglePinSelected() }
+
+    @objc private func contextUnhide(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        onShow(key)
+    }
+    @objc private func contextRename() { beginLabelEdit() }
+    @objc private func contextHide() { hideSelected() }
+    @objc private func contextRemove() { removeSelected() }
 
     // Move ahead of the SSE round trip: the acted-on row is dealt with
     // (vanishing, or staying as a seen busy row) and the cursor should
@@ -1043,6 +1220,23 @@ final class PaletteController: NSObject {
         jumpRow(tableView.clickedRow)
     }
 
+    // Single click: the Hidden divider toggles the section open/closed; a hidden
+    // row unhides (fires `show`). Clicks on visible rows fall through to normal
+    // selection.
+    @objc private func rowClicked(_ sender: Any?) {
+        let index = tableView.clickedRow
+        guard rows.indices.contains(index) else { return }
+        let row = rows[index]
+        if row.isDivider {
+            // "Hidden (0)" has nothing to expand.
+            guard row.hiddenCount > 0 else { return }
+            hiddenExpanded.toggle()
+            reload(preservingSelection: true)
+        } else if row.isHidden {
+            onShow(row.sessionKey)
+        }
+    }
+
     // MARK: - Label editing (`r`)
 
     // `r` opens an inline editor over the footer: type a signalbox display
@@ -1095,10 +1289,12 @@ final class PaletteController: NSObject {
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
-        // Fixed in place like Spotlight/Raycast - dragging the background moved
-        // it, which is only ever an accident.
-        panel.isMovable = false
-        panel.isMovableByWindowBackground = false
+        // Draggable like Alfred/Raycast: grab any background area to move it,
+        // and the position is remembered across opens (restorePosition). The
+        // search and rename fields handle their own mouse, so dragging inside
+        // them selects text rather than moving the panel.
+        panel.isMovable = true
+        panel.isMovableByWindowBackground = true
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -1268,7 +1464,7 @@ final class PaletteController: NSObject {
         let footer = NSView()
         let label = NSTextField(
             labelWithString:
-                "type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump  ·  esc clear/close"
+                "type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump  ·  esc clear/close"
         )
         label.font = .systemFont(ofSize: s(10.5))
         label.textColor = Theme.textDim
@@ -1322,7 +1518,8 @@ final class PaletteController: NSObject {
             .kern: s(1.5),
         ])
 
-        let table = NSTableView()
+        let table = PaletteTableView()
+        table.onContextMenu = { [weak self] row in self?.contextMenu(forRow: row) }
         table.headerView = nil
         table.rowHeight = Self.rowHeight
         table.style = .fullWidth
@@ -1338,6 +1535,7 @@ final class PaletteController: NSObject {
         table.dataSource = self
         table.delegate = self
         table.target = self
+        table.action = #selector(rowClicked(_:))
         table.doubleAction = #selector(rowDoubleClicked(_:))
 
         let scroll = NSScrollView()
@@ -1554,6 +1752,35 @@ final class PaletteController: NSObject {
         actionLabel.attributedStringValue = action
     }
 
+    // The remembered panel origin (bottom-left, screen coordinates). A dragged
+    // position should survive both reopening and app relaunches.
+    private static let frameOriginKey = "paletteFrameOrigin"
+
+    // Restore the dragged position if it is still reachable, else center. A
+    // remembered origin can fall offscreen when a display is unplugged, so the
+    // header (drag handle and search) must land on some screen's visible area.
+    private func restorePosition() {
+        guard let saved = UserDefaults.standard.string(forKey: Self.frameOriginKey) else {
+            position()
+            return
+        }
+        let origin = NSPointFromString(saved)
+        let frame = NSRect(origin: origin, size: panel.frame.size)
+        let header = NSPoint(x: frame.midX, y: frame.maxY - Self.headerHeight / 2)
+        let reachable = NSScreen.screens.contains { NSMouseInRect(header, $0.visibleFrame, false) }
+        if reachable {
+            panel.setFrameOrigin(origin)
+        } else {
+            // Stale offscreen origin (screen change): recenter and forget it.
+            UserDefaults.standard.removeObject(forKey: Self.frameOriginKey)
+            position()
+        }
+    }
+
+    private func savePosition() {
+        UserDefaults.standard.set(NSStringFromPoint(panel.frame.origin), forKey: Self.frameOriginKey)
+    }
+
     private func position() {
         // Summon onto the screen the user is looking at: the one with the mouse.
         let mouse = NSEvent.mouseLocation
@@ -1587,6 +1814,52 @@ private final class PaletteRowView: NSTableRowView {
     }
 }
 
+// MARK: - Hidden divider
+
+// The "Hidden (N)" row: a dim count, always shown so it is clear whether a
+// session is set aside. With a count it carries a disclosure chevron and toggles
+// the section (rowClicked); at "Hidden (0)" it is inert - no chevron, nothing to
+// expand.
+private final class HiddenDividerView: NSView {
+    init(count: Int, expanded: Bool) {
+        super.init(frame: .zero)
+        let label = NSTextField(labelWithString: "Hidden (\(count))")
+        label.font = .systemFont(ofSize: s(12), weight: .medium)
+        label.textColor = Theme.textDim
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        if count == 0 {
+            // No chevron: nothing to expand.
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s(20)),
+                label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
+            return
+        }
+
+        let chevron = NSImageView()
+        chevron.image = NSImage(
+            systemSymbolName: expanded ? "chevron.down" : "chevron.right",
+            accessibilityDescription: expanded ? "Collapse hidden" : "Expand hidden"
+        )
+        chevron.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: s(10), weight: .semibold)
+        chevron.contentTintColor = Theme.textDim
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(chevron)
+
+        NSLayoutConstraint.activate([
+            chevron.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s(20)),
+            chevron.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: chevron.trailingAnchor, constant: s(9)),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+}
+
 // MARK: - Table data source / delegate
 
 extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
@@ -1600,7 +1873,20 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row index: Int) -> NSView? {
         guard rows.indices.contains(index) else { return nil }
-        return SessionCellView(row: rows[index])
+        let row = rows[index]
+        if row.isDivider {
+            return HiddenDividerView(count: row.hiddenCount, expanded: hiddenExpanded)
+        }
+        let cell = SessionCellView(row: row)
+        // Hidden rows read as dismissed: dimmed, and inert (see shouldSelectRow).
+        cell.alphaValue = row.isHidden ? 0.45 : 1
+        return cell
+    }
+
+    // Only visible session rows select. The Hidden divider and hidden rows are
+    // inert to selection and the keyboard; a click on them is handled separately.
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        row < visibleCount
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -1665,11 +1951,21 @@ private final class SessionCellView: NSTableCellView {
         ageLabel.stringValue = ageString(from: row.ageStart)
         ageLabel.alignment = .right
 
-        // No "?" pill: the amber mark alone carries the ask (amber scheme).
-        let right = NSStackView(views: [ageLabel])
-        right.orientation = .vertical
-        right.alignment = .trailing
-        right.spacing = 2
+        // No "?" pill: the amber mark alone carries the ask (amber scheme). A
+        // pinned row gets a quiet pin just left of the age.
+        let right = NSStackView()
+        right.orientation = .horizontal
+        right.alignment = .centerY
+        right.spacing = s(5)
+        if row.pinned {
+            let pin = NSImageView()
+            let config = NSImage.SymbolConfiguration(pointSize: s(9), weight: .semibold)
+            pin.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned")?
+                .withSymbolConfiguration(config)
+            pin.contentTintColor = Theme.textDim
+            right.addArrangedSubview(pin)
+        }
+        right.addArrangedSubview(ageLabel)
         right.translatesAutoresizingMaskIntoConstraints = false
         right.setContentHuggingPriority(.required, for: .horizontal)
         right.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -1798,5 +2094,12 @@ extension PaletteController: NSWindowDelegate {
     func windowDidResignKey(_ notification: Notification) {
         // Clicked elsewhere: dismiss, matching Spotlight/Raycast behaviour.
         hide()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        // Persist only real user drags: the programmatic restore/center happens
+        // before the panel is ordered in, so it is skipped here.
+        guard panel.isVisible else { return }
+        savePosition()
     }
 }

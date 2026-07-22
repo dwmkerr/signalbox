@@ -58,6 +58,22 @@ final class HubSupervisor {
         child = nil
     }
 
+    // Restart the hub so a fresh process re-reads settings.json - used when
+    // Connect Phone or Settings allows other devices (hub.bind = "0.0.0.0" + an
+    // auto-generated token). Waits for the old child to release the port before
+    // respawning, because terminate() is asynchronous and the new bind would
+    // otherwise race the dying process for the port.
+    func restart() async {
+        let old = child
+        child = nil
+        old?.terminate()
+        for _ in 0..<50 {
+            if old?.isRunning != true { break }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        await ensureRunning()
+    }
+
     // The check-spawn loop doubles as the respawn throttle: a crashing hub
     // gets at most one launch per tick, and the app stays responsive because
     // nothing here blocks.

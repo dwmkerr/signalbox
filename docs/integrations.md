@@ -8,13 +8,15 @@ up with `signalbox init` (interactive) or one at a time with
 `~/.cursor/hooks.json`) for you, with consent: it takes a timestamped backup,
 merges only events that have no hooks at all (your own wrappers are never
 touched), and writes atomically. `--remove` reverses exactly that edit.
-Freeform config like `~/.tmux.conf` is never edited - `init` prints the exact
-snippet for you to apply instead.
+Freeform config like `~/.tmux.conf` gets its exact snippet printed for you to
+apply; add `--write-user-config` to have `init` write it as a fenced managed
+block (backup taken, `--reverse` removes only signalbox's own lines).
 
 | Agent | How it's wired | Status |
 |---|---|---|
 | **Claude Code** | Hooks in `~/.claude/settings.json` that fire as Claude works. | Stable |
 | **Cursor** | Cursor's own agent, via Cursor 1.7 Hooks (`~/.cursor/hooks.json`). | Available, still in testing |
+| **Codex** | Hooks in `~/.codex/hooks.json` (needs `[features] hooks = true`) that fire as Codex works, asks and needs approval. | Available, still in testing |
 | **VS Code** | Agents in the integrated terminal are auto-detected (`TERM_PROGRAM`); jump raises the VS Code window (window-level, not tab). No setup. | Available, still in testing |
 | **OpenCode** | A plugin in `~/.config/opencode/plugin`. | Stable |
 | **pi** | An extension in `~/.pi/agent/extensions`. | Stable |

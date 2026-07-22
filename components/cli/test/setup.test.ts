@@ -115,9 +115,22 @@ describe("remove (init --remove)", () => {
     expect(require("node:fs").existsSync(dest)).toBe(false);
   });
 
-  test("--remove --tmux prints removal instructions, never edits", () => {
+  test("--remove --tmux reverses signalbox's managed block, keeping the rest", () => {
+    let conf = "";
+    const out = runRemove(() => {
+      const home = mkdtempSync(join(tmpdir(), "sbrm-"));
+      conf = join(home, ".tmux.conf");
+      writeFileSync(conf, "set -g mouse on\n# >>> signalbox managed >>>\nset -g x\n# <<< signalbox managed <<<\n");
+      return home;
+    }, ["--tmux"]);
+    expect(out).toContain("removed signalbox block");
+    const after = require("node:fs").readFileSync(conf, "utf8");
+    expect(after).toContain("set -g mouse on");
+    expect(after).not.toContain("signalbox managed");
+  });
+
+  test("--remove --tmux with no signalbox block says there is nothing to remove", () => {
     const out = runRemove(() => mkdtempSync(join(tmpdir(), "sbrm-")), ["--tmux"]);
-    expect(out).toContain("remove the signalbox");
-    expect(out).toContain(".tmux.conf");
+    expect(out).toContain("no signalbox edit to remove");
   });
 });

@@ -67,10 +67,12 @@ async function fireSeen(hubURL: string, key: string): Promise<void> {
   }
 }
 
-// The AppleScript finds the iTerm2 session on the target tty and raises its
-// window - plain `open -a iTerm` only activates the app, and with several
-// windows the session could stay buried. The tty arrives as argv so no data
-// is ever interpolated into the script body.
+// Locates the iTerm2 session on the target tty and raises exactly that window,
+// activating iTerm only on a hit. A miss returns WITHOUT activating, so this
+// doubles as a probe for "is the switched client hosted in iTerm?": were it to
+// `activate` on a miss, it would flash iTerm to the front before we raise the
+// terminal that actually holds the session - the jolt. The tty arrives as argv
+// so no data is ever interpolated into the script body.
 const iTermRaiseScript = `on run argv
 	set targetTty to item 1 of argv
 	tell application "iTerm2"
@@ -87,14 +89,27 @@ const iTermRaiseScript = `on run argv
 				end repeat
 			end repeat
 		end repeat
-		activate
 	end tell
-	return "activated"
+	return "not-found"
 end run`;
 
+// True only when an iTerm window actually owning this tty was raised - not when
+// the script merely ran. The old `status === 0` check read a bare app-activate
+// as a raise and so masked tty misses.
 function raiseITermWindow(tty: string): boolean {
   const out = command("osascript", ["-", tty], { input: iTermRaiseScript });
-  return out.status === 0;
+  return out.status === 0 && out.stdout.toString().trim() === "raised";
+}
+
+// isRunning reports whether an app with this bundle id is already running,
+// without launching it. `open -b`/`open -a` on a terminal that is not running
+// launches it, and a freshly launched terminal opens an unrelated empty window
+// that never holds the attached session - the open-then-vanish jolt. lsappinfo
+// needs no automation permission and prints nothing when the app is not up.
+function isRunning(bundle: string): boolean {
+  const out = command("lsappinfo", ["find", `bundleid=${bundle}`]);
+  if (out.status !== 0) return false;
+  return (out.stdout?.toString().trim() ?? "") !== "";
 }
 
 // VS Code-family editors (Cursor, VS Code, other Electron forks) have no
@@ -134,15 +149,29 @@ function raiseEditor(bundle: string, workspace: string): boolean {
   return app;
 }
 
+// activateTerminal raises the terminal that actually hosts the client we just
+// switched, located by that client's tty - NOT origin.terminal, the terminal
+// where the pane was first seen. One tmux server is routinely shared across
+// terminals (the same session attached in iTerm while agents also run in VS
+// Code's or Cursor's integrated terminal), so the recorded terminal is often
+// not where the client is attached now. Switching one client but raising a
+// different terminal is the jolt: the wrong app flashes forward while the
+// session sits in the window behind it, so the jump looks like it opens then
+// closes.
 function activateTerminal(bundle: string | undefined, clientTTY: string): void {
+  // iTerm can find any window by tty, so probe it first regardless of the
+  // recorded terminal - but only when it is already running, since the probe's
+  // `tell application "iTerm2"` would otherwise launch it and open a window.
+  if (clientTTY && isRunning(iterm2Bundle) && raiseITermWindow(clientTTY)) return;
+  // The client is not in iTerm (or its tty is unknown): raise the recorded
+  // terminal, but never launch one - a fresh window would not hold the session.
   if (bundle && bundle !== iterm2Bundle) {
-    if (runCmd("open", "-b", bundle) !== null) return;
-    // A stale or uninstalled bundle id must not strand the jump.
-    runCmd("open", "-a", "iTerm");
+    if (isRunning(bundle)) runCmd("open", "-b", bundle);
     return;
   }
-  if (clientTTY && raiseITermWindow(clientTTY)) return;
-  runCmd("open", "-a", "iTerm");
+  // iTerm origin whose tty we could not match: bring iTerm forward only if it
+  // is already up, so we never spawn a throwaway window.
+  if (isRunning(iterm2Bundle)) runCmd("open", "-a", "iTerm");
 }
 
 // mostActiveClientTTY: the terminal the user is actually typing in. "|||"

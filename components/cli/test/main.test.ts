@@ -16,7 +16,7 @@ describe("grouped command dispatch", () => {
   test("unknown subcommand under a noun lists valid verbs", () => {
     const { out, code } = run(["session", "bogus"]);
     expect(out).toContain("unknown subcommand");
-    expect(out).toContain("ack, hide, rename, remove, list");
+    expect(out).toContain("ack, hide, show, pin, unpin");
     expect(code).toBe(2);
   });
 
@@ -26,9 +26,19 @@ describe("grouped command dispatch", () => {
     expect(code).toBe(0);
   });
 
+  test("session show/pin/unpin with no key log usage, exit 0 (hook-safe)", () => {
+    // Hook-path commands always exit 0; with a dead hub they just spool/log.
+    expect(run(["session", "show"]).code).toBe(0);
+    expect(run(["session", "pin"]).code).toBe(0);
+    expect(run(["session", "unpin"]).code).toBe(0);
+  });
+
   test("help lists the grouped commands", () => {
     const { out } = run(["help"]);
     expect(out).toContain("session ack");
+    expect(out).toContain("session show");
+    expect(out).toContain("session pin");
+    expect(out).toContain("session unpin");
     expect(out).toContain("tmux status");
     expect(out).toContain("hook claude");
   });

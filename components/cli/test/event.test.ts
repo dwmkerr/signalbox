@@ -38,6 +38,14 @@ describe("user events", () => {
   test("newHide", () => {
     expect(ev.newHide("pi:1").event).toBe("hide");
   });
+  test("newShow / newPin / newUnpin build user events from the key convention", () => {
+    expect(ev.newShow("claude:abc").event).toBe("show");
+    expect(ev.newPin("claude:abc").event).toBe("pin");
+    expect(ev.newUnpin("pi:1").event).toBe("unpin");
+    const pin = ev.newPin("claude:abc");
+    expect(pin.agent).toBe("claude");
+    expect(pin.session_key).toBe("claude:abc");
+  });
   test("newLabel collapses and crops", () => {
     const e = ev.newLabel("claude:abc", "  prod\ndeploy  ");
     expect(e.event).toBe("label");
@@ -75,6 +83,11 @@ describe("validate", () => {
   test("accepts label as a valid type", () => {
     expect(ev.validate({ ...valid(), event: "label" })).toBeNull();
   });
+  test("accepts show, pin, and unpin as valid types", () => {
+    expect(ev.validate({ ...valid(), event: "show" })).toBeNull();
+    expect(ev.validate({ ...valid(), event: "pin" })).toBeNull();
+    expect(ev.validate({ ...valid(), event: "unpin" })).toBeNull();
+  });
 });
 
 describe("redact", () => {
@@ -92,6 +105,18 @@ describe("redact", () => {
     expect(e.session_key).not.toBe("claude:secret-session-id");
     expect(e.session_key.startsWith("claude:")).toBe(true);
     expect(e.session_key.length).toBe("claude:".length + 12);
+  });
+});
+
+describe("agentFamily", () => {
+  test("bare agents pass through unchanged", () => {
+    expect(ev.agentFamily("claude")).toBe("claude");
+    expect(ev.agentFamily("cursor")).toBe("cursor");
+    expect(ev.agentFamily("opencode")).toBe("opencode");
+  });
+  test("host-prefixed display names strip to the family", () => {
+    expect(ev.agentFamily("vscode/claude")).toBe("claude");
+    expect(ev.agentFamily("cursor/claude")).toBe("claude");
   });
 });
 

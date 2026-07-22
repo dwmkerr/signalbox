@@ -24,8 +24,48 @@ enum SharedSettings {
         if let data = try? JSONSerialization.data(
             withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]
         ) {
-            try? data.write(to: url)
+            // Atomic (write-temp-then-rename) so a concurrent reader - the CLI
+            // hooks, or the hub reading hub.* - never sees a half-written file.
+            try? data.write(to: url, options: [.atomic])
         }
+    }
+
+    // Whether the hub is bound so other devices can reach it. hub.bind is stored
+    // as a literal address; anything other than a loopback address (or an unset
+    // key, which defaults to loopback) means the LAN can reach the hub.
+    static var hubAllowsNetworkAccess: Bool {
+        let hub = read()["hub"] as? [String: Any]
+        guard let bind = hub?["bind"] as? String, !bind.isEmpty else { return false }
+        return !isLoopback(bind)
+    }
+
+    // Loopback binds only answer this Mac; every other address exposes the hub
+    // to other devices on the network.
+    private static func isLoopback(_ bind: String) -> Bool {
+        ["127.0.0.1", "::1", "localhost", "loopback"].contains(bind.lowercased())
+    }
+
+    // Allow other devices to reach the hub: hub.bind = "0.0.0.0" (the wildcard
+    // that also keeps loopback served for local hooks and this app), deep-merged
+    // so an existing hub.token (and every other key) survives. The user reaches
+    // this from Connect Phone or the Settings "Hub" checkbox - never silently.
+    // The restarted hub reads this, binds every interface, and mints a token if
+    // it has none.
+    static func enableNetworkAccess() {
+        setHubBind("0.0.0.0")
+    }
+
+    // Restrict the hub back to this Mac: hub.bind = "127.0.0.1", deep-merged.
+    static func disableNetworkAccess() {
+        setHubBind("127.0.0.1")
+    }
+
+    private static func setHubBind(_ bind: String) {
+        var root = read()
+        var hub = root["hub"] as? [String: Any] ?? [:]
+        hub["bind"] = bind
+        root["hub"] = hub
+        write(root)
     }
 
     static var claudeClearEnds: Bool {
@@ -45,6 +85,25 @@ enum SharedSettings {
             write(s)
         }
     }
+
+    // The Codex pair of the two toggles above (specs/adapters.md).
+    static var codexClearEnds: Bool {
+        get { read()["codexClearEnds"] as? Bool ?? true }
+        set {
+            var s = read()
+            s["codexClearEnds"] = newValue
+            write(s)
+        }
+    }
+
+    static var codexRenameTitle: Bool {
+        get { read()["codexRenameTitle"] as? Bool ?? true }
+        set {
+            var s = read()
+            s["codexRenameTitle"] = newValue
+            write(s)
+        }
+    }
 }
 
 // The Settings window: menu bar icon style and behaviour toggles; future
@@ -60,23 +119,40 @@ final class SettingsController: NSObject, NSTextFieldDelegate {
 
     private let onIconChange: @MainActor () -> Void
     private let onFilterChange: @MainActor () -> Void
+    // Same restart path Connect Phone uses: flipping hub access rewrites
+    // hub.bind in settings.json, and the hub only picks that up on a restart.
+    private let restartHub: @MainActor () async -> Void
+    // Only needed for the port shown in the "Devices reach this Mac at ..."
+    // caption; the address itself comes from LANAddress.
+    private let hubPort: Int
     private var window: NSWindow?
     private var iconPopup: NSPopUpButton?
     private var clearCheckbox: NSButton?
     private var renameCheckbox: NSButton?
+    private var codexClearCheckbox: NSButton?
+    private var codexRenameCheckbox: NSButton?
     private var filterField: NSTextField?
+    private var hubAccessCheckbox: NSButton?
+    private var hubCaption: NSTextField?
 
     init(
+        hubURL: URL,
         onIconChange: @escaping @MainActor () -> Void,
-        onFilterChange: @escaping @MainActor () -> Void
+        onFilterChange: @escaping @MainActor () -> Void,
+        restartHub: @escaping @MainActor () async -> Void
     ) {
+        self.hubPort = hubURL.port ?? 8377
         self.onIconChange = onIconChange
         self.onFilterChange = onFilterChange
+        self.restartHub = restartHub
         super.init()
     }
 
     func show() {
         if window == nil { build() }
+        // The hub bind can change while this window exists (Connect Phone also
+        // writes it), so re-read the live state every time it is shown.
+        refreshHubState()
         // Accessory apps stay background by default; a settings window is a
         // real window and needs the app frontmost to take keys and clicks.
         // orderFrontRegardless because activate alone can leave the window
@@ -163,6 +239,30 @@ final class SettingsController: NSObject, NSTextFieldDelegate {
         renameCaption.font = .systemFont(ofSize: 11)
         renameCaption.textColor = .secondaryLabelColor
 
+        // The Codex pair, flat for now - agent-specific settings get their own
+        // tabs/tree once a third agent needs toggles.
+        let codexClearCheckbox = NSButton(
+            checkboxWithTitle: "Codex clear removes the session from the board",
+            target: self,
+            action: #selector(codexClearEndsChanged(_:))
+        )
+        codexClearCheckbox.state = SharedSettings.codexClearEnds ? .on : .off
+        self.codexClearCheckbox = codexClearCheckbox
+
+        let codexRenameCheckbox = NSButton(
+            checkboxWithTitle: "Rename session on Codex /rename",
+            target: self,
+            action: #selector(codexRenameTitleChanged(_:))
+        )
+        codexRenameCheckbox.state = SharedSettings.codexRenameTitle ? .on : .off
+        self.codexRenameCheckbox = codexRenameCheckbox
+
+        let codexCaption = NSTextField(
+            wrappingLabelWithString: "The Codex pair of the two toggles above."
+        )
+        codexCaption.font = .systemFont(ofSize: 11)
+        codexCaption.textColor = .secondaryLabelColor
+
         let hotkeyCaption = NSTextField(
             wrappingLabelWithString:
                 "Jumplist shortcut: ⌃⌥J - override with "
@@ -170,6 +270,26 @@ final class SettingsController: NSObject, NSTextFieldDelegate {
         )
         hotkeyCaption.font = .systemFont(ofSize: 11)
         hotkeyCaption.textColor = .secondaryLabelColor
+
+        // Hub network access: whether the hub answers only this Mac (loopback)
+        // or other devices too. The checkbox writes a literal hub.bind to the
+        // shared settings and restarts the hub, the same path Connect Phone
+        // uses to pair a phone.
+        let hubHeading = NSTextField(labelWithString: "Hub")
+        hubHeading.font = .systemFont(ofSize: 13, weight: .semibold)
+
+        let hubAccessCheckbox = NSButton(
+            checkboxWithTitle: "Allow other devices to connect (requires token)",
+            target: self,
+            action: #selector(hubAccessChanged(_:))
+        )
+        hubAccessCheckbox.state = SharedSettings.hubAllowsNetworkAccess ? .on : .off
+        self.hubAccessCheckbox = hubAccessCheckbox
+
+        let hubCaption = NSTextField(wrappingLabelWithString: hubCaptionText())
+        hubCaption.font = .systemFont(ofSize: 11)
+        hubCaption.textColor = .secondaryLabelColor
+        self.hubCaption = hubCaption
 
         // Additional filters: tags always applied to the board, on top of any
         // search. Space-separated for more than one; the board shows only
@@ -197,7 +317,10 @@ final class SettingsController: NSObject, NSTextFieldDelegate {
         let stack = NSStackView(
             views: [heading] + radioViews
                 + [caption, sessionsHeading, clearCheckbox, clearCaption,
-                   renameCheckbox, renameCaption, hotkeyCaption,
+                   renameCheckbox, renameCaption,
+                   codexClearCheckbox, codexRenameCheckbox, codexCaption,
+                   hotkeyCaption,
+                   hubHeading, hubAccessCheckbox, hubCaption,
                    filterHeading, filterField, filterCaption]
         )
         stack.orientation = .vertical
@@ -207,7 +330,10 @@ final class SettingsController: NSObject, NSTextFieldDelegate {
         stack.setCustomSpacing(20, after: caption)
         stack.setCustomSpacing(16, after: clearCaption)
         stack.setCustomSpacing(16, after: renameCaption)
+        stack.setCustomSpacing(16, after: codexCaption)
         stack.setCustomSpacing(20, after: hotkeyCaption)
+        stack.setCustomSpacing(4, after: hubHeading)
+        stack.setCustomSpacing(20, after: hubCaption)
         stack.setCustomSpacing(4, after: filterHeading)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -220,12 +346,49 @@ final class SettingsController: NSObject, NSTextFieldDelegate {
             stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -20),
         ])
         window.contentView = content
-        window.setContentSize(NSSize(width: 400, height: 500))
+        window.setContentSize(NSSize(width: 400, height: 600))
         self.window = window
     }
 
     @objc private func clearEndsChanged(_ sender: NSButton) {
         SharedSettings.claudeClearEnds = sender.state == .on
+    }
+
+    @objc private func codexClearEndsChanged(_ sender: NSButton) {
+        SharedSettings.codexClearEnds = sender.state == .on
+    }
+
+    @objc private func codexRenameTitleChanged(_ sender: NSButton) {
+        SharedSettings.codexRenameTitle = sender.state == .on
+    }
+
+    // Flip whether the hub answers other devices. hub.bind is only re-read when
+    // the hub restarts, so rewrite the file and restart on the same path Connect
+    // Phone uses. Off restricts it straight back to this Mac.
+    @objc private func hubAccessChanged(_ sender: NSButton) {
+        if sender.state == .on {
+            SharedSettings.enableNetworkAccess()
+        } else {
+            SharedSettings.disableNetworkAccess()
+        }
+        Task { await restartHub() }
+    }
+
+    // The reachable address the phone dials: this Mac's LAN IP and the hub port.
+    // Falls back to a plain sentence when no LAN address resolves (no Wi-Fi).
+    private func hubCaptionText() -> String {
+        guard let ip = LANAddress.primary() else {
+            return "Devices reach this Mac on port \(hubPort) once it joins Wi-Fi. "
+                + "The token is created automatically."
+        }
+        return "Devices reach this Mac at \(ip):\(hubPort). The token is created automatically."
+    }
+
+    // Re-read the live hub state so the checkbox and caption match the file even
+    // when Connect Phone changed it while this window was open.
+    private func refreshHubState() {
+        hubAccessCheckbox?.state = SharedSettings.hubAllowsNetworkAccess ? .on : .off
+        hubCaption?.stringValue = hubCaptionText()
     }
 
     @objc private func renameTitleChanged(_ sender: NSButton) {

@@ -46,6 +46,9 @@ export class Store {
       case ev.Hide: {
         const cur = this.sessions.get(e.session_key);
         if (cur) {
+          // Hide is the stronger, more recent intent than a pin, so it always
+          // drops the pin before applying its own rule.
+          delete cur.pinned;
           if (cur.event === ev.Busy) {
             // Hide on a busy row is treated as seen: a running session must
             // stay visible.
@@ -57,6 +60,26 @@ export class Store {
             cur.hidden = true;
           }
         }
+        return;
+      }
+      case ev.Show: {
+        // Unhide in place: clear hidden with no ack, no engagement bump, and
+        // no reorder, so the row reappears exactly where it sat. Idempotent on
+        // a row that is not hidden.
+        const cur = this.sessions.get(e.session_key);
+        if (cur) delete cur.hidden;
+        return;
+      }
+      case ev.Pin: {
+        // Float the row into the top partition and keep it there until the user
+        // clears it. No ack, no engagement change. Idempotent.
+        const cur = this.sessions.get(e.session_key);
+        if (cur) cur.pinned = true;
+        return;
+      }
+      case ev.Unpin: {
+        const cur = this.sessions.get(e.session_key);
+        if (cur) delete cur.pinned;
         return;
       }
       case ev.Label: {
@@ -97,6 +120,11 @@ export class Store {
       // The user's label always carries: agent events never set it.
       if (prev.label) e.label = prev.label;
       else delete e.label;
+      // A pin carries like label, not like acked/hidden: new activity does not
+      // clear it, so a pinned session that speaks again stays pinned. Only
+      // unpin or hide removes it.
+      if (prev.pinned) e.pinned = true;
+      else delete e.pinned;
       // Tags carry like prompt/reply - filled from prev only when the event
       // does not carry its own. An agent event usually has none (so it
       // inherits), but an event may bake tags in, and those must survive even
@@ -111,6 +139,9 @@ export class Store {
       // one in must not name a brand-new session. Tags are different: a
       // creating event may carry them, so they pass through untouched.
       delete e.label;
+      // Likewise a pin is set only by a pin event, never smuggled onto a
+      // brand-new session by a creating agent event.
+      delete e.pinned;
     }
     if (engages(e) && after(e.ts, e.engaged_ts)) e.engaged_ts = e.ts;
     // Drop empty-string optionals so /state JSON matches the Go hub's
@@ -121,10 +152,15 @@ export class Store {
     this.sessions.set(e.session_key, e);
   }
 
-  // list returns the display ordering - engagement MRU: engaged_ts
-  // descending, ts then seq breaking ties, so ordering is deterministic.
+  // list returns the display ordering - pinned first, then engagement MRU:
+  // engaged_ts descending, ts then seq breaking ties, so ordering is
+  // deterministic. Pinned sessions form a top partition (all pinned before all
+  // unpinned); engagement-MRU orders each partition internally, so a pin floats
+  // a row above more-recently-engaged unpinned rows without reordering the
+  // pinned group among itself. The hub owns this order; surfaces adopt it.
   list(): Event[] {
     return [...this.sessions.values()].sort((a, b) => {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
       if (a.engaged_ts !== b.engaged_ts) return (b.engaged_ts ?? "") < (a.engaged_ts ?? "") ? -1 : 1;
       if (a.ts !== b.ts) return b.ts < a.ts ? -1 : 1;
       return (b.seq ?? 0) - (a.seq ?? 0);

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Options for `xcodebuild -exportArchive`. method app-store-connect re-signs the
+  archive with an Apple Distribution certificate and an App Store provisioning
+  profile, so the .ipa this produces is the TestFlight/App Store artifact.
+
+  destination is "export" on purpose: it writes the signed .ipa to disk and does
+  NOT talk to App Store Connect. To actually release, change destination to
+  "upload" (needs the App Store Connect app record to exist and upload auth - see
+  RELEASE.md), or keep "export" and hand the .ipa to Transporter. Leaving the
+  committed default on "export" means running the documented command can never
+  upload by accident.
+-->
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>destination</key>
+	<string>export</string>
+	<key>teamID</key>
+	<string>5TTNE9J58F</string>
+	<!-- Ship the dSYMs so App Store Connect can symbolicate crash reports. -->
+	<key>uploadSymbols</key>
+	<true/>
+	<key>signingStyle</key>
+	<string>automatic</string>
+</dict>
+</plist>

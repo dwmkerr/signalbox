@@ -1,0 +1,4 @@
+build/
+# Xcode regenerates this; only project.pbxproj is worth committing.
+Signalbox.xcodeproj/project.xcworkspace/
+Signalbox.xcodeproj/xcuserdata/

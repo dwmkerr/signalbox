@@ -1,0 +1,603 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>signalbox ios</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; color:#c9c9ce; font-size:16px; line-height:1.6;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Arial,sans-serif;
+         display:flex; flex-direction:column; align-items:center; padding:48px 20px; }
+  .page { width:860px; max-width:100%; }
+  .nav { color:#6E6E73; font-size:13px; margin-bottom:18px; }
+  .nav a { color:#0A84FF; text-decoration:none; }
+  h1 { color:#EDEDED; font-size:26px; margin-bottom:6px; }
+  .subtitle { color:#98989D; font-size:15px; margin-bottom:8px; }
+  .note-line { color:#c9c9ce; font-size:14px; margin-bottom:22px; }
+  .prose h2 { color:#EDEDED; font-size:19px; font-weight:600; margin:26px 0 10px;
+              padding-bottom:6px; border-bottom:1px solid #ffffff1a; }
+  .prose h3 { color:#EDEDED; font-size:15.5px; font-weight:600; margin:18px 0 6px; }
+  .prose p { margin-bottom:10px; }
+  .prose ul { padding-left:22px; margin-bottom:10px; }
+  .prose li { margin-bottom:4px; }
+  code { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:13.5px;
+         background:#ffffff12; border-radius:4px; padding:1px 5px; color:#D8D8DC; }
+  .prose a { color:#0A84FF; text-decoration:none; }
+  .prose table { border-collapse:collapse; margin:10px 0; width:100%; }
+  .prose th, .prose td { border:1px solid #ffffff1e; padding:6px 12px; text-align:left;
+                         font-size:14.5px; vertical-align:top; }
+  .prose th { color:#EDEDED; }
+  .amber { color:#FF9F0A; } .blue { color:#0A84FF; } .red { color:#FF453A; } .green { color:#34C759; }
+
+  .chip { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.4px;
+          text-transform:uppercase; padding:2px 7px; border-radius:4px; vertical-align:2px;
+          margin-left:8px; }
+  .chip.built { background:#34C75922; color:#34C759; border:1px solid #34C75955; }
+  .chip.proposed { background:#FF9F0A22; color:#FF9F0A; border:1px solid #FF9F0A55; }
+  .chip.later { background:#ffffff10; color:#98989D; border:1px solid #ffffff26; }
+  .banner { border:1px solid #FF9F0A55; background:#FF9F0A14; border-radius:8px;
+            padding:12px 14px; margin-bottom:22px; font-size:14px; }
+  .banner b { color:#FF9F0A; }
+
+  /* The mockup. Two phones side by side: the board, and a session's detail. */
+  .phones { display:flex; gap:34px; justify-content:center; align-items:flex-start;
+            margin:6px 0 10px; flex-wrap:wrap; }
+  .phonewrap { display:flex; flex-direction:column; align-items:center; gap:9px; }
+  .phonecap { color:#6E6E73; font-size:11.5px; }
+  .phone { width:312px; border-radius:38px; background:#000; padding:9px;
+           border:1px solid #ffffff26; box-shadow:0 16px 44px rgba(0,0,0,.55); }
+  .screen { border-radius:30px; background:#0b0b0d; overflow:hidden; height:600px;
+            display:flex; flex-direction:column; position:relative; }
+  .island { position:absolute; top:8px; left:50%; transform:translateX(-50%); width:86px; height:24px;
+            background:#000; border-radius:14px; z-index:5; }
+  .sbar { display:flex; justify-content:space-between; align-items:center; padding:12px 20px 4px;
+          font-size:12px; color:#EDEDED; font-weight:600; line-height:normal; }
+  .sbar .right { display:flex; gap:5px; align-items:center; }
+
+  /* Nav bar: hub name plus the connection state, which is load-bearing on a
+     remote hub and therefore always visible. */
+  .navbar { padding:6px 16px 8px; border-bottom:1px solid #ffffff14; }
+  .navtop { display:flex; justify-content:space-between; align-items:center; }
+  .hubname { color:#EDEDED; font-size:19px; font-weight:700; }
+  .hubname .caret { color:#6E6E73; font-size:12px; font-weight:400; }
+  /* The scan affordance: pairing a hub is a main-screen action (top-right of
+     the Sessions nav bar), not something buried in Settings. */
+  .scan { display:flex; align-items:center; }
+  .conn { display:flex; align-items:center; gap:5px; color:#6E6E73; font-size:11px; margin-top:1px; }
+  .conn .cdot { width:6px; height:6px; border-radius:50%; background:#34C759; }
+  /* Search lives in the nav-bar drawer: hidden until you pull the list down,
+     shown here revealed so the spec pins its placement and prompt. */
+  .search { margin:8px 16px 0; background:#ffffff14; border-radius:9px; padding:6px 10px;
+            color:#6E6E73; font-size:13px; display:flex; align-items:center; gap:6px; }
+
+  /* Cards. The one list surface, and the layout a day of real use settled on:
+     a tap expands the preview, the arrow or a right-swipe asks the owning
+     machine to jump, a left-swipe acks or hides. */
+  .cards { flex:1; overflow:hidden; padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+  .card { display:flex; align-items:center; gap:11px; background:#141416; border:1px solid #ffffff1a;
+          border-radius:12px; padding:12px 14px; position:relative; }
+  .card .mk { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .card .mk.ring { background:none; border:1.5px solid #ffffff3d; }
+  .card .mk.fail { background:none; color:#FF453A; font-size:11px; line-height:9px;
+                   text-align:center; font-weight:700; }
+  .card .spin { width:9px; height:9px; border-radius:50%; border:1.5px solid #ffffff26;
+                border-top-color:#98989D; flex-shrink:0; }
+  .card .glyph { width:20px; flex-shrink:0; display:flex; justify-content:center; }
+  .card .body { flex:1; min-width:0; }
+  .card .top { display:flex; align-items:baseline; gap:6px; }
+  .card .nm { color:#EDEDED; font-size:16px; font-weight:600; white-space:nowrap; overflow:hidden;
+              text-overflow:ellipsis; }
+  /* The host is plain faint text on a card, shown only on a multi-machine hub. */
+  .card .host { font-size:10.5px; color:#6E6E73; flex-shrink:0;
+                font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .card .sub { color:#8e8e93; font-size:12.5px; line-height:1.35; margin-top:3px;
+               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* A tapped card expands: the preview runs to a few lines instead of one. */
+  .card.open .sub { white-space:normal; }
+  /* The jump arrow is its own target, and only a jumpable row carries it. */
+  .card .arrow { width:34px; height:34px; border-radius:50%; background:#0A84FF1f; color:#0A84FF;
+                 display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:17px; }
+
+  /* Swipe reveal, shown mid-gesture so the spec pins the actions and colours:
+     the trailing edge acks (Seen) then hides. */
+  .card.swiped { transform:translateX(-140px); }
+  .swipe { position:absolute; right:-140px; top:0; bottom:0; width:140px; display:flex;
+           border-radius:12px; overflow:hidden; }
+  .swipe div { flex:1; display:flex; align-items:center; justify-content:center; color:#fff;
+               font-size:11px; font-weight:600; }
+  .swipe .sa { background:#FF9F0A; } .swipe .sh { background:#48484c; }
+
+  /* The connect hint: the empty state shown when there is no hub to talk to. */
+  .empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+           text-align:center; padding:0 34px; gap:11px; }
+  .empty .etitle { color:#EDEDED; font-size:20px; font-weight:700; }
+  .empty .etext { color:#8e8e93; font-size:13.5px; line-height:1.45; }
+  .empty .etext svg { vertical-align:-3px; }
+
+  /* Settings: the iOS grouped-table idiom, done properly. The section header
+     is small caps ABOVE the rounded box; the footer subtext is BELOW it;
+     rows have inset dividers; trailing indicators (status dot, value, chevron)
+     sit on the right; a row with more behind it drills into a detail screen. */
+  .settings { flex:1; overflow-y:auto; padding:8px 0 0; }
+  .stitle { color:#EDEDED; font-size:26px; font-weight:700; padding:6px 20px 10px; }
+  .sgrouphdr { color:#8e8e93; font-size:11.5px; text-transform:uppercase; letter-spacing:.4px;
+               padding:0 20px 6px; }
+  .sgroup { background:#1c1c1e; border-radius:11px; margin:0 16px; overflow:hidden; }
+  .srow { display:flex; align-items:center; padding:0 15px; min-height:44px; font-size:15px; color:#EDEDED; }
+  /* Divider on the inner cell, so it insets past the leading icon like iOS. */
+  .srow .cell { flex:1; display:flex; align-items:center; gap:11px; padding:9px 0;
+                border-bottom:1px solid #ffffff14; min-height:26px; }
+  .srow:last-child .cell { border-bottom:none; }
+  .srow .val { margin-left:auto; color:#8e8e93; }
+  .srow .dot { width:11px; height:11px; border-radius:50%; margin-left:auto; }
+  .srow .chev { color:#5a5a5e; font-size:16px; margin-left:8px; }
+  .srow.act .cell { color:#0A84FF; justify-content:center; }
+  .srow.act.lead .cell { justify-content:flex-start; }
+  .srow.destructive .cell { justify-content:center; }
+  .srow.destructive { color:#FF453A; font-weight:400; }
+  /* An editable value row: the label, then a right-aligned field the user taps
+     to edit in place - the Mail-account idiom, only present when disconnected. */
+  .srow .field { margin-left:auto; color:#EDEDED; font-family:'SF Mono',ui-monospace,Menlo,monospace;
+                 font-size:13.5px; }
+  .srow .field.ph { color:#5a5a5e; }
+  .sfoot { color:#8e8e93; font-size:11.5px; line-height:1.4; padding:7px 20px 16px; }
+
+  /* The bottom menu. Two surfaces: the sessions board, and settings. */
+  .tabbar { margin-top:auto; display:flex; justify-content:space-around; align-items:center;
+            background:#ffffff0f; border-radius:22px; padding:6px 4px; margin-bottom:8px; }
+  .tab { display:flex; flex-direction:column; align-items:center; gap:2px; color:#6E6E73;
+         font-size:10px; padding:4px 14px; border-radius:16px; line-height:1.2; }
+  .tab span { font-size:14px; }
+  .tab.on { background:#ffffff14; color:#0A84FF; }
+</style></head><body>
+
+<div class="page">
+<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | <a href="settings.html">settings</a> | <a href="menubar.html">menu bar</a> | ios | <a href="architecture.html">architecture</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
+<h1>Specification: signalbox for iOS</h1>
+<div class="subtitle">The board on your phone: what needs you, from away from the desk.</div>
+<div class="note-line"><b>Note:</b> the mockups below are the living specification for the signalbox iOS app.</div>
+
+<div class="banner">
+  <b>Built and running on the simulator</b>, against a local hub: the board, the stream, ack, and
+  the jump round trip. <span class="chip later">later</span> marks what is deliberately deferred
+  (push).
+  <b>Not yet on a phone in your pocket</b>: that needs a hub reachable off-machine, which does not
+  exist yet - see <a href="architecture.html">architecture</a>. Today the simulator reaches the
+  laptop's own hub over loopback.
+</div>
+
+<div class="phones">
+  <div class="phonewrap">
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="sbar"><span>9:41</span><span class="right">
+        <svg width="15" height="11" viewBox="0 0 16 12" fill="#EDEDED"><path d="M8 9.6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM8 6c1.7 0 3.2.7 4.3 1.8l-1.4 1.4A4.1 4.1 0 0 0 8 8.1c-1.1 0-2.1.4-2.9 1.1L3.7 7.8A6 6 0 0 1 8 6zM8 2.2c2.7 0 5.2 1.1 7 2.9l-1.4 1.4A7.9 7.9 0 0 0 8 4.2c-2.2 0-4.2.9-5.6 2.3L1 5.1a9.9 9.9 0 0 1 7-2.9z"/></svg>
+        <svg width="22" height="11" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="#EDEDED" stroke-opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="#EDEDED"/><rect x="22.5" y="4" width="2" height="4" rx="1" fill="#EDEDED" fill-opacity=".6"/></svg>
+      </span></div>
+      <div class="navbar">
+        <div class="navtop">
+          <span class="hubname">Signalbox</span>
+          <span class="scan"><svg width="19" height="19" viewBox="0 0 22 22" fill="none" stroke="#0A84FF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5V4.5A1.5 1.5 0 0 1 4.5 3H7.5"/><path d="M14.5 3H17.5A1.5 1.5 0 0 1 19 4.5V7.5"/><path d="M19 14.5V17.5A1.5 1.5 0 0 1 17.5 19H14.5"/><path d="M7.5 19H4.5A1.5 1.5 0 0 1 3 17.5V14.5"/><rect x="7" y="7" width="3.2" height="3.2" rx="0.5" fill="#0A84FF" stroke="none"/><rect x="11.8" y="7" width="3.2" height="3.2" rx="0.5" fill="#0A84FF" stroke="none"/><rect x="7" y="11.8" width="3.2" height="3.2" rx="0.5" fill="#0A84FF" stroke="none"/><rect x="12.3" y="12.3" width="2.2" height="2.2" rx="0.5" fill="#0A84FF" stroke="none"/></svg></span>
+        </div>
+        <div class="conn"><span class="cdot"></span>Connected to 192.168.1.94 &middot; 2 machines</div>
+      </div>
+      <div class="search"><span>&#9906;</span><span>Search, or #tag</span></div>
+      <div class="cards">
+        <div class="card">
+          <span class="mk" style="background:#FF9F0A"></span>
+          <span class="glyph"><svg viewBox="0 0 20 20" width="16" height="16"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span>
+          <span class="body">
+            <span class="top"><span class="nm">writing-studio</span><span class="host">mbp</span></span>
+            <span class="sub">Shall I force-push the rebased branch, or open a new PR?</span>
+          </span>
+          <span class="arrow">&#8631;</span>
+        </div>
+        <div class="card swiped">
+          <span class="mk" style="background:#0A84FF"></span>
+          <span class="glyph"><svg viewBox="0 0 20 20" width="16" height="16"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span>
+          <span class="body">
+            <span class="top"><span class="nm">agent-notifier</span><span class="host">studio</span></span>
+            <span class="sub">Done. The reducer now drops empty optionals, and the tests cover it.</span>
+          </span>
+          <span class="arrow">&#8631;</span>
+          <span class="swipe"><span class="sa">Seen</span><span class="sh">Hide</span></span>
+        </div>
+        <div class="card">
+          <span class="mk fail">&#10005;</span>
+          <span class="glyph"><svg width="16" height="16" viewBox="0 0 16 16"><path fill="#B5B5BA" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></span>
+          <span class="body">
+            <span class="top"><span class="nm">ci: release</span><span class="host">github</span></span>
+            <span class="sub">Job failed: typecheck (2 errors in components/cli/src/hub.ts)</span>
+          </span>
+        </div>
+        <div class="card">
+          <span class="spin"></span>
+          <span class="glyph"><span style="font-family:ui-monospace;color:#0A84FF;font-size:15px;line-height:1">&#960;</span></span>
+          <span class="body">
+            <span class="top"><span class="nm">crash-dumps</span><span class="host">mbp</span></span>
+            <span class="sub">Working&hellip; symbolicating the last 40 reports</span>
+          </span>
+          <span class="arrow">&#8631;</span>
+        </div>
+        <div class="card">
+          <span class="mk ring"></span>
+          <span class="glyph"><svg viewBox="0 0 20 20" width="16" height="16"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#6e6e73" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#34C759" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#6e6e73" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+          <span class="body">
+            <span class="top"><span class="nm" style="color:#8e8e93;font-weight:400">release-notes</span><span class="host">studio</span></span>
+            <span class="sub">Drafted the 0.2.0 notes from the merged PRs.</span>
+          </span>
+          <span class="arrow">&#8631;</span>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><span>&#9776;</span>Sessions</div>
+        <div class="tab"><span>&#9881;</span>Settings</div>
+      </div>
+    </div></div>
+    <div class="phonecap">Sessions. Tap a card to expand, the arrow or a right-swipe to jump,
+      left-swipe for Seen and Hide. The <b>ci: release</b> row has no window to raise, so it carries
+      no arrow.</div>
+  </div>
+
+  <div class="phonewrap">
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="sbar"><span>9:41</span><span class="right">
+        <svg width="15" height="11" viewBox="0 0 16 12" fill="#EDEDED"><path d="M8 9.6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM8 6c1.7 0 3.2.7 4.3 1.8l-1.4 1.4A4.1 4.1 0 0 0 8 8.1c-1.1 0-2.1.4-2.9 1.1L3.7 7.8A6 6 0 0 1 8 6zM8 2.2c2.7 0 5.2 1.1 7 2.9l-1.4 1.4A7.9 7.9 0 0 0 8 4.2c-2.2 0-4.2.9-5.6 2.3L1 5.1a9.9 9.9 0 0 1 7-2.9z"/></svg>
+        <svg width="22" height="11" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="#EDEDED" stroke-opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="#EDEDED"/><rect x="22.5" y="4" width="2" height="4" rx="1" fill="#EDEDED" fill-opacity=".6"/></svg>
+      </span></div>
+      <div class="navbar">
+        <div class="navtop">
+          <span class="hubname">192.168.1.94</span>
+          <span class="scan"><svg width="19" height="19" viewBox="0 0 22 22" fill="none" stroke="#0A84FF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5V4.5A1.5 1.5 0 0 1 4.5 3H7.5"/><path d="M14.5 3H17.5A1.5 1.5 0 0 1 19 4.5V7.5"/><path d="M19 14.5V17.5A1.5 1.5 0 0 1 17.5 19H14.5"/><path d="M7.5 19H4.5A1.5 1.5 0 0 1 3 17.5V14.5"/><rect x="7" y="7" width="3.2" height="3.2" rx="0.5" fill="#0A84FF" stroke="none"/><rect x="11.8" y="7" width="3.2" height="3.2" rx="0.5" fill="#0A84FF" stroke="none"/><rect x="7" y="11.8" width="3.2" height="3.2" rx="0.5" fill="#0A84FF" stroke="none"/><rect x="12.3" y="12.3" width="2.2" height="2.2" rx="0.5" fill="#0A84FF" stroke="none"/></svg></span>
+        </div>
+        <div class="conn"><span class="cdot" style="background:#FF453A"></span>Hub rejected this token</div>
+      </div>
+      <div class="empty">
+        <svg width="74" height="74" viewBox="0 0 74 74" fill="none" stroke="#6E6E73" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="37" y1="33" x2="37" y2="52"/>
+          <path d="M28.5 30a12 12 0 0 1 17 0"/>
+          <path d="M22 23.5a21 21 0 0 1 30 0"/>
+          <line x1="18" y1="16" x2="57" y2="59"/>
+        </svg>
+        <div class="etitle">Not connected</div>
+        <div class="etext">Choose 'Connect Phone' from the desktop app, run 'signalbox pair' from the CLI or configure in 'Settings'.</div>
+        <div style="margin-top:14px;background:#0A84FF;color:#fff;font-size:13.5px;font-weight:600;border-radius:9px;padding:8px 16px;display:inline-flex;align-items:center;gap:6px;">
+          <svg width="15" height="15" viewBox="0 0 22 22" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5V4.5A1.5 1.5 0 0 1 4.5 3H7.5"/><path d="M14.5 3H17.5A1.5 1.5 0 0 1 19 4.5V7.5"/><path d="M19 14.5V17.5A1.5 1.5 0 0 1 17.5 19H14.5"/><path d="M7.5 19H4.5A1.5 1.5 0 0 1 3 17.5V14.5"/><rect x="7" y="7" width="3.2" height="3.2" rx="0.5" fill="#fff" stroke="none"/><rect x="11.8" y="7" width="3.2" height="3.2" rx="0.5" fill="#fff" stroke="none"/><rect x="7" y="11.8" width="3.2" height="3.2" rx="0.5" fill="#fff" stroke="none"/><rect x="12.3" y="12.3" width="2.2" height="2.2" rx="0.5" fill="#fff" stroke="none"/></svg>
+          Scan to Connect</div>
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><span>&#9776;</span>Sessions</div>
+        <div class="tab"><span>&#9881;</span>Settings</div>
+      </div>
+    </div></div>
+    <div class="phonecap">No hub yet. Instead of an empty board: the hint, and the way in right under it.</div>
+  </div>
+</div>
+
+<div class="prose">
+
+<h2>What this is <span class="chip built">built</span></h2>
+<p>The product is "know when a session needs you without watching terminals". Away from the desk is
+where it matters most: agents run long, and the amber moment usually lands once you have walked away.
+This surface is the board in your pocket.</p>
+<p>It is a native app. That keeps the hub simple: a browser cannot set headers on an
+<code>EventSource</code>, so a web board would force cookies, sessions, a login page and CORS onto the
+hub. <code>URLSession</code> sets an <code>Authorization</code> header freely, so the hub stays a pure
+API and the phone is another client.</p>
+
+<h3>Scope</h3>
+<ul>
+  <li><b>Read the board</b>, live, across every machine pointed at the hub.</li>
+  <li><b>Clear the flag</b> from the phone. Half the value: acking on the phone must quieten the
+  board everywhere.</li>
+  <li><b>Ask a machine to jump.</b> The phone cannot jump, but it can ask the laptop to. See below.</li>
+  <li><b>No push notifications in v1</b> <span class="chip later">later</span>. Wanted, and its own
+  piece of work.</li>
+</ul>
+
+<h2>The phone is a remote control</h2>
+<p>Jumping spawns <code>tmux</code> against a socket on a local filesystem, or raises a local window.
+A phone has neither, so it cannot jump itself. The laptop can: it is already listening to the hub and
+already knows how to jump, so the phone asks it to.</p>
+<p>The ask is a
+<a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md#commands">command</a>
+on the same bus the board rides. Fire the jump from a card with the arrow or a right-swipe, and the
+machine that owns that session raises the window. The phone in your hand becomes a jumplist for the
+laptop on your desk.</p>
+<p>Two rules:</p>
+<ul>
+  <li><b>Only jumpable rows offer it.</b> A CI run has no machine to raise a window on, so its row
+  carries no jump.</li>
+  <li><b>Success shows only once the phone can see it.</b> The laptop may be asleep or not running the
+  app. The row going quiet when that machine acks is the confirmation, since <code>jump</code> fires
+  <code>seen</code> only once the switch has landed.</li>
+</ul>
+<p><code>origin.kind</code> reserves <code>ssh</code> as a future kind. When it lands, a row on a
+machine that is not next to you becomes jumpable too.</p>
+
+<h2>Rows</h2>
+<p>Same anatomy and the same words as the <a href="hub-jumplist.html">jumplist</a>, so the two
+surfaces never disagree: status mark, agent glyph, name, host, age, and the subtext.</p>
+
+<h3>Status marks</h3>
+<ul>
+  <li><span class="amber">&#9679; amber</span> - needs your input (act)</li>
+  <li><span class="blue">&#9679; blue</span> - output updated (look)</li>
+  <li><span class="red">&#10005; red</span> - failed (fix)</li>
+  <li>spinner - working</li>
+  <li>&#9675; faint ring - read; dealt with, the row keeps its place</li>
+</ul>
+<p>A bold name means unread. The amber mark alone means the session is asking for you; there is no
+extra badge.</p>
+
+<h3>Subtext</h3>
+<p>The line under each name is the latest line of the exchange, cropped to two lines. While a session
+works you see your prompt (what it is working on); once it finishes, asks, or fails you see its reply
+(what came back). Identical rule to the jumplist.</p>
+
+<h3>Host</h3>
+<p>A row shows the machine it lives on <b>when more than one machine is on the board</b>. The machine
+decides whether a row can be acted on, so it matters most on a shared hub. With one machine every row
+shows the same host and the state line already says "1 machine", so the chip drops out.</p>
+
+<h3>Icons and naming</h3>
+<p>The glyph comes from the event's <code>agent</code> field, mapped locally to the same per-agent
+icons the jumplist uses (<a href="hub-jumplist.html">see the table</a>), with the plain ring as the
+fallback for anything unknown. Naming priority is <code>label</code>, then <code>title</code>, then
+the <code>cwd</code> folder name.</p>
+
+<h2>Order and filtering</h2>
+<p><b>The hub owns the order.</b> <code>GET /state</code> returns rows in display order (most recently
+engaged first) and the app adopts it verbatim. Do not re-sort client-side: the ordering rules live in
+the reducer, and a surface that re-derives them will drift.</p>
+<p>The search field lives in the navigation bar's drawer: it is hidden until you pull the list down,
+which keeps the board itself uncluttered. Search filters live over name, prompt, reply and agent. A
+query starting with <code>#</code> switches to tag mode (<code>#ops</code> shows only sessions carrying
+that tag, case-insensitive, exact match), matching the jumplist. Hidden rows drop out of the main
+list (see below); acked rows stay, drawn quiet.</p>
+
+<h3>Pinned <span class="chip built">built</span></h3>
+<p>Long-press a card and choose <b>Pin</b> (the Messages / Telegram gesture). The session stays at the
+top of the board with a small pin mark, regardless of engagement order. Long-press again to unpin.</p>
+<p>Pinned rows sort first. Within the pinned group, and within everything below it, the order is still
+the hub's engagement MRU. <b>The hub owns the order</b>, so <code>pin</code> and <code>unpin</code> are
+user events like <code>seen</code> and <code>hide</code>: the reducer serializes <code>pinned</code>,
+and every surface (this app, the jumplist, the menu bar) shows the same partition.</p>
+<p><b>Hiding a pinned session unpins it.</b> Hide is the stronger, more recent intent.</p>
+
+<h3>Hidden <span class="chip built">built</span></h3>
+<p>Hidden sessions collapse into a quiet divider at the bottom of the list - the Reminders "Show
+Completed" pattern. The section holds only sessions that are <i>currently silent and deliberately
+hidden</i>: a hidden session that speaks again returns to the main list on its own, so the section
+stays small.</p>
+<ul>
+  <li>The divider is <b>always shown</b> once the board has a session, "Hidden (0)" included, faint and
+  small, so it is always clear whether a session is set aside. "Hidden (0)" is inert: no chevron,
+  nothing to expand.</li>
+  <li>Tap to expand: hidden rows appear dimmed with an eye-slash mark. Swipe offers <b>Unhide</b>
+  (the wire's <code>show</code> user event - clears <code>hidden</code> without waiting for the
+  agent). Tap to collapse again.</li>
+  <li><b>Search sees through it.</b> A query that matches a hidden session reveals the section with
+  the match in it. The Gmail rule: search includes the archive.</li>
+</ul>
+
+<h3>Empty states</h3>
+<p>An empty board means two different things, and the app says which. On a <b>live</b> hub with nothing
+running, it is the quiet moon: <i>No sessions. Fire an agent and it appears here.</i> Before the first
+connection lands - not paired, offline, or a rejected token - the app shows <b>Not connected</b>
+instead, pointing at the <code>qrcode.viewfinder</code> button top-right to scan a pairing code, or the
+manual address in Settings.</p>
+
+<h2>The bottom menu</h2>
+<table>
+  <tr><th>Tab</th><th>What it is for</th></tr>
+  <tr><td><b>Sessions</b></td><td>Every session on the hub, in the hub's order, as cards. The one surface: browse, search, ack, and jump.</td></tr>
+  <tr><td><b>Settings</b></td><td>The hub and pairing. Machine and session counts live on the Sessions connection line.</td></tr>
+</table>
+
+<h2>Actions</h2>
+<table>
+  <tr><th>Gesture</th><th>Action</th></tr>
+  <tr><td>Tap a card</td><td>Expand the preview in place, to a few lines. It never marks the session seen.</td></tr>
+  <tr><td>The <span class="blue">arrow</span>, or swipe right, <span class="blue">Jump</span></td><td>Ask the owning machine to raise the window. Only on a row that can be jumped to.</td></tr>
+  <tr><td>Swipe left, <span class="amber">Seen</span></td><td>Fire <code>seen</code>. The row goes quiet everywhere, on every surface. <span class="chip built">built</span> Offered only on an unread row; a quiet, already-acked row offers no no-op (the Mail rule: "Mark Read" appears only on unread mail).</td></tr>
+  <tr><td>Swipe left, Hide</td><td>Fire <code>hide</code>. The row leaves the main list for the collapsed Hidden section until the session speaks again, or until unhidden there.</td></tr>
+  <tr><td>Long-press <span class="chip built">built</span></td><td>Context menu: <b>Pin</b> / <b>Unpin</b> (see Pinned above).</td></tr>
+  <tr><td>Pull down a little</td><td>Reveal the search field.</td></tr>
+  <tr><td>Pull down further</td><td>Force a full <code>/state</code> resync. The escape hatch when a stream has gone strange.</td></tr>
+</table>
+<p>Expanding a card does <b>not</b> mark it seen. On the desktop, jumping is the ack because looking
+at the pane is seeing it. On a phone, reading a breadcrumb is not dealing with the session, so marking
+seen is always deliberate here.</p>
+<p>The board offers no way to remove a session. Removal is destructive and irreversible from the
+phone.</p>
+
+<h2>Connection state</h2>
+<p>A remote hub needs the network, so the app always says what it is showing. The state line under the
+hub name is always visible, so you can tell a stale board from a live one.</p>
+<table>
+  <tr><th>State</th><th>Line</th><th>Meaning</th></tr>
+  <tr><td><span class="green">&#9679;</span> Live</td><td><code>Connected to 192.168.1.94 &middot; 2 machines</code></td><td>Stream connected. What you see is current.</td></tr>
+  <tr><td><span class="amber">&#9679;</span> Connecting</td><td><code>Reconnecting&hellip;</code></td><td>Retrying with backoff. Rows stay, drawn normally.</td></tr>
+  <tr><td><span style="color:#6E6E73">&#9679;</span> Offline</td><td><code>Offline &middot; last seen 4m ago</code></td><td>Unreachable. The board is a memory and says so.</td></tr>
+  <tr><td><span class="red">&#9679;</span> Rejected</td><td><code>Hub rejected this token</code></td><td>401. Send them to hub settings, do not silently retry.</td></tr>
+</table>
+<p>Reconnect with <code>?since=N</code> carrying the highest <code>seq</code> seen, so the hub replays
+the gap. That is the primitive a phone needs across a tunnel, a lift, or a suspended app. Do not poll
+<code>/state</code> in a loop instead.</p>
+<p>iOS suspends the app and the stream dies with it. Reconnect on foreground with <code>?since=N</code>.
+Do not fight for background execution; that is what push is for, and push is a later piece of work.</p>
+
+<h2>Settings</h2>
+
+<div class="phones">
+  <div class="phonewrap">
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="sbar"><span>9:41</span><span class="right">
+        <svg width="22" height="11" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="#EDEDED" stroke-opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="#EDEDED"/><rect x="22.5" y="4" width="2" height="4" rx="1" fill="#EDEDED" fill-opacity=".6"/></svg>
+      </span></div>
+      <div class="settings">
+        <div class="stitle">Settings</div>
+        <div class="sgrouphdr">Hub</div>
+        <div class="sgroup">
+          <div class="srow"><div class="cell">Status<span class="val" style="color:#EDEDED">Connected</span><span class="dot" style="background:#34C759;margin-left:9px"></span></div></div>
+          <div class="srow"><div class="cell">Address<span class="val">192.168.1.94:8377</span></div></div>
+          <div class="srow"><div class="cell">Token<span class="val" style="letter-spacing:2px">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span></div></div>
+        </div>
+        <div class="sfoot">The hub is the machine you connect to that provides your session details.</div>
+        <div class="sgroup" style="margin-top:16px;">
+          <div class="srow destructive"><div class="cell">Disconnect</div></div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><span>&#9776;</span>Sessions</div>
+        <div class="tab on"><span>&#9881;</span>Settings</div>
+      </div>
+    </div></div>
+    <div class="phonecap">Connected: read-only facts, one destructive action at the bottom.</div>
+  </div>
+
+  <div class="phonewrap">
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="sbar"><span>9:41</span><span class="right">
+        <svg width="22" height="11" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="#EDEDED" stroke-opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="#EDEDED"/><rect x="22.5" y="4" width="2" height="4" rx="1" fill="#EDEDED" fill-opacity=".6"/></svg>
+      </span></div>
+      <div class="settings">
+        <div class="stitle">Settings</div>
+        <div class="sgrouphdr">Hub</div>
+        <div class="sgroup">
+          <div class="srow"><div class="cell">Status<span class="val">Not connected</span></div></div>
+        </div>
+        <div class="sfoot">The hub is the machine you connect to that provides your session details.</div>
+        <div class="sgroup" style="margin-top:8px;">
+          <div class="srow act"><div class="cell"><svg width="16" height="16" viewBox="0 0 22 22" fill="none" stroke="#0A84FF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5V4.5A1.5 1.5 0 0 1 4.5 3H7.5"/><path d="M14.5 3H17.5A1.5 1.5 0 0 1 19 4.5V7.5"/><path d="M19 14.5V17.5A1.5 1.5 0 0 1 17.5 19H14.5"/><path d="M7.5 19H4.5A1.5 1.5 0 0 1 3 17.5V14.5"/><rect x="7" y="7" width="3.2" height="3.2" rx=".5" fill="#0A84FF" stroke="none"/><rect x="11.8" y="7" width="3.2" height="3.2" rx=".5" fill="#0A84FF" stroke="none"/><rect x="7" y="11.8" width="3.2" height="3.2" rx=".5" fill="#0A84FF" stroke="none"/><rect x="12.3" y="12.3" width="2.2" height="2.2" rx=".5" fill="#0A84FF" stroke="none"/></svg><span style="margin-left:9px">Scan to Connect</span></div></div>
+        </div>
+        <div class="sgroup" style="margin-top:8px;">
+          <div class="srow"><div class="cell" style="color:#EDEDED">Enter Address Manually<span class="chev" style="margin-left:auto;color:#5a5a5e">&#8250;</span></div></div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <div class="tab"><span>&#9776;</span>Sessions</div>
+        <div class="tab on"><span>&#9881;</span>Settings</div>
+      </div>
+    </div></div>
+    <div class="phonecap">Not connected: Scan to Connect on top, manual as a row beneath.</div>
+  </div>
+
+  <div class="phonewrap">
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="sbar"><span>9:41</span><span class="right">
+        <svg width="22" height="11" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="#EDEDED" stroke-opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="#EDEDED"/><rect x="22.5" y="4" width="2" height="4" rx="1" fill="#EDEDED" fill-opacity=".6"/></svg>
+      </span></div>
+      <div class="snav" style="position:relative;display:flex;align-items:center;padding:6px 12px 10px;">
+        <span style="color:#0A84FF;font-size:15px">&#8249; Settings</span>
+        <span style="position:absolute;left:50%;transform:translateX(-50%);color:#EDEDED;font-size:16px;font-weight:700">Enter Address</span>
+        <span style="margin-left:auto;color:#5a5a5e;font-size:15px;font-weight:600">Connect</span>
+      </div>
+      <div class="settings" style="padding-top:2px;">
+        <div class="sgroup">
+          <div class="srow"><div class="cell">Address<span class="field ph">http://192.168.1.20:8377</span></div></div>
+          <div class="srow"><div class="cell">Token<span class="field ph">Optional</span></div></div>
+        </div>
+        <div class="sfoot">Leave the token empty for a hub with no password.</div>
+      </div>
+    </div></div>
+    <div class="phonecap">The manual screen: address, optional token, Connect in the nav bar.</div>
+  </div>
+</div>
+
+<p>Settings holds one thing: the hub you connect to. Connecting is a mode, so the screen has two faces.</p>
+
+<h3>Connected</h3>
+<ul>
+  <li>Read-only rows: Status, Address, Token (shown as dots).</li>
+  <li>One red <b>Disconnect</b> at the bottom, behind a confirm. It deletes the token, so the
+  confirm says so: <i>This removes the hub. Scan or enter it again to reconnect.</i></li>
+  <li>To change a live hub, disconnect and set it up again.</li>
+</ul>
+
+<h3>Not connected</h3>
+<ul>
+  <li><b>Scan to Connect</b> leads: one scan fills the address and token and connects.</li>
+  <li><b>Enter Address Manually</b> is a row beneath it. It pushes to its own screen: address field,
+  optional token, Connect in the nav bar.</li>
+</ul>
+
+<h3>Data and storage</h3>
+<ul>
+  <li>A hub is <code>{ name, url, token }</code>. The app holds a list from day one and shows one at a
+  time; the nav bar hub name is the switcher, so one identity can carry several hubs (work, personal).</li>
+  <li>The nav bar title is the URL host: <code>192.168.1.94</code>, <code>fly-hub</code>. Loopback
+  reads as <b>Signalbox</b> (the simulator reaching the laptop's own hub).</li>
+  <li>The token lives in the Keychain. It reads every prompt and reply on the hub and can forge events,
+  so it is a password.</li>
+  <li>Adding a hub takes a URL and a token. Verify with <code>GET /healthz</code> before saving and
+  show a failure plainly.</li>
+  <li>A local hub over plain <code>http://</code> works from the simulator with no ATS key: App
+  Transport Security already exempts loopback (a public cleartext URL fails <code>-1022</code> in the
+  same build). <code>NSLocalNetworkUsageDescription</code> covers a real device reaching a hub over the
+  LAN, which the simulator never exercises.</li>
+</ul>
+
+<h2>Pairing <span class="chip built">built</span></h2>
+<p>Run <code>signalbox pair</code> on the CLI or use <b>Connect Phone</b> from the desktop app. Each
+encodes the hub URL and token into a short-lived QR code the app scans to connect. The manual address
+and token fields stay for when there is no QR.</p>
+<p>Scanning is a main-screen action:</p>
+<ul>
+  <li>A <code>qrcode.viewfinder</code> button sits top-right of the Sessions nav bar, and the
+  <b>Not connected</b> empty state points at it. Settings keeps a <b>Pair with a code</b> entry too.
+  Both open the same scanner sheet.</li>
+  <li>A successful pair stores the token in the Keychain and lands on the Sessions tab.</li>
+  <li>Settings carries <b>Disconnect</b> at the bottom: it deletes the token and clears the address,
+  dropping Sessions back to the Not connected state.</li>
+</ul>
+<p>The link is the contract; the QR carries it:</p>
+<pre>signalbox://pair?url=&lt;percent-encoded "http://LAN-IP:PORT"&gt;&amp;code=&lt;base64url-code&gt;</pre>
+<p><code>pair</code> rides in the URL host (a custom scheme has no path authority). <code>url</code> is
+the hub to redeem against; <code>code</code> is a one-time pairing code. The phone POSTs
+<code>{ "code": &lt;code&gt; }</code> to <code>&lt;url&gt;/pair</code> and gets back
+<code>{ "token": &lt;string&gt; }</code>; any 4xx means the code is bad, expired, or spent. The token
+goes to the Keychain and the app reconnects.</p>
+<p>Two security invariants:</p>
+<ul>
+  <li><b>The redeem POST carries no <code>Authorization</code> header.</b> The URL arrives from outside
+  the app (a QR or a link), so the request is built by hand and ships only the one-time code, keeping
+  the real token off an attacker-supplied URL.</li>
+  <li><b>A link never pairs silently.</b> <code>onOpenURL</code> fires for any
+  <code>signalbox://</code> link, so opening one raises a confirmation naming the hub
+  (<code>Pair with the hub at 192.168.1.20?</code>) and, when a hub is already set, that it replaces
+  the current one. Only the Pair button touches the network. The embedded <code>url</code> is validated
+  as plain <code>http</code>/<code>https</code>, so <code>file:</code>, <code>javascript:</code> and
+  scheme-less links are rejected.</li>
+</ul>
+<p>The deep link is what the tests drive; the scanner is one way to deliver it. The camera cannot run
+in the simulator, so the scanner guards on availability and falls back to the same instructions a
+device without a camera shows. <code>NSCameraUsageDescription</code> and the <code>signalbox</code> URL
+scheme live in <code>Partial-Info.plist</code>.</p>
+
+<h2>Notifications <span class="chip later">later</span></h2>
+<p>The point of the app is to be told when a session needs you. v1 ships without notifications to get
+the board and stream right first; the design lands in its own spec.</p>
+<p>Shape, so v1 does not foreclose it: attention and error always notify, done only after more than
+thirty seconds of work (quick turnarounds are noise), keyed by session so a newer signal replaces a
+stale banner. The same rules as the <a href="menubar.html">menu bar</a>. Web push works over a
+tailnet, and the hub sends outbound to the push service, so no tier of
+<a href="architecture.html">the deployment model</a> rules it out.</p>
+
+<h2>What the app must not do</h2>
+<ul>
+  <li><b>No product logic.</b> The hub decides order, <code>acked</code>, <code>hidden</code> and
+  naming; the app renders. A stream event triggers a <code>/state</code> resync, so the app never
+  re-derives state and drifts from the hub. Events are small and rare, so refetching is cheap.</li>
+  <li><b>No transcripts.</b> The breadcrumb is two cropped lines and that is the privacy contract;
+  the app shows what the hub sends and never asks for more.</li>
+  <li><b>No second source of truth.</b> No local event log, no offline queue of user actions. If a
+  <code>seen</code> cannot be delivered, say so and let the user retry.</li>
+</ul>
+
+</div>
+</div>
+</body></html>

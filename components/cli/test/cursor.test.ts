@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mapCursorHook, cursorReply, cursorWorkspace, cursorBundle, vscodeBundle, editorTerminalOrigin } from "../src/cursor";
+import { mapCursorHook, cursorReply, cursorWorkspace, cursorBundle, vscodeBundle, editorTerminalOrigin, editorHost, hostPrefixedAgent } from "../src/cursor";
+import { agentFamily } from "../src/event";
 
 describe("mapCursorHook", () => {
   const cases: [any, { eventType: string; reason: string } | null][] = [
@@ -67,6 +68,40 @@ describe("editorTerminalOrigin", () => {
   test("an unknown fork's bundle id passes through", () => {
     const o = editorTerminalOrigin({ TERM_PROGRAM: "vscode", __CFBundleIdentifier: "com.exafunction.windsurf" });
     expect(o?.cursor?.bundle).toBe("com.exafunction.windsurf");
+  });
+});
+
+describe("host-prefixed agent (editor-hosted display name)", () => {
+  // The producer rule: a Claude session shows under its editor host's icon via
+  // a display-agent prefix, while session_key stays keyed on the "claude"
+  // family so the same session never splits across terminals.
+  const cursorEnv = { TERM_PROGRAM: "vscode", __CFBundleIdentifier: cursorBundle };
+  const vscodeEnv = { TERM_PROGRAM: "vscode", __CFBundleIdentifier: "com.microsoft.VSCode" };
+  const forkEnv = { TERM_PROGRAM: "vscode", __CFBundleIdentifier: "com.exafunction.windsurf" };
+
+  test("plain terminal keeps the bare agent family", () => {
+    expect(editorHost({})).toBeNull();
+    expect(editorHost({ TERM_PROGRAM: "iTerm.app" })).toBeNull();
+    expect(hostPrefixedAgent("claude", {})).toBe("claude");
+  });
+  test("Cursor's integrated terminal prefixes cursor/", () => {
+    expect(editorHost(cursorEnv)).toBe("cursor");
+    expect(hostPrefixedAgent("claude", cursorEnv)).toBe("cursor/claude");
+  });
+  test("VS Code's integrated terminal prefixes vscode/", () => {
+    expect(editorHost(vscodeEnv)).toBe("vscode");
+    expect(hostPrefixedAgent("claude", vscodeEnv)).toBe("vscode/claude");
+  });
+  test("an unrecognized vscode fork is shown as VS Code", () => {
+    expect(editorHost(forkEnv)).toBe("vscode");
+    expect(hostPrefixedAgent("claude", forkEnv)).toBe("vscode/claude");
+  });
+  test("session_key family is unchanged across every host", () => {
+    // The display agent varies with the host, but the family that anchors
+    // session_key (claude:<id>) is invariant - the session cannot split.
+    for (const env of [{}, cursorEnv, vscodeEnv, forkEnv]) {
+      expect(agentFamily(hostPrefixedAgent("claude", env))).toBe("claude");
+    }
   });
 });
 
