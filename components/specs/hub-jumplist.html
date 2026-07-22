@@ -65,9 +65,10 @@
   .spin { width:11px; height:11px; border-radius:50%; border:1.7px solid rgba(152,152,157,.25);
           border-top-color:#98989D; animation:rot .9s linear infinite; }
   @keyframes rot { to { transform:rotate(360deg); } }
-  /* A quiet pin ahead of the age marks a pinned row. */
+  /* A pin ahead of the age marks a pinned row - age tier, not the dimmest
+     gray, so user-applied state never reads quieter than the age beside it. */
   .pin { display:inline-flex; vertical-align:middle; margin-right:5px; }
-  .pin svg { fill:#6E6E73; }
+  .pin svg { fill:#98989D; }
   /* Hidden section: a quiet divider at the foot of the list that expands to
      reveal set-aside sessions, dimmed and eye-slashed so they read as parked. */
   .hdiv { display:flex; align-items:center; gap:7px; margin:8px 10px 0; padding:9px 10px;
@@ -211,8 +212,10 @@
 
   <h2>Pinning and the row menu</h2>
   <p>Pin a session to keep it at the top: pinned sessions sort before the rest (engagement order
-  within each group) and carry a quiet pin mark on the row and in the menu bar dropdown. Order is a
-  hub decision: the app shows the order the hub sends and does not re-sort locally. Pin or unpin the
+  within each group) and carry a pin mark on the row and in the menu bar dropdown. Order is a
+  hub decision: the app applies the same rule locally - a pin toggle moves the row into or out of
+  the pinned group immediately, and an engagement bump never lifts an unpinned row above a pinned
+  one - so the list always matches what the hub's order would show. Pin or unpin the
   selected row with <kbd>⌃P</kbd>; pins survive agent activity and hub restarts.</p>
   <p>Right-click any row for the same actions as a menu: <b>Pin/Unpin</b>, <b>Rename</b>,
   <b>Hide</b> (or <b>Unhide</b> on a revealed hidden row), and <b>Remove</b>.</p>
@@ -416,9 +419,11 @@ function renderPreview(){
 function select(i){ sel = i; renderList(); renderPreview(); }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 1300); }
 
-// Pinned sessions sort first; here the pin just flips the mark (the hub owns
-// the actual order). Real order stays the hub's - the mock keeps its slot.
-function togglePin(i){ const s=SESSIONS[i]; if(!s) return; s.pinned=!s.pinned; renderList(); renderPreview();
+// Pinned sessions sort first: a toggle re-partitions immediately (stable
+// within each group, mirroring the hub's rule) - no waiting for a resync.
+function togglePin(i){ const s=SESSIONS[i]; if(!s) return; s.pinned=!s.pinned;
+  SESSIONS.sort((a,b)=>(!!b.pinned)-(!!a.pinned)); sel=SESSIONS.indexOf(s);
+  renderList(); renderPreview();
   toast(s.pinned ? `pinned "${s.label||s.title}" (sorts first)` : "unpinned"); }
 
 // Right-click row menu: the same actions as the keyboard row commands.
