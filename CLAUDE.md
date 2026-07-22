@@ -62,20 +62,24 @@ relaunch the app itself to pick up an app rebuild.
 
 `docs/images/hero-anim.gif` (README + `docs/assets/hero-images/hero.html` on
 the landing page) is a rendered capture of `hero.html`'s `.split` element, not
-hand-edited. After changing `hero.html`, regenerate it:
+hand-edited. The README embeds it with `<img width="900">`, but the gif's own
+pixel dimensions must NOT be 900-wide - see the resolution note below. After
+changing `hero.html`, regenerate it:
 
 ```bash
 # serve the file (file:// is blocked by headless browsers)
 cd docs/assets/hero-images && python3 -m http.server 8791 &
 
-# one-off Playwright install, in a scratch dir (gitignored)
+# one-off Playwright + gifsicle install, in a scratch dir (gitignored)
 mkdir -p scratch/hero-gif && cd scratch/hero-gif
 npm init -y && npm install playwright && npx playwright install chromium
+brew install gifsicle   # if not already on the machine
 ```
 
 Capture script (`scratch/hero-gif/capture.js`) - steps through the CSS
 animation with `Animation.currentTime` rather than waiting in real time, so
-every frame is exact regardless of machine speed:
+every frame is exact regardless of machine speed. `deviceScaleFactor: 2`
+renders at 2x pixel density (retina-equivalent):
 
 ```js
 const { chromium } = require('playwright');
@@ -91,7 +95,7 @@ const FRAME_COUNT = DURATION_MS / 1000 * FPS;
 (async () => {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1300, height: 1000 } });
+  const page = await browser.newPage({ viewport: { width: 1300, height: 1000 }, deviceScaleFactor: 2 });
   await page.goto(URL);
   await page.waitForTimeout(200);
   await page.evaluate(() => document.getAnimations().forEach(a => a.pause()));
@@ -108,23 +112,33 @@ const FRAME_COUNT = DURATION_MS / 1000 * FPS;
 ```
 
 ```bash
-node capture.js
+node capture.js   # frames land at ~2120x888 (native .split size x2)
 
-# assemble at the shipped size (900x377) - dither=none is required, the
-# default bayer/floyd-steinberg dither is clearly visible as speckle noise
-# on the flat dark background at this bit depth
+# Resolution note: do NOT scale down to the README's display width (900).
+# The capture is already 2x-supersampled for antialiasing quality, but if you
+# then shrink the output back to 900-wide you throw away exactly the pixels
+# that bought you - text goes soft again. Ship at 2x the display width
+# (1800x754) instead; the <img width="900"> tag downscales it in-browser,
+# same as a retina screenshot.
 ffmpeg -y -framerate 12 -i frames/frame-%03d.png \
-  -vf "scale=900:377:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff:max_colors=255[p];[b][p]paletteuse=dither=none" \
-  -loop 0 hero-anim.gif
+  -vf "scale=1800:754:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff:max_colors=255[p];[b][p]paletteuse=dither=none" \
+  -loop 0 hero-anim-full.gif
+
+# dither=none avoids visible bayer/floyd-steinberg speckle noise on the flat
+# dark background at 8-bit palette depth. But 2x resolution roughly triples
+# raw file size (~14MB) - claw it back with gifsicle's lossy compression,
+# which targeted-blurs only where the palette would otherwise dither:
+gifsicle -O3 --lossy=120 hero-anim-full.gif -o hero-anim.gif   # ~9-10MB
 
 cp hero-anim.gif ../../docs/images/hero-anim.gif
 kill %1   # stop the http.server
 ```
 
 Sanity-check before committing: extract a frame (`ffmpeg -i hero-anim.gif
--vf "select=eq(n\,0)" -update 1 -vframes 1 frame0.png`) and crop-zoom a patch
-of flat background to eyeball for dither speckle - it should look as smooth
-as the previous gif, not noisy.
+-update 1 -vframes 1 frame0.png`) and crop a patch of small text at native
+resolution (no resizing the crop) - it should read like a real screenshot,
+not a soft downscale, and a patch of flat background should show no dither
+speckle.
 
 ### Testing coding-agent integrations
 
