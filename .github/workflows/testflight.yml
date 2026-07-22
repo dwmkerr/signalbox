@@ -24,7 +24,9 @@ concurrency:
 
 jobs:
   upload:
-    runs-on: macos-15
+    # macos-26: App Store Connect rejects uploads built with an SDK older
+    # than iOS 26 (Xcode 26), and macos-15's default toolchain is Xcode 16.
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
