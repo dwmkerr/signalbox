@@ -35,12 +35,20 @@ describe("install claude-hook detection", () => {
     expect(out).not.toContain("merge the JSON block");
   });
 
-  test("a command mentioning signalbox counts as wired - never doubled", () => {
-    const { out, home } = runInstall(hookBlock("~/.claude/hooks/signalbox-dispatch.sh"), ["--agent", "claude"]);
+  test("the literal command is the wired marker - absolute path or composed counts", () => {
+    const { out, home } = runInstall(hookBlock("/opt/homebrew/bin/signalbox hook claude"), ["--agent", "claude"]);
     expect(out).not.toContain("merge the JSON block");
     const settings = JSON.parse(require("node:fs").readFileSync(join(home, ".claude", "settings.json"), "utf8"));
     const cmds = settings.hooks.Stop.flatMap((e: any) => e.hooks.map((h: any) => h.command));
-    expect(cmds).toEqual(["~/.claude/hooks/signalbox-dispatch.sh"]);
+    expect(cmds).toEqual(["/opt/homebrew/bin/signalbox hook claude"]);
+  });
+
+  test("a signalbox-ish script name is not the marker - entry still appended", () => {
+    // Presence is read from the file's literal command, never guessed from a name.
+    const { home } = runInstall(hookBlock("~/.claude/hooks/signalbox-dispatch.sh"), ["--agent", "claude"]);
+    const settings = JSON.parse(require("node:fs").readFileSync(join(home, ".claude", "settings.json"), "utf8"));
+    const cmds = settings.hooks.Stop.flatMap((e: any) => e.hooks.map((h: any) => h.command));
+    expect(cmds).toEqual(["~/.claude/hooks/signalbox-dispatch.sh", "signalbox hook claude"]);
   });
 
   test("an unrelated hook gets signalbox appended alongside, untouched", () => {

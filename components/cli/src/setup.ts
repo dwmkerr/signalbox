@@ -209,15 +209,13 @@ class Setup {
     } catch (err) {
       return { status: statusNeeds, name, detail: `cannot read ${settingsPath}: ${err}` };
     }
-    // Every event routes to signalbox (directly or via a command that
-    // mentions it) - the canonical setup.
+    // Every event carries the literal hook command - the canonical setup.
     if (scan.ours.length === claudeHookEvents.length) {
       return { status: statusDone, name, detail: settingsPath };
     }
-    // An event whose hooks never mention signalbox is missing, even when the
-    // user has their own hook there (a bell, a logger): hook arrays compose,
-    // so signalbox is appended alongside and cannot double-fire. Only a
-    // command that mentions signalbox counts as wired.
+    // The literal command is the marker; an event without it is missing, even
+    // when the user has their own hook there (a bell, a logger): hook arrays
+    // compose, so signalbox is appended alongside without touching theirs.
     const missing = claudeHookEvents.filter((ev) => !scan.ours.includes(ev));
     if (!this.confirm(`merge the signalbox hooks into ${settingsPath} (backup taken)`)) {
       return {
@@ -262,9 +260,8 @@ class Setup {
     if (scan.ours.length === cursorHookEvents.length) {
       return { status: statusDone, name, detail: hooksPath };
     }
-    // Same append policy as Claude's hooks: an event is missing unless one of
-    // its commands mentions signalbox; unrelated hooks compose, so appending
-    // alongside them cannot double-fire.
+    // Same append policy as Claude's hooks: the literal command is the marker,
+    // and entries compose, so appending never touches or doubles the user's own.
     const missing = cursorHookEvents.filter((ev) => !scan.ours.includes(ev));
     if (!this.confirm(`merge the signalbox hooks into ${hooksPath} (backup taken)`)) {
       return {
@@ -336,9 +333,8 @@ class Setup {
     if (scan.ours.length === codexHookEvents.length) {
       return { status: statusDone, name, detail: hooksPath };
     }
-    // Same append policy as Claude's hooks: an event is missing unless one of
-    // its commands mentions signalbox - a user's unrelated hook there does not
-    // count as wired, and entries compose so adding ours cannot double-fire.
+    // Same append policy as Claude's hooks: the literal command is the marker;
+    // a user's own hook on an event does not count as wired.
     const missing = codexHookEvents.filter((ev) => !scan.ours.includes(ev));
     return {
       status: statusNeeds,
@@ -569,17 +565,17 @@ function mergeJSONFile(path: string, mutate: (obj: any) => void): string | null 
 const claudeHookEvents = ["Notification", "Stop", "UserPromptSubmit", "SessionStart", "SessionEnd"];
 
 interface HookScan {
-  ours: string[]; // events with a command that mentions signalbox
-  other: string[]; // events with only unrelated hooks - still need signalbox
+  ours: string[]; // events with a command containing the literal hook command
+  other: string[]; // events with only other hooks - still need signalbox
   empty: string[]; // events with no hook at all
 }
 
 // scanClaudeHooks classifies each hook event. Parsed leniently so user
-// settings with matchers still read fine. "ours" recognises both the literal
-// `signalbox hook claude` and any command that mentions signalbox, so a
-// dispatcher named e.g. signalbox-hook.sh still counts; a generic wrapper
-// (agent-notify.sh) lands in "other" and still gets signalbox appended
-// alongside - an unrelated hook is not evidence signalbox is wired.
+// settings with matchers still read fine. The literal `signalbox hook claude`
+// command is the marker: an event is wired only when a command contains it
+// (bare, absolute-path, or composed inline). Everything else - including a
+// script that merely sounds signalbox-ish - gets the entry appended
+// alongside; presence is read from the file, never guessed from a name.
 function scanClaudeHooks(settingsPath: string): HookScan {
   let settings: any = {};
   try {
@@ -596,7 +592,7 @@ function scanClaudeHooks(settingsPath: string): HookScan {
           (c: unknown): c is string => typeof c === "string"
         )
       : [];
-    if (commands.some((c) => c.includes("signalbox"))) scan.ours.push(evName);
+    if (commands.some((c) => c.includes("signalbox hook claude"))) scan.ours.push(evName);
     else if (commands.length > 0) scan.other.push(evName);
     else scan.empty.push(evName);
   }
@@ -606,8 +602,8 @@ function scanClaudeHooks(settingsPath: string): HookScan {
 const codexHookEvents = ["SessionStart", "UserPromptSubmit", "Stop", "PermissionRequest", "SessionEnd"];
 
 // Codex's ~/.codex/hooks.json has the same shape as Claude's settings.json hooks
-// (`{ hooks: { <Event>: [{ hooks: [{ command }] }] } }`), so the same lenient
-// classification applies: "ours" matches any command mentioning signalbox.
+// (`{ hooks: { <Event>: [{ hooks: [{ command }] }] } }`), so the same literal-
+// command classification applies.
 function scanCodexHooks(hooksPath: string): HookScan {
   let cfg: any = {};
   try {
@@ -624,7 +620,7 @@ function scanCodexHooks(hooksPath: string): HookScan {
           (c: unknown): c is string => typeof c === "string"
         )
       : [];
-    if (commands.some((c) => c.includes("signalbox"))) scan.ours.push(evName);
+    if (commands.some((c) => c.includes("signalbox hook codex"))) scan.ours.push(evName);
     else if (commands.length > 0) scan.other.push(evName);
     else scan.empty.push(evName);
   }
@@ -634,14 +630,14 @@ function scanCodexHooks(hooksPath: string): HookScan {
 const cursorHookEvents = ["sessionStart", "stop", "subagentStop", "beforeShellExecution", "beforeMCPExecution"];
 
 interface CursorHookScan {
-  ours: string[]; // events whose hook calls signalbox directly
+  ours: string[]; // events with a command containing the literal hook command
   other: string[]; // events with some hook, but not the signalbox command
   empty: string[]; // events with no hook at all
 }
 
 // scanCursorHooks classifies each Cursor hook event. Cursor's hooks.json shape
-// is `{ hooks: { <event>: [{ command }] } }` (beta). Parsed leniently; "ours"
-// matches any command mentioning signalbox so a dispatcher script still counts.
+// is `{ hooks: { <event>: [{ command }] } }` (beta). Parsed leniently; the
+// literal `signalbox hook cursor` command is the wired marker.
 function scanCursorHooks(hooksPath: string): CursorHookScan {
   let cfg: any = {};
   try {
@@ -656,7 +652,7 @@ function scanCursorHooks(hooksPath: string): CursorHookScan {
     const commands: string[] = Array.isArray(entries)
       ? entries.map((e: any) => e?.command).filter((c: unknown): c is string => typeof c === "string")
       : [];
-    if (commands.some((c) => c.includes("signalbox"))) scan.ours.push(evName);
+    if (commands.some((c) => c.includes("signalbox hook cursor"))) scan.ours.push(evName);
     else if (commands.length > 0) scan.other.push(evName);
     else scan.empty.push(evName);
   }

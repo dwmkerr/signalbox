@@ -52,11 +52,11 @@ missing row shows `◉ · set up` and an unchecked-but-installed row shows `○ 
 User config policy: JSON agent configs (`~/.claude/settings.json`,
 `~/.cursor/hooks.json`) are merged only with consent - checking the row in
 the picker or passing the scope flag IS the consent - with a timestamped
-backup next to the file and an atomic, parse-validated write. An event counts
-as wired only when one of its hook commands mentions signalbox; otherwise the
-signalbox entry is appended alongside your own hooks (hook arrays compose, so
-an unrelated hook is never doubled and never touched). `--remove` is the same
-edit in reverse:
+backup next to the file and an atomic, parse-validated write. The literal
+`signalbox hook <agent>` command is the wired marker: an event counts as set
+up only when one of its hook commands contains it; otherwise the entry is
+appended alongside your own hooks (hook arrays compose, so your hooks are
+never doubled and never touched). `--remove` is the same edit in reverse:
 only the literal `signalbox hook <agent>` commands are removed. Freeform
 config (`~/.tmux.conf`) is printed as a snippet by default; `--write-user-config`
 writes it as a fenced managed block instead. The binary itself is not init's business: Homebrew owns the CLI on

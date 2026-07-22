@@ -116,10 +116,10 @@ export function mergeHookCommand(
   for (const ev of events) {
     const groups = (hooks[ev] ??= []);
     if (!Array.isArray(groups)) continue;
-    // "Mentions signalbox" (not the exact command) matches the init scan's
-    // wired test, so a user's signalbox-calling dispatcher is never doubled.
+    // The literal hook command is the marker: its presence in the file is the
+    // deterministic "already wired" test (same test init's scan and removal use).
     const present = groups.some((g: any) =>
-      (g?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes("signalbox")),
+      (g?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes(command)),
     );
     if (present) continue;
     groups.push({ matcher: "*", hooks: [{ type: "command", command }] });
@@ -177,9 +177,8 @@ export function mergeCursorHooks(
   for (const ev of events) {
     const arr = (hooks[ev] ??= []);
     if (!Array.isArray(arr)) continue;
-    // Same "mentions signalbox" wired test as the init scan - a dispatcher
-    // that calls signalbox is never doubled.
-    if (arr.some((h: any) => typeof h?.command === "string" && h.command.includes("signalbox"))) continue;
+    // The literal hook command is the marker (same test as init's scan/removal).
+    if (arr.some((h: any) => typeof h?.command === "string" && h.command.includes(command))) continue;
     arr.push({ command });
     changed.push(ev);
   }
