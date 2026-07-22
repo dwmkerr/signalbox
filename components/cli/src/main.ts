@@ -26,7 +26,7 @@ import {
 } from "./display";
 
 // A plain const stamped by release-please; the compiled binary carries it.
-const version = "0.1.2"; // x-release-please-version
+const version = "0.1.3"; // x-release-please-version
 
 // The short help: what a person types. Plumbing (hooks, tmux glue, drain)
 // and env vars live in `signalbox help` - the first screen a new user sees

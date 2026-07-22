@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/dwmkerr/signalbox/compare/v0.1.2...v0.1.3) (2026-07-22)
+
+
+### Features
+
+* iOS app ([#15](https://github.com/dwmkerr/signalbox/issues/15)) ([fc15494](https://github.com/dwmkerr/signalbox/commit/fc15494386dcc91add9cfa132bdf47644229fe97))
+
 ## [0.1.2](https://github.com/dwmkerr/signalbox/compare/v0.1.1...v0.1.2) (2026-07-15)
 
 
