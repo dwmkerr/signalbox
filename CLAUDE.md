@@ -58,6 +58,74 @@ cd components/cli && bunx tsc --noEmit   # typecheck
 a running hub and the app respawns it with the new build within seconds;
 relaunch the app itself to pick up an app rebuild.
 
+### Regenerating the hero gif
+
+`docs/images/hero-anim.gif` (README + `docs/assets/hero-images/hero.html` on
+the landing page) is a rendered capture of `hero.html`'s `.split` element, not
+hand-edited. After changing `hero.html`, regenerate it:
+
+```bash
+# serve the file (file:// is blocked by headless browsers)
+cd docs/assets/hero-images && python3 -m http.server 8791 &
+
+# one-off Playwright install, in a scratch dir (gitignored)
+mkdir -p scratch/hero-gif && cd scratch/hero-gif
+npm init -y && npm install playwright && npx playwright install chromium
+```
+
+Capture script (`scratch/hero-gif/capture.js`) - steps through the CSS
+animation with `Animation.currentTime` rather than waiting in real time, so
+every frame is exact regardless of machine speed:
+
+```js
+const { chromium } = require('playwright');
+const path = require('path');
+const fs = require('fs');
+
+const OUT_DIR = path.join(__dirname, 'frames');
+const URL = 'http://localhost:8791/hero.html';
+const DURATION_MS = 9000; // must match the CSS animation's total loop length
+const FPS = 12;
+const FRAME_COUNT = DURATION_MS / 1000 * FPS;
+
+(async () => {
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1300, height: 1000 } });
+  await page.goto(URL);
+  await page.waitForTimeout(200);
+  await page.evaluate(() => document.getAnimations().forEach(a => a.pause()));
+  const split = await page.$('.split');
+  for (let i = 0; i < FRAME_COUNT; i++) {
+    const t = (i * DURATION_MS) / FRAME_COUNT;
+    await page.evaluate((t) => {
+      document.getAnimations().forEach(a => { a.currentTime = t; });
+    }, t);
+    await split.screenshot({ path: path.join(OUT_DIR, `frame-${String(i).padStart(3, '0')}.png`) });
+  }
+  await browser.close();
+})();
+```
+
+```bash
+node capture.js
+
+# assemble at the shipped size (900x377) - dither=none is required, the
+# default bayer/floyd-steinberg dither is clearly visible as speckle noise
+# on the flat dark background at this bit depth
+ffmpeg -y -framerate 12 -i frames/frame-%03d.png \
+  -vf "scale=900:377:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff:max_colors=255[p];[b][p]paletteuse=dither=none" \
+  -loop 0 hero-anim.gif
+
+cp hero-anim.gif ../../docs/images/hero-anim.gif
+kill %1   # stop the http.server
+```
+
+Sanity-check before committing: extract a frame (`ffmpeg -i hero-anim.gif
+-vf "select=eq(n\,0)" -update 1 -vframes 1 frame0.png`) and crop-zoom a patch
+of flat background to eyeball for dither speckle - it should look as smooth
+as the previous gif, not noisy.
+
 ### Testing coding-agent integrations
 
 Use `shellwright` to test a coding agent end to end: it runs the agent (codex,
