@@ -1959,10 +1959,12 @@ private final class SessionCellView: NSTableCellView {
         right.spacing = s(5)
         if row.pinned {
             let pin = NSImageView()
-            let config = NSImage.SymbolConfiguration(pointSize: s(9), weight: .semibold)
+            let config = NSImage.SymbolConfiguration(pointSize: s(10), weight: .semibold)
             pin.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned")?
                 .withSymbolConfiguration(config)
-            pin.contentTintColor = Theme.textDim
+            // Age tier, not textDim: the pin is user-applied state and must not
+            // read dimmer than the age text beside it.
+            pin.contentTintColor = Theme.age
             right.addArrangedSubview(pin)
         }
         right.addArrangedSubview(ageLabel)

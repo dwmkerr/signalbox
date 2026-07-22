@@ -27,8 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Drive `#tag` search in the palette.
         var tags: [String]?
         // User pin, carried across agent events (pins survive agent activity);
-        // only pin/unpin change it. The hub returns pinned-first order, adopted
-        // verbatim - this flag only drives the pin mark, never local sorting.
+        // only pin/unpin change it. Drives the pin mark and the reposition
+        // partition - pinned rows sort first, mirroring the hub's order.
         var pinned: Bool
         // Tracked locally so a `done` after a long `busy` can earn a notification.
         var busySince: Date?
@@ -284,12 +284,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             session.tags = set.isEmpty ? nil : set
             sessions[key] = session
         case "pin", "unpin":
-            // User pin toggle: flips the flag so the mark updates live. No ack,
-            // no engagement bump, no local reorder - the hub returns pinned-first
-            // order, adopted from the next /state resync.
+            // User pin toggle: flips the flag and repositions immediately so
+            // the row jumps into (or out of) the pinned partition without
+            // waiting for a /state resync. No ack, no engagement bump -
+            // engagement order within each partition is untouched, so the
+            // local move lands exactly where the hub's order will.
             guard var session = sessions[key] else { break }
             session.pinned = event.event == "pin"
             sessions[key] = session
+            reposition(key)
         case "show":
             // User unhide: clears the flag so the row returns to the main list
             // in place. No ack, no engagement bump, no reorder - handled like the
@@ -350,11 +353,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Insert the changed session where engagement MRU puts it (engaged_ts
     // descending), leaving every other row exactly where /state placed it.
+    // Pinned rows form a top partition (hub contract): an engagement bump on
+    // an unpinned row must never carry it above a pinned one, so insertion
+    // respects the partition before comparing engagement.
     private func reposition(_ key: String) {
         order.removeAll { $0 == key }
         guard let session = sessions[key] else { return }
         let index = order.firstIndex { otherKey in
             guard let other = sessions[otherKey] else { return false }
+            if session.pinned != other.pinned { return session.pinned }
             return other.engagedDate < session.engagedDate
         } ?? order.count
         order.insert(key, at: index)
