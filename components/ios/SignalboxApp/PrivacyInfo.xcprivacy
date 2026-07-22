@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Apple's required-reason privacy manifest. It lives in the synchronized
+  SignalboxApp group so it is copied into the bundle root as a resource with no
+  pbxproj entry. Signalbox collects nothing: the hub is the user's own machine
+  and the app only talks to it, so there is no tracking and no collected data.
+  The one required-reason API it touches is UserDefaults, via @AppStorage for
+  the app's own settings; CA92.1 is Apple's declared reason for an app reading
+  and writing its own defaults. Keychain access needs no entry.
+-->
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

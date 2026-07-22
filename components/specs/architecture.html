@@ -1,0 +1,453 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>signalbox architecture</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; color:#c9c9ce; font-size:16px; line-height:1.6;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Arial,sans-serif;
+         display:flex; flex-direction:column; align-items:center; padding:48px 20px; }
+  .page { width:860px; max-width:100%; }
+  .nav { color:#6E6E73; font-size:13px; margin-bottom:18px; }
+  .nav a { color:#0A84FF; text-decoration:none; }
+  h1 { color:#EDEDED; font-size:26px; margin-bottom:6px; }
+  .subtitle { color:#98989D; font-size:15px; margin-bottom:8px; }
+  .note-line { color:#c9c9ce; font-size:14px; margin-bottom:22px; }
+  .prose h2 { color:#EDEDED; font-size:19px; font-weight:600; margin:26px 0 10px;
+              padding-bottom:6px; border-bottom:1px solid #ffffff1a; }
+  .prose h3 { color:#EDEDED; font-size:15.5px; font-weight:600; margin:18px 0 6px; }
+  .prose p { margin-bottom:10px; }
+  .prose ul { padding-left:22px; margin-bottom:10px; }
+  .prose li { margin-bottom:4px; }
+  .prose code, code { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:13.5px;
+                background:#ffffff12; border-radius:4px; padding:1px 5px; color:#D8D8DC; }
+  .prose a { color:#0A84FF; text-decoration:none; }
+  .prose table { border-collapse:collapse; margin:10px 0; width:100%; }
+  .prose th, .prose td { border:1px solid #ffffff1e; padding:6px 12px; text-align:left; font-size:14.5px;
+                         vertical-align:top; }
+  .prose th { color:#EDEDED; }
+  .amber { color:#FF9F0A; } .blue { color:#0A84FF; } .red { color:#FF453A; } .green { color:#34C759; }
+
+  /* Status chips: this spec describes both what exists and what is designed
+     but unbuilt, so every section that is not yet code says so in place. */
+  .chip { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.4px;
+          text-transform:uppercase; padding:2px 7px; border-radius:4px; vertical-align:2px;
+          margin-left:8px; }
+  .chip.built { background:#34C75922; color:#34C759; border:1px solid #34C75955; }
+  .chip.proposed { background:#FF9F0A22; color:#FF9F0A; border:1px solid #FF9F0A55; }
+  .banner { border:1px solid #FF9F0A55; background:#FF9F0A14; border-radius:8px;
+            padding:12px 14px; margin-bottom:22px; font-size:14px; }
+  .banner b { color:#FF9F0A; }
+
+  /* Topology diagrams. Boxes and rails, not art: every node is a real process
+     and every arrow is a real protocol. */
+  .diagram { border:1px solid #ffffff18; border-radius:10px; background:#141417;
+             padding:22px; margin:14px 0 6px; overflow-x:auto; }
+  .dcap { color:#6E6E73; font-size:12px; margin-bottom:16px; }
+  .machine { border:1px dashed #ffffff2e; border-radius:9px; padding:14px; position:relative;
+             min-width:0; }
+  .machine > .mlabel { position:absolute; top:-9px; left:12px; background:#141417; padding:0 7px;
+                       color:#98989D; font-size:11.5px; letter-spacing:.3px; }
+  .cols { display:flex; gap:18px; align-items:stretch; }
+  .col { display:flex; flex-direction:column; gap:9px; justify-content:center; min-width:0; }
+  .node { border:1px solid #ffffff26; border-radius:7px; padding:7px 11px; font-size:13px;
+          background:#1c1c20; color:#D8D8DC; white-space:nowrap; }
+  .node.hub { border-color:#0A84FF88; background:#0A84FF14; color:#EDEDED; }
+  .node.hub b { color:#0A84FF; }
+  .node.store { border-color:#34C75966; background:#34C75910; }
+  .node.phone { border-color:#FF9F0A66; background:#FF9F0A10; }
+  .node .sub { display:block; color:#6E6E73; font-size:11px; margin-top:2px; }
+  .arrow { display:flex; flex-direction:column; justify-content:center; align-items:center;
+           color:#6E6E73; font-size:11px; padding:0 2px; white-space:nowrap; }
+  .arrow .line { color:#48484c; font-size:15px; letter-spacing:-1px; }
+  pre.ascii { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:12.5px; line-height:1.45;
+              color:#98989D; white-space:pre; }
+</style></head><body>
+
+<div class="page">
+<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | <a href="settings.html">settings</a> | <a href="menubar.html">menu bar</a> | <a href="ios.html">ios</a> | architecture | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
+<h1>Specification: signalbox architecture</h1>
+<div class="subtitle">Where the processes are, what talks to what, and what secures it.</div>
+<div class="note-line"><b>Note:</b> this page is the living specification for signalbox's topology and security model. <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">events.md</a> owns the wire schema and the hub API; this page owns the deployment shape around it.</div>
+
+<div class="banner">
+  <b>Read the status chips.</b> Sections marked <span class="chip built">built</span> describe
+  shipped behaviour and must match the code. Sections marked
+  <span class="chip proposed">proposed</span> are designed but not implemented; they lead the code
+  deliberately, per <a href="README.md">the spec convention</a>.
+</div>
+
+<div class="prose">
+
+<h2>The shape of the system</h2>
+<p>Three roles, and every signalbox deployment is some arrangement of them:</p>
+<ul>
+  <li><b>Emitters</b> fire events as agents work. Hooks, adapters, CI. They only ever write.</li>
+  <li><b>The hub</b> folds events into one session per <code>session_key</code>, persists them, and
+  broadcasts. Exactly one process owns the truth.</li>
+  <li><b>Surfaces</b> render sessions and let you act on them. Jumplist, menu bar, tmux picker, CLI,
+  and (proposed) the iOS app.</li>
+</ul>
+<p><b>Machine versus human</b> is the axis the security model divides on. Surfaces write too, because
+<code>seen</code>, <code>hide</code>, <code>label</code> and <code>tag</code> are events like any other,
+so the divide is by actor rather than by direction. Credential type divides on the same axis: a hook
+cannot complete an interactive login.</p>
+
+<h3>Read plane and control plane</h3>
+<p>The <b>read plane</b> flows one way: events go agents to hub to surfaces, and a surface writes back
+only annotations about the display (<code>seen</code>, <code>hide</code>, <code>label</code>). Nothing
+a surface does touches a machine.</p>
+<p><a href="#jump">Jump</a> adds a <b>control plane</b>: a request flows <i>backwards</i> through the
+bus and makes a machine act. A railway signal box is exactly this, a place you pull levers from to move
+things at a distance. The security model grows to match, and the rest of this page separates the two
+planes. Reading and actuating use separate credentials (see <a href="#risk">the security tiers</a>).</p>
+
+<h2>Local: one machine <span class="chip built">built</span></h2>
+<p>The default, and the only shape that exists today. Everything is loopback.</p>
+
+<div class="diagram">
+  <div class="dcap">Default deployment. No network, no auth, no configuration.</div>
+  <div class="machine">
+    <span class="mlabel">your mac</span>
+    <div class="cols">
+      <div class="col">
+        <div class="node">claude<span class="sub">hook</span></div>
+        <div class="node">opencode<span class="sub">plugin</span></div>
+        <div class="node">pi<span class="sub">adapter</span></div>
+        <div class="node">github actions<span class="sub">signalbox fire</span></div>
+      </div>
+      <div class="arrow">
+        <span>POST /events</span>
+        <span class="line">&#9472;&#9472;&#9654;</span>
+        <span>200ms, spools</span>
+      </div>
+      <div class="col">
+        <div class="node hub"><b>signalbox hub</b><span class="sub">127.0.0.1:8377</span></div>
+        <div class="node store">events.jsonl<span class="sub">the only durable state</span></div>
+      </div>
+      <div class="arrow">
+        <span>GET /state</span>
+        <span class="line">&#9472;&#9472;&#9654;</span>
+        <span>GET /stream</span>
+      </div>
+      <div class="col">
+        <div class="node">menu bar app<span class="sub">jumplist, supervises the hub</span></div>
+        <div class="node">tmux picker</div>
+        <div class="node">signalbox CLI</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3>The app owns the hub</h3>
+<p>There is no LaunchAgent. The menu bar app spawns <code>signalbox hub</code> as a child, keeps it
+alive, and stops it on quit (<code>Hub.swift</code>). The bundle embeds a version-matched CLI at
+<code>Contents/Resources/signalbox</code>, so the app and the hub can never skew. Run the hub yourself
+with <code>signalbox hub</code> when you want it in the foreground.</p>
+
+<h3>Properties worth protecting</h3>
+<ul>
+  <li><b>State is derived.</b> <code>events.jsonl</code> is the only durable artifact; the in-memory
+  store rebuilds from it on boot and <code>seq</code> continues from the highest persisted value. A
+  host needs one process and one writable file. Nothing else.</li>
+  <li><b>One write path.</b> Every event reaches state through <code>ingest()</code> - including the
+  expiry and liveness sweeps, which fire real <code>ended</code> events rather than mutating state
+  behind the reducer's back. Do not add a second write path.</li>
+  <li><b>The reducer is pure.</b> <code>Store</code> has no I/O, no clock, no network. It is the
+  product's semantics in about a hundred lines, and it is testable because of that.</li>
+  <li><b>Routing is separable from serving.</b> <code>hub.handle()</code> takes a
+  <code>Request</code> and returns a <code>Response</code>, so tests drive every endpoint without a
+  socket.</li>
+</ul>
+
+<h3>Security model: the process boundary</h3>
+<p>The hub binds <code>127.0.0.1</code> and has no auth by contract: on a local hub the operating system
+is the boundary, and anything that can reach loopback can already read your files. Two defences guard
+the edges of that assumption:</p>
+<ul>
+  <li>Requests whose <code>Host</code> header is not a loopback literal are rejected. A hostile page
+  can point a DNS name it controls at <code>127.0.0.1</code> and read <code>/state</code>
+  same-origin; this is the DNS rebinding defence.</li>
+  <li>Only <code>application/json</code> may POST. <code>text/plain</code> and form encodings are CORS
+  "simple requests" that a hostile page can send with no preflight.</li>
+</ul>
+<p><code>signalbox hub</code> with no flags stays loopback, unauthenticated and zero-config.</p>
+
+<h2 id="jump">Jump executes locally, but anyone can ask <span class="chip built">built</span></h2>
+<p>Jumping spawns <code>tmux</code> against a socket path on the local filesystem, or activates a
+local window. It acts on the machine it runs on. Every event carries <code>host</code>, so a session
+on another machine can be <i>seen</i> from anywhere but <i>jumped to</i> only by its own host.</p>
+<p>State is shareable while execution stays local, so the hub is free to move. Sharing a hub does not
+break jumping, because jumping reads a row and then acts locally.</p>
+<p>A phone does not jump, and does not need to: the machine that can jump is already listening to the
+hub. The phone asks, and the laptop answers:</p>
+
+<div class="diagram">
+  <div class="dcap">A command in, an event back. The phone never touches a window.</div>
+  <div class="cols">
+    <div class="col">
+      <div class="node phone">iOS app<span class="sub">taps a row</span></div>
+    </div>
+    <div class="arrow">
+      <span>POST /command</span>
+      <span class="line">&#9472;&#9472;&#9654;</span>
+      <span>{ok, delivered}</span>
+    </div>
+    <div class="col">
+      <div class="node hub"><b>hub</b><span class="sub">fans out, forgets</span></div>
+    </div>
+    <div class="arrow">
+      <span>event: command</span>
+      <span class="line">&#9472;&#9472;&#9654;</span>
+      <span>every machine</span>
+    </div>
+    <div class="col">
+      <div class="node">menu bar app<span class="sub">is this me?</span></div>
+      <div class="node store">signalbox jump<span class="sub">raises the window</span></div>
+    </div>
+  </div>
+  <div style="text-align:center;color:#6E6E73;font-size:11.5px;margin-top:14px;">
+    &#8627; then <code>seen</code> goes back through the log as a normal event, and the phone's row
+    goes quiet. <b>That</b> is the confirmation.
+  </div>
+</div>
+
+<h3>Commands are not events</h3>
+<p>The hub logs every event and replays the log to whoever reconnects. A command must never enter
+that log: a replayed jump moves a window hours after the tap, and a client reconnecting from seq 0
+would replay <i>every jump ever fired</i>. So commands skip the log, the reducer and <code>seq</code>
+entirely - they exist only in flight. The full shape is in
+<a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">events.md</a>.</p>
+<p><b>A command goes out, an event comes back.</b> The request is ephemeral because it is only
+meaningful now; the result is a fact, so it is logged like any other. <code>jump</code> already fires
+<code>seen</code> once the switch has landed, so the board going quiet confirms success.</p>
+
+<h3>Every machine sees every command</h3>
+<p>The hub does not route and does not adjudicate. It fans a command out to everyone listening, and
+each machine decides whether it is the target. That keeps the hub a bus rather than a broker, and it
+means the decision lives where the knowledge is.</p>
+<p>The executing machine requires <b>both</b> the command's <code>target_host</code> (what the caller
+read off the row it tapped) and the session's own <code>host</code> to name it, and fails closed on a
+session it does not know. Requiring both makes a disagreement - a stale row on a phone, a session that
+moved - a silent no-op rather than a jump on the wrong machine.</p>
+
+<h3>Two consequences for any surface on a shared hub</h3>
+<ul>
+  <li>Rows must show <code>host</code> when there is more than one, and must make clear which rows can
+  be acted on. On a local hub every row is local, so nothing needs saying. Once two machines share a
+  hub, rows must name their host.</li>
+  <li><code>origin.kind</code> is the extension point. It already names <code>ssh</code> as a future
+  kind: a row on a machine that is not next to you could one day jump by opening an SSH session
+  rather than being inert.</li>
+</ul>
+
+<h2>Remote: one hub, many machines <span class="chip proposed">proposed</span></h2>
+<p>Points every machine at one hub so the board spans them, and so a phone can reach it. The hub is
+the same binary and the same API; what changes is where it binds and what it demands.</p>
+
+<div class="diagram">
+  <div class="dcap">Self-hosted. You run this; nobody runs it for you.</div>
+  <div class="cols">
+    <div class="col" style="gap:14px;">
+      <div class="machine">
+        <span class="mlabel">mac 1</span>
+        <div class="node" style="margin-bottom:7px;">hooks<span class="sub">SIGNALBOX_URL + token</span></div>
+        <div class="node">menu bar app<span class="sub">jump: local rows only</span></div>
+      </div>
+      <div class="machine">
+        <span class="mlabel">mac 2</span>
+        <div class="node" style="margin-bottom:7px;">hooks<span class="sub">SIGNALBOX_URL + token</span></div>
+        <div class="node">menu bar app</div>
+      </div>
+    </div>
+    <div class="arrow">
+      <span>HTTPS</span>
+      <span class="line">&#9472;&#9472;&#9654;</span>
+      <span>Bearer token</span>
+    </div>
+    <div class="col">
+      <div class="node hub"><b>signalbox hub</b><span class="sub">0.0.0.0:8377, TLS at the platform</span></div>
+      <div class="node store">events.jsonl<span class="sub">on a volume</span></div>
+    </div>
+    <div class="arrow">
+      <span>HTTPS</span>
+      <span class="line">&#9664;&#9472;&#9472;</span>
+      <span>Bearer token</span>
+    </div>
+    <div class="col">
+      <div class="node phone">iOS app<span class="sub">read + ack, never jump</span></div>
+    </div>
+  </div>
+</div>
+
+<h3>What changes</h3>
+<table>
+  <tr><th>Concern</th><th>Local</th><th>Remote</th></tr>
+  <tr><td>Bind</td><td><code>127.0.0.1</code></td><td><code>--bind 0.0.0.0</code></td></tr>
+  <tr><td>Auth</td><td>none (process boundary)</td><td><code>SIGNALBOX_TOKEN</code>, <code>Authorization: Bearer</code></td></tr>
+  <tr><td>Host check</td><td>loopback literals only</td><td>allowlist the configured hostname</td></tr>
+  <tr><td>TLS</td><td>n/a</td><td>terminated by the platform</td></tr>
+  <tr><td>Offline</td><td>always works</td><td>does not work, by contract</td></tr>
+</table>
+
+<h3>Two jobs, one check</h3>
+<p>The loopback <code>Host</code> check currently does <b>two</b> things: it defends against DNS
+rebinding, and it stands in for authentication. Going remote splits them. The rebinding defence survives
+as a hostname allowlist; auth becomes real. The token replaces authentication only, and does not cover
+DNS rebinding.</p>
+
+<h3>Binding wide without a token is a configuration error</h3>
+<p>A non-loopback bind with no token configured <b>must refuse to start</b>, with an error naming what
+to set. It fails hard rather than warning or offering an opt-past flag. The alternative is a board of
+everyone's prompts on the open internet.</p>
+
+<h3>Offline behaviour</h3>
+<p>A remote hub needs the network. Emitters spool to disk and drain on the next hook invocation, so
+events are delayed rather than lost, and the hook path never blocks a calling agent. Surfaces cannot
+read while offline. This is a documented contract. Local-first stays available to anyone who does not
+opt in.</p>
+
+<h2 id="risk">Security tiers <span class="chip proposed">proposed</span></h2>
+
+<div class="banner">
+  <b>Commands change what a leaked token costs.</b> On the read plane a stolen token exposes your
+  breadcrumbs. On the control plane it also lets someone drive your machines. The credential to command
+  is separate from the credential to read, and token scopes matter once <code>POST /command</code>
+  exists. See below.
+</div>
+
+<p>Ranked by security per line of code we write. Pick per deployment; they are not exclusive.</p>
+<table>
+  <tr><th>Tier</th><th>What secures it</th><th>Cost to signalbox</th></tr>
+  <tr><td><b>Loopback</b><br><span style="color:#6E6E73">the default</span></td>
+      <td>The OS process boundary.</td>
+      <td>Zero. Built.</td></tr>
+  <tr><td><b>Private network</b><br><span style="color:#6E6E73">Tailscale, WireGuard</span></td>
+      <td>The tunnel. Identity, device revocation, TLS and NAT traversal all handled outside
+      signalbox. Nothing is exposed publicly.</td>
+      <td>Nearly zero: a <code>--bind</code> flag and a page of docs. Web push still works over a
+      tailnet - it needs an HTTPS origin and outbound reach to the push service, not inbound.</td></tr>
+  <tr><td><b>Public + token</b><br><span style="color:#6E6E73">Fly.io, a VPS</span></td>
+      <td>One shared bearer token. TLS from the platform.</td>
+      <td>Small. The work described above.</td></tr>
+  <tr><td><b>Public + identity</b><br><span style="color:#6E6E73">GitHub device flow</span></td>
+      <td>A GitHub identity checked against an allowlist. No shared secret on the hub.</td>
+      <td>Real, and additive. See below.</td></tr>
+</table>
+
+<h3>Tokens stay for machines</h3>
+<p>Hooks, CI runners and the CLI are machines. They cannot complete an interactive flow, so they need
+a machine credential regardless of any identity layer. GitHub auth replaces the <i>human</i> login step
+only. Tokens come first.</p>
+<p>Identity <b>removes the shared secret from every hub</b>. Each hub configures an allowlist
+(<code>SIGNALBOX_ALLOW=dwmkerr</code>) rather than a secret; a client authenticates once with GitHub
+and presents that identity to any hub, which validates it independently. One identity, many hubs, no
+passwords to leak or rotate. Device flow needs no client secret, so a self-hosted hub stores nothing
+sensitive.</p>
+
+<h3>The risk</h3>
+<p>A remote hub holds a breadcrumb of every prompt you type and every reply your agents give, across
+every machine you point at it, on someone else's server. A single shared token is the only thing
+protecting it: anyone holding it can read every breadcrumb and forge events. It does not expire, and
+rotating it means redeploying the hub and updating every machine. Use
+<code>SIGNALBOX_PROFILE=redacted</code> where even one line must not leave.</p>
+<p>The realistic leak vector is the token sitting in shell history, env files and CI configs across
+several machines; a 32-byte random token is not guessable by brute force. Reducing the number of places
+the token lives matters more than making the token longer.</p>
+
+<h3>Scopes, once commands exist</h3>
+<p>Once one token also authorizes <code>POST /command</code>, a single all-powerful token no longer
+holds up. The credential splits along the same machine-versus-human axis everything else does:</p>
+<table>
+  <tr><th>Scope</th><th>Grants</th><th>Held by</th></tr>
+  <tr><td><code>emit</code></td><td><code>POST /events</code></td><td>a hook, a CI runner - can announce work, cannot read your board or command anything</td></tr>
+  <tr><td><code>read</code></td><td><code>/state</code>, <code>/stream</code></td><td>a dashboard, a phone that only watches</td></tr>
+  <tr><td><code>actuate</code></td><td><code>POST /command</code></td><td>the highest-risk scope, hardest to obtain</td></tr>
+</table>
+<p>The stronger form, to aim for before commands carry more than a jump: <b>authority to command belongs
+to the target machine.</b> The hub token gets you onto the bus; whether your laptop <i>acts</i> on a
+command is the laptop's decision, from its own allowlist of device identities it has accepted once.
+Holding the hub token lets someone watch; commanding your laptop needs your laptop to have accepted that
+device.</p>
+
+<h3>And if commands ever carry messages</h3>
+<p>The obvious next command is <code>message</code>: send text to an agent, not just jump to it. It is
+not built; this section exists so the door it opens is opened deliberately. Three things change the
+moment a command carries content:</p>
+<ul>
+  <li><b>The blast radius becomes code execution.</b> A leaked <code>actuate</code> credential that can
+  jump is annoying. One that can instruct an agent with tool access is remote code execution by proxy.
+  <code>actuate</code> must be the hardest scope to hold, and per-machine authorization becomes
+  required.</li>
+  <li><b>The privacy contract only points one way.</b> Today it governs content <i>leaving</i> a
+  machine: cropped breadcrumbs, and <code>redacted</code> strips what departs. A message is content
+  flowing <i>in</i>, and <code>redacted</code> cannot strip a payload that is the entire point of the
+  request. Inbound content needs its own contract.</li>
+  <li><b>Broadcast stops being free.</b> The hub fans every command to everyone and lets each machine
+  self-select, which works when the payload is "jump to session X". Text meant for one machine is
+  readable by every other machine on the same hub. Content-bearing commands force routing, and routing
+  forces client identity, so a <code>message</code> command is where the hub stops being a pure bus.</li>
+</ul>
+<p><a href="#jump">Jump</a> is a safe place to have crossed into a control plane: the worst a stray
+jump can do is raise a window. Learn the shape here; do not ship a content-bearing command until the
+scopes above and per-machine authority are real.</p>
+
+<h2>Rejected: two hubs replicating <span class="chip proposed">proposed</span></h2>
+<p>The tempting shape is a local hub per machine that syncs to a shared one: local-first writes, a
+remote aggregate for the phone. <b>Do not build this.</b></p>
+<p><code>Store</code> is not a CRDT. It is last-write-wins on <i>arrival order</i>, not on
+<code>ts</code>: any agent event clears <code>acked</code>, so an ack at t=6 that arrives before an
+agent event at t=5 is silently wiped by the older event. Two hubs ingesting in different orders
+diverge. <code>seq</code> is per-hub ingest order, so <code>?since=N</code> is meaningless across two
+of them, and a downlink echo loops because nothing dedupes on event <code>id</code>. The cost is a
+distributed system for a list of terminal sessions.</p>
+<p>If shared state ever needs to survive a partition, the reducer becomes a real CRDT first, as its own
+piece of work.</p>
+
+<h2>Accepted: a local proxy <span class="chip proposed">proposed</span></h2>
+<p>The safe version of the same instinct. A local <code>signalbox hub --upstream &lt;url&gt;</code>
+keeps <b>no state of its own</b>: it forwards POSTs upstream with the token attached and relays the
+upstream stream back down. Every other client on the machine keeps talking to loopback, unchanged and
+unaware.</p>
+
+<div class="diagram">
+  <div class="dcap">Optional. The truth stays remote; nothing is replicated.</div>
+  <div class="machine">
+    <span class="mlabel">your mac</span>
+    <div class="cols">
+      <div class="col">
+        <div class="node">hooks<span class="sub">no token, no config</span></div>
+        <div class="node">menu bar app<span class="sub">unchanged</span></div>
+        <div class="node">tmux picker<span class="sub">unchanged</span></div>
+      </div>
+      <div class="arrow">
+        <span>loopback</span>
+        <span class="line">&#9472;&#9472;&#9654;</span>
+      </div>
+      <div class="col">
+        <div class="node hub"><b>hub --upstream</b><span class="sub">proxy, no store</span></div>
+      </div>
+      <div class="arrow">
+        <span>HTTPS + token</span>
+        <span class="line">&#9472;&#9472;&#9654;</span>
+      </div>
+      <div class="col">
+        <div class="node hub" style="border-color:#34C75988;background:#34C75910;"><b>remote hub</b><span class="sub">the truth</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p>What it buys, in order of how much it matters:</p>
+<ul>
+  <li><b>The token lives in exactly one place per machine.</b> Not in every hook env, shell profile
+  and CI config. This closes the actual leak vector.</li>
+  <li><b>Nothing else on the machine changes.</b> No client edits, no migration.</li>
+  <li><b>No conflicts are possible</b>, because the proxy never originates state.</li>
+</ul>
+<p>It may hold a read-through cache of upstream state so surfaces still render when the uplink drops.
+A cache fed by the upstream stream is a materialised view that originates nothing, so there is nothing
+to reconcile. Writes go up, come back down, and apply.</p>
+
+</div>
+</div>
+</body></html>

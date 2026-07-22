@@ -25,10 +25,13 @@ struct SessionEvent: Decodable {
     let seq: Int?
     let acked: Bool?
     let hidden: Bool?
+    // User pin (the "pin"/"unpin" user-event); /state rows carry it true when
+    // set. Pinned rows sort first (hub-authoritative order).
+    let pinned: Bool?
     let origin: SessionOrigin?
 
     enum CodingKeys: String, CodingKey {
-        case agent, event, reason, host, cwd, title, prompt, detail, reply, label, tags, ts, seq, acked, hidden, origin
+        case agent, event, reason, host, cwd, title, prompt, detail, reply, label, tags, ts, seq, acked, hidden, pinned, origin
         case sessionKey = "session_key"
         case engagedTs = "engaged_ts"
     }
@@ -58,6 +61,7 @@ struct SessionEvent: Decodable {
         seq = try? container.decodeIfPresent(Int.self, forKey: .seq)
         acked = try? container.decodeIfPresent(Bool.self, forKey: .acked)
         hidden = try? container.decodeIfPresent(Bool.self, forKey: .hidden)
+        pinned = try? container.decodeIfPresent(Bool.self, forKey: .pinned)
         origin = try? container.decodeIfPresent(SessionOrigin.self, forKey: .origin)
     }
 }
@@ -178,6 +182,28 @@ func ageString(from date: Date, to now: Date = Date()) -> String {
     if seconds < 3600 { return "\(seconds / 60)m" }
     if seconds < 86400 { return "\(seconds / 3600)h" }
     return "\(seconds / 86400)d"
+}
+
+// A command off the hub's `event: command` frame (specs/events.md). Not an
+// event and deliberately not shaped like one: no `event` field, no `seq`. A
+// command is a request to a machine right now, so it is never logged and never
+// replayed - a replayed jump would move a window hours after the tap.
+//
+// Strict where SessionEvent is lenient. An event we half-understand is still
+// worth drawing; a command we half-understand would move a window on the wrong
+// machine, so anything malformed must fail to decode and be dropped.
+struct HubCommand: Decodable {
+    let command: String
+    let sessionKey: String
+    // The host the caller read off the row it tapped. Checked against the
+    // session's own host before acting: a disagreement is a no-op.
+    let targetHost: String
+
+    enum CodingKeys: String, CodingKey {
+        case command
+        case sessionKey = "session_key"
+        case targetHost = "target_host"
+    }
 }
 
 // MainActor because ISO8601DateFormatter is not Sendable; all parsing happens

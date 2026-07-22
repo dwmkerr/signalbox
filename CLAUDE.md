@@ -58,8 +58,18 @@ cd components/cli && bunx tsc --noEmit   # typecheck
 a running hub and the app respawns it with the new build within seconds;
 relaunch the app itself to pick up an app rebuild.
 
+### Testing coding-agent integrations
+
+Use `shellwright` to test a coding agent end to end: it runs the agent (codex,
+claude, ...) as a driven shell session so you can send input, read the streamed
+output, and take screenshots along the way. This is the way to verify an adapter
+against a real agent (e.g. confirm a Codex turn fires the hooks and the board
+updates), rather than only feeding canned hook payloads to `signalbox hook`.
+
 ## Conventions
 
+- Push to GitHub at the end of the day only - commit locally as you go, one
+  push when the day's work is done.
 - Conventional Commits (`feat:`, `fix:`, `docs:`, ...).
 - Comments explain *why*, not *what* - no breadcrumb comments.
 - Use a regular hyphen (-), never an em-dash, anywhere in code, comments, or docs.

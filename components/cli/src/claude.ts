@@ -104,8 +104,18 @@ export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
 // so the reducer's carry keeps the previous reply.
 export function claudeReply(h: ClaudeHook): string {
   const speaking = h.hook_event_name === "Stop" || isIdleNotification(h);
-  if (!speaking || !h.transcript_path) return "";
-  return cropReply(stripHarness(lastAssistantText(h.transcript_path)));
+  if (speaking && h.transcript_path) {
+    return cropReply(stripHarness(lastAssistantText(h.transcript_path)));
+  }
+  // A permission/attention notification: show the notification message (it names
+  // what Claude needs) rather than let the row fall back to a stale prompt. The
+  // transcript is deliberately NOT read here - on a permission prompt its last
+  // line is stale, not the ask. Empty message keeps the prompt fallback. Rarely
+  // seen when running with permissions bypassed.
+  if (h.hook_event_name === "Notification" && !isIdleNotification(h)) {
+    return cropReply(stripHarness(h.message || ""));
+  }
+  return "";
 }
 
 // Bounds how much of a transcript the hook path reads: the last assistant

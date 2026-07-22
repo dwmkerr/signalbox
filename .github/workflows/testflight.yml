@@ -1,0 +1,83 @@
+# Ships the iOS app to TestFlight on every push to main (and by hand via
+# dispatch), so a build lands on the phone without a laptop in the loop. The
+# product VERSION rides the release-please line in components/cli/package.json
+# - a main push bumps only the BUILD number, never the version; a real version
+# change happens when release-please lands one.
+#
+# Auth is an App Store Connect API key (three secrets: ASC_KEY_ID,
+# ASC_ISSUER_ID, ASC_KEY_P8 base64) - no certificates live in CI. The
+# distribution certificate is cloud-managed in Apple's account, and
+# -allowProvisioningUpdates with the key fetches it headless; that is the
+# whole reason this can run on a runner at all.
+#
+# Public repo: standard GitHub-hosted macOS runners are free.
+name: testflight
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: testflight
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write the App Store Connect API key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p ~/asc
+          echo "$ASC_KEY_P8" | base64 -d > ~/asc/key.p8
+
+      - name: Archive
+        working-directory: components/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          # The product version rides the release-please line; the build
+          # number is the run number offset past the hand-cut builds (1-4
+          # went up manually), so App Store Connect never sees a duplicate.
+          VERSION=$(node -p "require('../cli/package.json').version")
+          BUILD=$((100 + GITHUB_RUN_NUMBER))
+          echo "version $VERSION ($BUILD)"
+          xcodebuild archive \
+            -project Signalbox.xcodeproj -scheme Signalbox -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Signalbox.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/asc/key.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM=5TTNE9J58F \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD"
+
+      - name: Upload to TestFlight
+        working-directory: components/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          # The committed ExportOptions defaults to "export" so a local run can
+          # never upload by accident; CI flips it deliberately.
+          sed 's|<string>export</string>|<string>upload</string>|' \
+            ExportOptions.plist > /tmp/ExportUpload.plist
+          xcodebuild -exportArchive \
+            -archivePath build/Signalbox.xcarchive \
+            -exportOptionsPlist /tmp/ExportUpload.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/asc/key.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Scrub the key
+        if: always()
+        run: rm -f ~/asc/key.p8

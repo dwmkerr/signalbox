@@ -70,7 +70,7 @@
 </style></head><body>
 
 <div class="page">
-<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | <a href="settings.html">settings</a> | menu bar | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
+<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | <a href="settings.html">settings</a> | menu bar | <a href="ios.html">ios</a> | <a href="architecture.html">architecture</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
 <h1>Specification: signalbox menu bar</h1>
 <div class="subtitle">The status item: an icon with a status dot, and a dropdown listing every session.</div>
 <div class="note-line"><b>Note:</b> the mockups below are the living specification for the signalbox menu bar item (hover a dropdown row to see selection).</div>
@@ -93,7 +93,7 @@
     <div class="mrow"><span class="mk ring"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#6e6e73" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#34C759" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#6e6e73" stroke-width="1.6" stroke-linecap="round"/></svg></span><span class="t read">release-notes</span><span class="mage">5h</span></div>
     <div class="mrow"><span class="mk ring"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">crash-dumps</span><span class="mage">23h</span></div>
     <div class="msep"></div>
-    <div class="mrow"><span class="t">Refresh</span><span class="mage">⌘R</span></div>
+    <div class="mrow"><span class="agent" style="color:#1d1d1f"><svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="2.3" width="8" height="15.4" rx="2"/><line x1="9" y1="15" x2="11" y2="15" stroke-width="1.3"/></svg></span><span class="t">Connect Phone…</span></div>
     <div class="mrow"><span class="t">Settings…</span><span class="mage">⌘,</span></div>
     <div class="mrow"><span class="t">Quit Signalbox</span><span class="mage">⌘Q</span></div>
   </div>
@@ -101,12 +101,12 @@
 
 <div class="prose">
   <h2>Icon</h2>
-  <p>The beacon (radio waves) is the default; the list glyph is the alternate, switchable in
+  <p>The beacon (radio waves) is the default icon; the list glyph is the alternate, switchable in
   <a href="settings.html">settings</a>. Idle shows the plain template glyph. When sessions wait, one
-  dot appears top-right, and the highest urgency wins:
-  <span class="red">red failed</span> beats <span class="amber">amber needs-you</span> beats
+  dot appears top-right at the highest urgency:
+  <span class="red">red failed</span>, then <span class="amber">amber needs-you</span>, then
   <span class="blue">blue output updated</span>. The dot counts only unacked, unhidden rows, so a
-  dealt-with board goes quiet. No text counts on the icon.</p>
+  dealt-with board goes quiet. The icon carries a dot only, no text count.</p>
 
   <table>
     <tr><th>Dot</th><th>State</th></tr>
@@ -117,22 +117,51 @@
   </table>
 
   <h2>Dropdown</h2>
-  <p>One row per session in board order: status mark (same temperatures as the
-  <a href="hub-jumplist.html">jumplist</a> - a menu cannot animate, so working shows a static dotted
-  circle and failed the red ✕), the agent glyph (the same per-agent icon the jumplist
-  uses, not its name), name, age. Bold means unread; a faint ring means
-  read. Click a row to jump. Hidden rows drop out, and the
-  <a href="settings.html">additional filters</a> apply here too, so the dropdown always matches the
-  jumplist; with nothing to show, a disabled "No sessions" row. Below the sessions:
-  Refresh (⌘R), Settings… (⌘,), Quit Signalbox (⌘Q). If the signalbox CLI cannot be found, a
-  disabled banner row sits at the top (<code>signalbox CLI not found - brew install
-  dwmkerr/tools/signalbox (or set SIGNALBOX_BIN)</code>) - jump, hide and remove need the CLI. The
-  mock above shows the bar and the open dropdown together.</p>
+  <p>One row per session in board order: status mark, agent glyph, name, age.</p>
+  <ul>
+    <li>Status mark uses the same temperatures as the <a href="hub-jumplist.html">jumplist</a>. A menu
+    cannot animate, so working shows a static dotted circle and failed the red ✕.</li>
+    <li>The agent glyph is the same per-agent icon the jumplist uses (glyph only).</li>
+    <li>Bold means unread; a faint ring means read.</li>
+    <li>Click a row to jump.</li>
+    <li>Hidden rows drop out, and the <a href="settings.html">additional filters</a> apply here too, so
+    the dropdown matches the jumplist. With nothing to show, a disabled "No sessions" row appears.</li>
+    <li>Below the sessions: Connect Phone… (small phone glyph), Settings… (⌘,), Quit Signalbox (⌘Q).</li>
+    <li>No Refresh item; the stream resyncs on every reconnect and on wake.</li>
+    <li>If the signalbox CLI cannot be found, a disabled banner row sits at the top
+    (<code>signalbox CLI not found - brew install dwmkerr/tools/signalbox (or set SIGNALBOX_BIN)</code>).
+    Jump, hide and remove need the CLI.</li>
+  </ul>
+  <p>The mock above shows the bar and the open dropdown together.</p>
+
+  <h2>Connect Phone</h2>
+  <p>A small window (~360×460, titled "Connect Phone") that pairs the
+  <a href="ios.html">iPhone app</a> with the hub, WhatsApp-Web style: show a QR, wait, then confirm.
+  On open it POSTs to the loopback hub's <code>/pair/new</code> to mint a one-time code, then:</p>
+  <ul>
+    <li><b>Code minted (200).</b> It builds the pairing deep link
+    <code>signalbox://pair?url=&lt;percent-encoded http://LAN-IP:PORT&gt;&amp;code=&lt;code&gt;</code>
+    (the LAN IP comes from the response <code>bind</code> when concrete, otherwise this Mac's primary
+    Wi-Fi IPv4), renders it as a QR (CoreImage, upscaled nearest-neighbor so it stays crisp), and shows
+    "Scan with your iPhone camera" with the plain LAN URL beneath. It then polls
+    <code>/pair/status</code> every 2s: on <code>redeemed</code> it swaps to a green check and
+    "Phone paired" and auto-closes after ~2s; when the code expires (180s) it offers a "New code" button.</li>
+    <li><b>Hub only answers this Mac (409).</b> Pairing needs the hub reachable over the network, so the
+    window explains "Signalbox only answers this Mac" and offers <b>Allow other devices</b>. That button
+    writes <code>hub.bind = "0.0.0.0"</code> to <code>~/.config/signalbox/settings.json</code>
+    (deep-merged, other keys preserved), restarts the hub so it re-reads the config and binds every
+    interface with an auto-generated token, waits for it to answer, then re-mints and shows the QR. A
+    note warns that anyone on the network with the code could pair. Network access turns on only from
+    this button or the <a href="settings.html">Settings Hub checkbox</a>.</li>
+  </ul>
+  <p>The QR carries only the one-time code and the LAN URL, and <b>omits the hub token</b>. The phone
+  learns the token by redeeming the code against the hub over the LAN, so a photo of a used or expired
+  QR grants no access.</p>
 
   <h2>Notifications</h2>
   <ul>
-    <li>Attention and error always notify; done only after more than 30 seconds of work, because quick
-    prompt turnarounds are noise.</li>
+    <li>Attention and error always notify; done only after more than 30 seconds of work, skipping quick
+    prompt turnarounds.</li>
     <li>Clicking a notification jumps to the session.</li>
     <li>Notifications are keyed by session, so a newer signal replaces the stale banner.</li>
   </ul>

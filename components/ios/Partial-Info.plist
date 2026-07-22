@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Merged into the generated Info.plist (GENERATE_INFOPLIST_FILE stays on). Only
+  the keys Xcode's flat INFOPLIST_KEY_ build settings cannot express live here:
+  NSAppTransportSecurity is a nested dict, and the local-network prompt needs a
+  purpose string. Kept outside the synchronized SignalboxApp group on purpose,
+  so it is never copied as an app resource.
+
+  Loopback (the simulator) needs none of this - ATS already exempts localhost.
+  These keys are for a real device reaching a hub over the LAN: NSAllowsLocal-
+  Networking permits plain http to private-range and .local hosts without the
+  blanket NSAllowsArbitraryLoads, and iOS 14+ silently drops same-subnet
+  connections unless NSLocalNetworkUsageDescription is present.
+-->
+<dict>
+	<!--
+	  Export compliance: the app uses only exempt encryption (HTTPS via URLSession
+	  and Keychain), so declare it here and App Store Connect skips the per-build
+	  encryption questionnaire that would otherwise hold every upload.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Signalbox connects to the hub running on your computer to show your agent sessions.</string>
+	<!--
+	  The signalbox:// scheme is how the hub hands the phone a pairing link. iOS
+	  only routes a scheme back to this app if the app claims it here; without
+	  this key the QR/deep link opens nothing. The confirmation gate in
+	  SignalboxApp.onOpenURL is what keeps the open scheme safe.
+	-->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.dwmkerr.signalbox.ios</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>signalbox</string>
+			</array>
+		</dict>
+	</array>
+	<!-- The scanner reads the QR the hub prints; iOS hides the camera without a purpose string. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Signalbox uses the camera to scan the pairing code shown by your hub.</string>
+</dict>
+</plist>

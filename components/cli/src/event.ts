@@ -5,8 +5,9 @@
 
 import { hostname } from "node:os";
 
-// Event types, ordered as they rank for display urgency. Seen, Hide and
-// Label are user actions, not agent lifecycle - none touches recency.
+// Event types, ordered as they rank for display urgency. Seen, Hide, Show,
+// Pin, Unpin and Label are user actions, not agent lifecycle - none touches
+// recency (pin/unpin move the display partition, never engaged_ts).
 export const Attention = "attention";
 export const Error = "error";
 export const Done = "done";
@@ -14,6 +15,9 @@ export const Busy = "busy";
 export const Ended = "ended";
 export const Seen = "seen";
 export const Hide = "hide";
+export const Show = "show";
+export const Pin = "pin";
+export const Unpin = "unpin";
 export const Label = "label";
 export const Tag = "tag";
 export const Untag = "untag";
@@ -98,6 +102,9 @@ export interface Event {
   // Reducer-derived state-model metadata; a fired event never carries these.
   acked?: boolean;
   hidden?: boolean;
+  // The user pinned this session to the top partition. Unlike acked/hidden it
+  // outlives agent activity: only unpin or hide clears it (specs/events.md).
+  pinned?: boolean;
   engaged_ts?: string;
 }
 
@@ -126,11 +133,21 @@ export function cropLabel(s: string): string {
 }
 
 export function validType(t: string): boolean {
-  return [Attention, Error, Done, Busy, Ended, Seen, Hide, Label, Tag, Untag].includes(t);
+  return [Attention, Error, Done, Busy, Ended, Seen, Hide, Show, Pin, Unpin, Label, Tag, Untag].includes(t);
 }
 
 export function shortHostname(): string {
   return hostname().split(".")[0] ?? "";
+}
+
+// agentFamily is the base agent that anchors session identity, stripping any
+// editor-host display prefix: "vscode/claude" and "cursor/claude" both key on
+// "claude", so one session keeps a single identity whether it runs in a plain
+// terminal or an editor. session_key is built from the family; only the display
+// `agent` field carries the host prefix (specs/events.md).
+export function agentFamily(agent: string): string {
+  const slash = agent.indexOf("/");
+  return slash > 0 ? agent.slice(slash + 1) : agent;
 }
 
 // nowTS matches the Go emitter's time.Now().UTC().Truncate(time.Second):
@@ -166,6 +183,22 @@ export function newSeen(sessionKey: string): Event {
 
 export function newHide(sessionKey: string): Event {
   return newUserEvent(Hide, sessionKey, "");
+}
+
+// newShow unhides a session in place: the reverse of hide, clearing hidden
+// with no ack and no reorder so the row reappears where it sat.
+export function newShow(sessionKey: string): Event {
+  return newUserEvent(Show, sessionKey, "");
+}
+
+// newPin / newUnpin float a session into the pinned top partition or release
+// it. A pin is the user's until removed; only unpin or hide drops it.
+export function newPin(sessionKey: string): Event {
+  return newUserEvent(Pin, sessionKey, "");
+}
+
+export function newUnpin(sessionKey: string): Event {
+  return newUserEvent(Unpin, sessionKey, "");
 }
 
 // newLabel sets signalbox's own display label (cropped at the emitter).

@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Discreet tags carried across agent events; only tag/untag change them.
         // Drive `#tag` search in the palette.
         var tags: [String]?
+        // User pin, carried across agent events (pins survive agent activity);
+        // only pin/unpin change it. The hub returns pinned-first order, adopted
+        // verbatim - this flag only drives the pin mark, never local sorting.
+        var pinned: Bool
         // Tracked locally so a `done` after a long `busy` can earn a notification.
         var busySince: Date?
     }
@@ -60,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkey: GlobalHotkey?
     private var palette: PaletteController?
     private var settings: SettingsController?
+    private var connectPhone: ConnectPhoneController?
     // Additional filters (Settings): when set, every surface - the jumplist and
     // the menu bar list - shows only sessions carrying these tags. Persisted so
     // it survives restarts, the quiet way to flip the board to `demo` for a
@@ -90,8 +95,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
 
         settings = SettingsController(
+            hubURL: hubURL,
             onIconChange: { [weak self] in self?.updateStatusIcon() },
-            onFilterChange: { [weak self] in self?.refreshUI() }
+            onFilterChange: { [weak self] in self?.refreshUI() },
+            restartHub: { [weak self] in await self?.hubSupervisor?.restart() }
+        )
+        connectPhone = ConnectPhoneController(
+            hubURL: hubURL,
+            restartHub: { [weak self] in await self?.hubSupervisor?.restart() }
         )
         setupNotifications()
         setupPalette()
@@ -167,15 +178,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
+        // The frame label decides what the next data line means: `signal` is an
+        // event to fold in, `command` is a request to act on now. Heartbeat
+        // comments (":") carry no payload; the hub sends each JSON on a single
+        // data line.
+        var frame = "signal"
         for try await line in bytes.lines {
-            // Heartbeat comments (":") and "event:" labels carry no payload; the
-            // hub sends each event's JSON on a single data line.
+            if line.hasPrefix("event:") {
+                frame = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+                continue
+            }
             guard line.hasPrefix("data:") else { continue }
             let payload = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-            guard let data = payload.data(using: .utf8),
-                  let event = try? JSONDecoder().decode(SessionEvent.self, from: data)
-            else { continue }
-            apply(event)
+            guard let data = payload.data(using: .utf8) else { continue }
+            if frame == "command" {
+                if let command = try? JSONDecoder().decode(HubCommand.self, from: data) {
+                    perform(command)
+                }
+            } else if let event = try? JSONDecoder().decode(SessionEvent.self, from: data) {
+                apply(event)
+            }
+            // Per SSE, the label applies to one dispatch only - reset so a
+            // later data line can never inherit a stale one.
+            frame = "signal"
         }
         // Server closed the stream cleanly - treat like a drop so the loop reconnects.
     }
@@ -203,6 +228,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 label: event.label,
                 // /state carries the merged tag set; hub-authoritative.
                 tags: event.tags,
+                // /state carries pinned; hub-authoritative, no local carry.
+                pinned: event.pinned ?? false,
                 busySince: busyStart(for: event, date: date, prev: prev)
             )
             if fresh[event.sessionKey] == nil { freshOrder.append(event.sessionKey) }
@@ -256,6 +283,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if event.event == "tag" { set.append(tag) }
             session.tags = set.isEmpty ? nil : set
             sessions[key] = session
+        case "pin", "unpin":
+            // User pin toggle: flips the flag so the mark updates live. No ack,
+            // no engagement bump, no local reorder - the hub returns pinned-first
+            // order, adopted from the next /state resync.
+            guard var session = sessions[key] else { break }
+            session.pinned = event.event == "pin"
+            sessions[key] = session
+        case "show":
+            // User unhide: clears the flag so the row returns to the main list
+            // in place. No ack, no engagement bump, no reorder - handled like the
+            // pin toggle, never rebuilt as an agent event.
+            guard var session = sessions[key] else { break }
+            session.hidden = false
+            sessions[key] = session
         case "hide":
             guard var session = sessions[key] else { break }
             if session.event.event == "busy" {
@@ -293,6 +334,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 label: prev?.label,
                 // Same for tags: raw agent events don't carry them, keep known.
                 tags: prev?.tags,
+                // Pins survive agent activity: raw events omit pinned, so keep
+                // the known state rather than clearing it.
+                pinned: event.pinned ?? prev?.pinned ?? false,
                 busySince: busyStart(for: event, date: date, prev: prev)
             )
             sessions[key] = session
@@ -403,8 +447,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rowsProvider: { [weak self] in self?.paletteRows() ?? [] },
             onJump: { [weak self] key in self?.jump(to: key) },
             onHide: { [weak self] key in self?.hide(sessionKey: key) },
+            onShow: { [weak self] key in self?.show(sessionKey: key) },
             onRemove: { [weak self] key in self?.remove(sessionKey: key) },
             onLabel: { [weak self] key, text in self?.setLabel(sessionKey: key, text: text) },
+            onPin: { [weak self] key, pinned in self?.setPinned(sessionKey: key, pinned: pinned) },
             onSettings: { [weak self] in self?.settings?.show() }
         )
         let spec: GlobalHotkey.Spec
@@ -514,8 +560,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func paletteRows() -> [PaletteRow] {
         let tokens = activeFilters()
+        // Hidden rows are included and flagged; the palette groups them under a
+        // collapsed "Hidden (N)" divider rather than dropping them, mirroring the
+        // mobile board and hub-jumplist.html.
         return orderedSessions().filter { session in
-            !session.hidden && passesFilters(session, tokens)
+            passesFilters(session, tokens)
         }.map { session in
             let event = session.event
             // Unread per Slack grammar = unacked needs-you; acked rows are
@@ -539,7 +588,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 location: locationText(for: session),
                 needsCheck: unread,
                 engagedDate: session.engagedDate,
-                tags: session.tags ?? []
+                tags: session.tags ?? [],
+                pinned: session.pinned,
+                isHidden: session.hidden
             )
         }
     }
@@ -589,6 +640,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return resolved
     }
 
+    // Names the editor behind a cursor-kind origin from its captured bundle.
+    // Cursor ships as a ToDesktop build whose reverse-DNS id is a meaningless
+    // slug, so name it directly; VS Code and other forks resolve through the
+    // terminal-name table (com.microsoft.VSCode -> "VS Code"). A missing bundle
+    // defaults to Cursor, matching the CLI jump's own fallback.
+    private func editorDisplayName(bundleID: String?) -> String {
+        guard let bundleID, !bundleID.isEmpty else { return "Cursor" }
+        if bundleID.lowercased() == "com.todesktop.230313mzl4w4u92" { return "Cursor" }
+        return terminalDisplayName(bundleID: bundleID)
+    }
+
     // The hub records bare hostnames; Bonjour-style ".local" suffixes differ
     // between capture points, so compare with the suffix stripped.
     private static let localHostName: String = {
@@ -596,12 +658,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return host.hasSuffix(".local") ? String(host.dropLast(6)) : host
     }()
 
-    private func hostDisplay(_ host: String?) -> String {
-        guard let host, !host.isEmpty else { return "localhost" }
+    /// Whether a host on the wire names this machine. Emitters send the
+    /// hostname verbatim ("M-J7H7N07NPX"), while localHostName is lowercased
+    /// and stripped of ".local" - so the two never match raw, and comparing
+    /// them directly is always false. Every host comparison goes through here.
+    private func isLocalHost(_ host: String?) -> Bool {
+        guard let host, !host.isEmpty else { return false }
         var normalized = host.lowercased()
         if normalized.hasSuffix(".local") { normalized = String(normalized.dropLast(6)) }
-        return (normalized == "localhost" || normalized == Self.localHostName)
-            ? "localhost" : host
+        return normalized == "localhost" || normalized == Self.localHostName
+    }
+
+    private func hostDisplay(_ host: String?) -> String {
+        guard let host, !host.isEmpty else { return "localhost" }
+        return isLocalHost(host) ? "localhost" : host
     }
 
     // The preview's action line: where Enter takes you, derived entirely from
@@ -616,11 +686,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return "Jump to \(app) (\(coords)) on \(hostDisplay(session.event.host))"
         }
-        if session.origin?.cursor != nil {
-            // Window-level focus only - Cursor's tabs aren't externally
-            // addressable (see specs/adapters.md).
+        if let cursor = session.origin?.cursor {
+            // Window-level focus only - editor tabs aren't externally
+            // addressable (see specs/adapters.md). Name the editor from the
+            // captured bundle so a VS Code-hosted session doesn't read as Cursor.
             let folder = session.event.title ?? "session"
-            return "Jump to Cursor (\(folder)) on \(hostDisplay(session.event.host))"
+            return "Jump to \(editorDisplayName(bundleID: cursor.bundle)) (\(folder)) on \(hostDisplay(session.event.host))"
         }
         if let raw = session.origin?.url, let url = URL(string: raw), let domain = url.host {
             if domain.lowercased() == "github.com" || domain.lowercased().hasSuffix(".github.com") {
@@ -716,15 +787,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 name: displayName(for: event, label: session.label),
                 age: ageString(from: sessionAgeStart(session), to: now),
                 unread: !session.acked && needsCheck(event.event),
-                read: session.acked && event.event != "busy"
+                read: session.acked && event.event != "busy",
+                pinned: session.pinned
             )
             // No "?" badge: the amber mark alone says asking (amber scheme).
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        let refresh = NSMenuItem(title: "Refresh", action: #selector(refreshAction), keyEquivalent: "r")
-        refresh.target = self
-        menu.addItem(refresh)
+        // No Refresh item: the stream resyncs /state on every (re)connect and
+        // on wake, so a manual refresh had nothing left to fix.
+        let connectItem = NSMenuItem(
+            title: "Connect Phone…", action: #selector(openConnectPhone), keyEquivalent: ""
+        )
+        connectItem.target = self
+        connectItem.image = connectPhoneMenuIcon()
+        menu.addItem(connectItem)
         let settingsItem = NSMenuItem(
             title: "Settings…", action: #selector(openSettings), keyEquivalent: ","
         )
@@ -735,6 +812,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         ))
+    }
+
+    // A small phone glyph on the Connect Phone item. Template-rendered so it
+    // takes the menu's own label color like a system menu image; the QR glyph
+    // is the fallback on the rare system without an "iphone" symbol.
+    private func connectPhoneMenuIcon() -> NSImage? {
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        let base = NSImage(systemSymbolName: "iphone", accessibilityDescription: "Connect Phone")
+            ?? NSImage(systemSymbolName: "qrcode", accessibilityDescription: "Connect Phone")
+        let image = base?.withSymbolConfiguration(config)
+        image?.isTemplate = true
+        return image
     }
 
     private func menuSymbol(for mark: StatusMark, word: String) -> NSImage? {
@@ -750,11 +839,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .withSymbolConfiguration(config)
     }
 
+    // A small dim pin as an NSTextAttachment, for the pinned-row marker in the
+    // dropdown titles. Color baked in (menu attachments do not take a tint).
+    private func pinMenuGlyph(size: CGFloat) -> NSTextAttachment? {
+        let config = NSImage.SymbolConfiguration(pointSize: size - 3, weight: .semibold)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.secondaryLabelColor]))
+        guard let image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned")?
+            .withSymbolConfiguration(config) else { return nil }
+        let attachment = NSTextAttachment()
+        attachment.image = image
+        attachment.bounds = CGRect(x: 0, y: -1, width: image.size.width, height: image.size.height)
+        return attachment
+    }
+
     private func menuTitle(
-        agent: String, name: String, age: String, unread: Bool, read: Bool
+        agent: String, name: String, age: String, unread: Bool, read: Bool, pinned: Bool
     ) -> NSAttributedString {
         let size = NSFont.systemFontSize
         let text = NSMutableAttributedString()
+        if pinned, let pin = pinMenuGlyph(size: size) {
+            // A quiet pin ahead of the glyph marks pinned rows in the dropdown,
+            // the same signal as the palette's pin mark.
+            text.append(NSAttributedString(attachment: pin))
+            text.append(NSAttributedString(string: " "))
+        }
         if !agent.isEmpty {
             // The agent glyph (same as the jumplist rows) instead of its name -
             // an at-a-glance icon reads faster than "claude · ".
@@ -788,12 +896,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return event.sessionKey
     }
 
-    @objc private func refreshAction() {
-        restartStream()
-    }
-
     @objc private func openSettings() {
         settings?.show()
+    }
+
+    @objc private func openConnectPhone() {
+        connectPhone?.show()
     }
 
     @objc private func jumpMenuItem(_ sender: NSMenuItem) {
@@ -801,10 +909,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         jump(to: key)
     }
 
+    // MARK: - Commands
+
+    /// Acts on a command off the hub's command frame. Every machine watching
+    /// the hub sees every command, so this is also the filter deciding it is
+    /// ours: a phone cannot jump, but it can ask the machine that owns the
+    /// session to, and that machine is the only one that may answer.
+    private func perform(_ command: HubCommand) {
+        guard command.command == "jump" else { return }
+        // Two independent checks, both required. The caller's target_host is
+        // what it read off the row it tapped; the session's own host is what
+        // this app knows. Requiring both means a disagreement - a stale row on
+        // the phone, a session that moved - does nothing, rather than jumping
+        // on the wrong machine. Unknown session fails closed for the same reason.
+        guard isLocalHost(command.targetHost) else { return }
+        guard let session = sessions[command.sessionKey],
+              isLocalHost(session.event.host) else { return }
+        jump(to: command.sessionKey)
+    }
+
     // MARK: - CLI actions (jump/hide/remove logic lives in the CLI only)
 
     func jump(to sessionKey: String) {
         // Jump auto-acks via the CLI (`seen` fires on success) - no app-side ack.
+        // That ack is also how a remote caller learns its jump landed: `seen`
+        // only fires once the switch actually happened, so the board going
+        // quiet is proof of success rather than mere receipt.
         runSignalbox(["jump", sessionKey])
     }
 
@@ -813,6 +943,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// hide state locally.
     func hide(sessionKey: String) {
         runSignalbox(["hide", sessionKey])
+    }
+
+    /// Fires `signalbox show` - the resulting `show` event clears the hidden
+    /// flag over SSE, returning the row to the main list; the app never mutates
+    /// hide state locally.
+    func show(sessionKey: String) {
+        runSignalbox(["show", sessionKey])
     }
 
     /// Fires `signalbox remove` - the hub answers with `ended` over SSE, which
@@ -828,6 +965,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var arguments = ["label", sessionKey]
         if !text.isEmpty { arguments.append(text) }
         runSignalbox(arguments)
+    }
+
+    /// Fires `signalbox session pin|unpin` - the hub echoes the pin/unpin event
+    /// over SSE and returns pinned-first order on the next /state, so every
+    /// surface repositions at once. The app never mutates pin order locally.
+    func setPinned(sessionKey: String, pinned: Bool) {
+        runSignalbox(["session", pinned ? "pin" : "unpin", sessionKey])
     }
 
     private func runSignalbox(_ arguments: [String]) {

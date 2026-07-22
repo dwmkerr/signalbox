@@ -21,6 +21,13 @@ export function hubURL(): string {
   return process.env.SIGNALBOX_URL || DefaultURL;
 }
 
+// authHeaders attaches the bearer token when SIGNALBOX_TOKEN is set. A loopback
+// hub ignores it; a non-loopback hub requires it. The token is never logged.
+function authHeaders(): Record<string, string> {
+  const token = process.env.SIGNALBOX_TOKEN;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export function stateDir(): string {
   if (process.env.SIGNALBOX_STATE_DIR) return process.env.SIGNALBOX_STATE_DIR;
   const home = homedir();
@@ -102,7 +109,7 @@ export class Client {
   private async post(line: string): Promise<void> {
     const res = await fetch(`${this.url}/events`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: line,
       signal: AbortSignal.timeout(postTimeoutMs),
     });
@@ -221,7 +228,10 @@ export async function fetchState(
   url: string,
   timeoutMs: number
 ): Promise<{ doc: StateDoc; raw: string }> {
-  const res = await fetch(`${url}/state`, { signal: AbortSignal.timeout(timeoutMs) });
+  const res = await fetch(`${url}/state`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
   const raw = await res.text();
   if (!res.ok) throw new Error(`hub returned ${res.status}: ${raw.trim()}`);
   return { doc: JSON.parse(raw) as StateDoc, raw };

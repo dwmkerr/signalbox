@@ -32,6 +32,28 @@ export function editorTerminalOrigin(env: Record<string, string | undefined>): O
   return { kind: "cursor", cursor: { bundle } };
 }
 
+// editorHost names the VS Code-family editor hosting the integrated terminal an
+// agent runs in, or null for a plain terminal. Cursor and VS Code both report
+// TERM_PROGRAM "vscode"; the bundle id tells them apart (editorTerminalOrigin
+// captures it), and any unrecognized fork is shown as VS Code. Reuses
+// editorTerminalOrigin so the detection lives in one place.
+export function editorHost(env: Record<string, string | undefined>): "cursor" | "vscode" | null {
+  const origin = editorTerminalOrigin(env);
+  if (!origin?.cursor) return null;
+  return origin.cursor.bundle === cursorBundle ? "cursor" : "vscode";
+}
+
+// hostPrefixedAgent decorates an agent's family name with the editor host it is
+// running inside, for the DISPLAY `agent` field only: "claude" becomes
+// "vscode/claude" or "cursor/claude" when fired from that editor's integrated
+// terminal, and stays the bare family in a plain terminal. The prefix drives
+// the icon (editor mark with the agent glyph badged); it must never reach
+// session_key, whose identity is the agent family alone (specs/events.md).
+export function hostPrefixedAgent(family: string, env: Record<string, string | undefined>): string {
+  const host = editorHost(env);
+  return host ? `${host}/${family}` : family;
+}
+
 // Subset of the Cursor hook stdin JSON signalbox consumes. Field names follow
 // the beta Hooks docs (conversation_id, hook_event_name, workspace_roots,
 // transcript_path, status). `status` rides on the `stop` event.

@@ -139,12 +139,14 @@ describe("claudeReply", () => {
     const got = claudeReply({ hook_event_name: "Notification", message: "Claude is waiting for your input", transcript_path: fixture });
     expect(got.startsWith("Done - both changes are in.")).toBe(true);
   });
-  test("permission_prompt does not (stale text)", () => {
-    const got = claudeReply({ hook_event_name: "Notification", notification_type: "permission_prompt", transcript_path: fixture });
-    expect(got).toBe("");
-  });
-  test("typeless permission message does not (stale text)", () => {
+  test("a permission notification shows its message, never the stale transcript", () => {
+    // The message is the fresh ask; the transcript's last line would be stale, so
+    // it is not read here.
     const got = claudeReply({ hook_event_name: "Notification", message: "Claude needs your permission to use Bash", transcript_path: fixture });
+    expect(got).toBe("Claude needs your permission to use Bash");
+  });
+  test("a permission notification with no message stays empty (prompt carries)", () => {
+    const got = claudeReply({ hook_event_name: "Notification", notification_type: "permission_prompt", transcript_path: fixture });
     expect(got).toBe("");
   });
   test("no transcript path is empty", () => {

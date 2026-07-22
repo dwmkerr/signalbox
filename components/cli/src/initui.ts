@@ -206,9 +206,16 @@ export async function runPicker(
         if (ch.install.length === 0 && ch.remove.length === 0) {
           process.stdout.write(`\n ${ok("✔")} No changes. ${dim("Press ⌃⌥J to see your board.")}\n`);
         } else {
-          process.stdout.write(`\n ${dim("Applying…")}\n`);
-          for (const line of await apply(ch)) process.stdout.write(`   ${line}\n`);
-          process.stdout.write(`\n ${ok("✔ Done.")} ${dim("Open a session and press ⌃⌥J.")}\n`);
+          // The apply lines carry their own honest outcomes (✔ configured,
+          // ⚠ needs a manual step) and a reconciling summary. No blanket "Done":
+          // a printed-only component must never read as configured.
+          process.stdout.write("\n");
+          for (const line of await apply(ch)) {
+            const colored = line.startsWith("✔") || line.startsWith("✓") ? ok(line)
+              : line.startsWith("⚠") ? amber(line) : line;
+            process.stdout.write(` ${colored}\n`);
+          }
+          process.stdout.write("\n");
         }
         resolve();
         return;

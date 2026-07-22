@@ -55,10 +55,10 @@
 </style></head><body>
 
 <div class="page">
-<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | settings | <a href="menubar.html">menu bar</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
+<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | settings | <a href="menubar.html">menu bar</a> | <a href="ios.html">ios</a> | <a href="architecture.html">architecture</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
 <h1>Specification: signalbox settings</h1>
 <div class="subtitle">Open from the menu bar (Settings…), or from the jumplist with <kbd>⌘</kbd><kbd>,</kbd> or its footer cog.</div>
-<div class="note-line"><b>Note:</b> the mockup below is the living specification for the signalbox settings window: a plain macOS preferences window, nothing more.</div>
+<div class="note-line"><b>Note:</b> the mockup below is the living specification for the signalbox settings window, a plain macOS preferences window.</div>
 
 <div class="win">
   <div class="titlebar">
@@ -85,8 +85,21 @@
       <span class="ctl"><span class="check on">✓</span> Rename session on Claude Code /rename</span>
     </div>
     <div class="subnote">On, a Claude /rename shows on the board as the session name. Off keeps the folder name. Your own ⌃R rename always wins either way.</div>
+    <div class="row">
+      <span class="ctl"><span class="check on">✓</span> Codex clear removes the session from the board</span>
+    </div>
+    <div class="row">
+      <span class="ctl"><span class="check on">✓</span> Rename session on Codex /rename</span>
+    </div>
+    <div class="subnote">The Codex pair of the two toggles above. Agent settings stay flat until a third agent needs toggles, then they move to per-agent tabs.</div>
 
     <div class="subnote" style="margin-top:12px">Jumplist shortcut: ⌃⌥J - override with defaults write com.dwmkerr.signalbox hotkey "cmd+shift+space"</div>
+
+    <div class="sect">Hub</div>
+    <div class="frow">
+      <span class="ctl"><span class="check"></span> Allow other devices to connect (requires token)</span>
+    </div>
+    <div class="subnote">Devices reach this Mac at 192.168.1.24:8377. The token is created automatically.</div>
 
     <div class="sect">Additional filters</div>
     <div class="frow">
@@ -98,39 +111,77 @@
 
 <div class="prose">
   <h2>What this is</h2>
-  <p>The app's settings window. A plain macOS preferences window: a popup for the icon choice,
-  checkboxes for toggles, a text field for the filters, short grey captions under each control. Keep
-  it small; new settings are new rows.</p>
+  <p>The app's settings window, a plain macOS preferences window:</p>
+  <ul>
+    <li>A popup for the icon choice.</li>
+    <li>Checkboxes for toggles.</li>
+    <li>A text field for the filters.</li>
+    <li>A short grey caption under each control.</li>
+  </ul>
+  <p>Keep it small; new settings are new rows.</p>
 
   <h2>Additional filters</h2>
-  <p>The filter field narrows the board everywhere - the jumplist and the menu bar dropdown share it,
-  so the two never disagree. Tokens are space- or comma-separated: <code>#tag</code> matches a tag,
-  plain text matches the session name or its last message, and a leading
-  <code>!</code> excludes either. A session shows when it matches every include token and no exclude
-  token. The field applies live as you type (no Save button) and persists across restarts
-  (<code>tagFilter</code> below). It is also settable at launch:
+  <p>The filter field narrows the board everywhere. The jumplist and the menu bar dropdown share it,
+  so the two stay in sync.</p>
+  <ul>
+    <li>Tokens are space- or comma-separated.</li>
+    <li><code>#tag</code> matches a tag.</li>
+    <li>Plain text matches the session name or its last message.</li>
+    <li>A leading <code>!</code> excludes either.</li>
+    <li>A session shows when it matches every include token and no exclude token.</li>
+  </ul>
+  <p>The field applies live as you type (no Save button) and persists across restarts
+  (<code>tagFilter</code> below). Set it at launch too:
   <code>open Signalbox.app --args --filter demo</code> restarts straight into a filtered view, and
   <code>--filter</code> with no value clears it back to all.</p>
 
   <h2>The jumplist shortcut</h2>
-  <p>Today the shortcut is shown as a caption: <code>⌃⌥J</code> by default, overridden with
-  <code>defaults write com.dwmkerr.signalbox hotkey "cmd+shift+space"</code>. If the combo is taken
-  by another app, signalbox falls back and notifies. macOS has a well-defined pattern for a proper
-  control here: a recorder well, as in System Settings under Keyboard Shortcuts - click the well, it
-  focuses, press a combination, it captures it (and shows a clear button). The de facto
-  implementation is the
-  <a href="https://github.com/sindresorhus/KeyboardShortcuts">KeyboardShortcuts</a> Swift package,
-  which provides the recorder control, persistence, and the global listener in one - it would replace
-  our hand-rolled Carbon code and the defaults-write override.</p>
+  <p>The shortcut shows as a caption: <code>⌃⌥J</code> by default, overridden with
+  <code>defaults write com.dwmkerr.signalbox hotkey "cmd+shift+space"</code>. If another app holds the
+  combo, signalbox falls back and notifies.</p>
+  <p>macOS has a standard control for this: a recorder well, as in System Settings under Keyboard
+  Shortcuts. Click the well, it focuses; press a combination, it captures it and shows a clear button.
+  The <a href="https://github.com/sindresorhus/KeyboardShortcuts">KeyboardShortcuts</a> Swift package
+  provides the recorder control, persistence, and the global listener in one, replacing the Carbon
+  code and the defaults-write override.</p>
 
   <h2>Where settings are stored</h2>
   <table>
     <tr><th>Store</th><th>What</th><th>Why</th></tr>
     <tr><td><code>UserDefaults</code></td><td>menu bar icon (<code>menuBarIcon</code>), jumplist shortcut (<code>hotkey</code>), board tag filter (<code>tagFilter</code>), jumplist zoom (<code>uiScale</code>, 0.8-1.6, set with ⌘+/⌘−/⌘0), login-item one-shot (<code>didRegisterLoginItem</code> - the app registers itself as a login item once, on first launch from /Applications, and never re-adds it if you remove it in System Settings)</td><td>only the app needs these; the filter and zoom are local view preferences, not shared config</td></tr>
-    <tr><td><code>~/.config/signalbox/settings.json</code></td><td>toggles the CLI hooks must also see, currently <code>claudeClearEnds</code> and <code>claudeRenameTitle</code></td><td>the app writes the file and the hook path reads it on every fire, so a change applies immediately with no IPC</td></tr>
+    <tr><td><code>~/.config/signalbox/settings.json</code></td><td>toggles the CLI hooks must also see, currently <code>claudeClearEnds</code>, <code>claudeRenameTitle</code>, <code>codexClearEnds</code> and <code>codexRenameTitle</code>; plus a <code>hub</code> section for how the hub binds: <code>hub.bind</code> (a keyword or a literal - the keywords <code>loopback</code> (<code>127.0.0.1</code>) and <code>lan</code> (the <code>0.0.0.0</code> wildcard) still resolve, and any literal like <code>0.0.0.0</code> or an explicit IP is honored verbatim; default <code>loopback</code>, this Mac only) and <code>hub.token</code> (the bearer token; default empty). The Hub "Allow other devices" checkbox writes the literal <code>0.0.0.0</code>, and off writes <code>127.0.0.1</code>.</td><td>the app writes the file and the hook path reads it on every fire, so a change applies immediately with no IPC; the hub reads <code>hub.bind</code>/<code>hub.token</code> at start so the app-spawned hub (which passes no flags) can serve other devices on the network</td></tr>
   </table>
   <p>Writes to the shared file merge key by key, so unknown keys survive. A missing or broken file
-  means defaults, and must never break the hook path.</p>
+  falls back to defaults and keeps the hook path working.</p>
+
+  <h2>Hub network access</h2>
+  <p>The <b>Allow other devices to connect</b> checkbox controls who can reach the hub. Off (the
+  default), the hub answers only this Mac; on, it answers other devices on the network too. The
+  checkbox reflects <code>hub.bind</code> in the settings file, read live each time the window opens so
+  it stays right even when Connect Phone changed it. Toggling it rewrites that value and restarts the
+  hub (the same restart Connect Phone uses) so the new bind takes effect. The grey caption beneath shows
+  the address a phone dials, this Mac's LAN IP and the hub port, and notes the token is created
+  automatically.</p>
+  <p>The <code>hub</code> section is the persistent, file-backed equivalent of <code>signalbox hub</code>'s
+  <code>--bind</code> flag and <code>SIGNALBOX_TOKEN</code>. It exists so the hub the app spawns - which
+  passes only <code>--port</code> - can come up reachable with a token, with no flags and no env.</p>
+  <ul>
+    <li><code>hub.bind</code>: a keyword or a literal, and the two coexist with no normalization pass
+    rewriting one into the other. The keywords <code>loopback</code> and <code>lan</code> resolve to
+    <code>127.0.0.1</code> and the <code>0.0.0.0</code> wildcard; a literal (<code>127.0.0.1</code>,
+    <code>0.0.0.0</code>, or an explicit IP) is honored verbatim. The checkbox writes literals -
+    <code>0.0.0.0</code> to allow other devices (loopback stays served for local hooks and this app while
+    every interface is served too), <code>127.0.0.1</code> to restrict to this Mac; an absent value means
+    loopback. Set it from the CLI too: <code>signalbox config set hub.bind 0.0.0.0</code> (or
+    <code>lan</code>) then <code>signalbox config get</code>.</li>
+    <li><code>hub.token</code>: the bearer token non-loopback clients must send. When the hub starts on a
+    non-loopback bind with no token set, it <b>generates one and saves it here</b>, so a reachable hub is
+    on a stable auto-token across restarts. No control on this window edits the token; it is a CLI-only
+    value (<code>signalbox config set hub.token --generate</code>).</li>
+  </ul>
+  <p>Full resolution order, auth, and the auto-token are in the
+  <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">CLI spec</a> and the
+  <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a>.</p>
 
   <h2>The /clear toggle</h2>
   <p>Claude Code fires <code>SessionEnd</code> with reason <code>clear</code> when you type

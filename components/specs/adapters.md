@@ -1,4 +1,4 @@
-signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) | [settings](https://dwmkerr.github.io/signalbox/specs/settings.html) | [menu bar](https://dwmkerr.github.io/signalbox/specs/menubar.html) | [cli](cli.md) | [data model](events.md) | agent integrations
+signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) | [settings](https://dwmkerr.github.io/signalbox/specs/settings.html) | [menu bar](https://dwmkerr.github.io/signalbox/specs/menubar.html) | [ios](https://dwmkerr.github.io/signalbox/specs/ios.html) | [architecture](https://dwmkerr.github.io/signalbox/specs/architecture.html) | [cli](cli.md) | [data model](events.md) | agent integrations
 
 # Specification: signalbox agent integrations
 
@@ -34,12 +34,13 @@ signalbox init --agent claude
 | `UserPromptSubmit` | busy + `prompt` = cropped prompt text |
 | `Stop` | done (reason `stop`) |
 | `Notification` - idle | done (reason `idle`). Matched by `notification_type: idle_prompt`, or (current Claude Code sends no type) by a typeless `message` mentioning idle/finished/"waiting for your input"/"no longer" (case-insensitive). |
-| `Notification` - anything else (permission prompt, elicitation, unknown type, or a typeless permission `message`) | attention. Claude is blocked waiting on you. Defaulting to attention keeps the "needs you" state honest across Claude Code versions that change these payloads. |
+| `Notification` - anything else (permission prompt, elicitation, unknown type, or a typeless permission `message`) | attention. Claude is blocked waiting on you. Defaulting to attention keeps the needs-you state correct across Claude Code versions that change these payloads. |
 | `StopFailure` | error (reason = `error_type`) |
 | `SessionEnd` | ended - except reason `clear` when the `claudeClearEnds` setting is off, which maps to done (reason `clear`) so the old exchange stays on the board ([settings.html](https://dwmkerr.github.io/signalbox/specs/settings.html)) |
 | anything else | ignore, exit 0 |
 
 - `session_key = claude:<session_id>`.
+- Host prefix (display only): when the hook fires from an editor's *integrated terminal* the displayed `agent` gains the editor host as a prefix - `cursor/claude` in Cursor, `vscode/claude` in VS Code (and unrecognized VS Code forks). The same `TERM_PROGRAM=vscode` + `__CFBundleIdentifier` check as the [VS Code terminal jump-back](#vs-code---terminal-jump-back---available-still-in-testing) below tells them apart; a plain terminal keeps the bare `claude`. The prefix drives the icon only (the editor's mark with Claude's glyph badged bottom-right). `session_key` stays `claude:<session_id>`, keyed on the agent family, so the same session stays on one row across a plain terminal and an editor.
 - Title: explicit `/rename` from the transcript's `custom-title` entries (bounded head+tail read, last one wins) beats the cwd basename. The `claudeRenameTitle` setting turns the `/rename` lookup off; your own jumplist rename (a label event) overrides either.
 - `reply`: final assistant text from the transcript (bounded tail read of `transcript_path`, never the full file). Captured on `Stop` and on **any idle notification** - by the same idle test the mapping uses, so a typeless idle `message` on current Claude Code refreshes the reply just like a typed `idle_prompt`. **Not** captured on permission/attention notifications, where the transcript's last line is stale. Filtered like the prompt; empty on any miss, so the previous reply carries.
 - Prompt filter (shared with reply): strip leading bracket-tag prefixes (`[Image #1]` etc.); skip text that then starts with `<` (harness XML) - detail is the last *human* prompt.
@@ -77,7 +78,7 @@ signalbox init --agent cursor
 | `stop`, `status: completed` (or missing/unknown) | done (reason `stop`) |
 | `stop`, `status: aborted` | ended (reason `aborted`) |
 | `stop`, `status: error` | error (reason `error`) |
-| `beforeShellExecution` | attention (reason `shell_permission`) - the ask/permission path, Cursor's only "blocked on you" signal |
+| `beforeShellExecution` | attention (reason `shell_permission`) - the ask/permission path, Cursor's only blocked-on-you signal |
 | `beforeMCPExecution` | attention (reason `mcp_permission`) |
 | `subagentStop` | done (reason `subagent_stop`) |
 | anything else (`subagentStart`, `afterFileEdit`, …) | ignore, exit 0 |
@@ -89,12 +90,45 @@ signalbox init --agent cursor
 - Jump-back raises the **Cursor window** for the workspace (bundle id `com.todesktop.230313mzl4w4u92`, plus an Accessibility `AXRaise` on the window whose title contains the project folder). **Window-level only** - Cursor's editor/terminal tabs are not externally addressable, so a specific Composer tab cannot be targeted.
 - **Cursor Hooks are beta**: event names, payload fields (`status`, `transcript_path`, `workspace_roots`) and the permission-signal behaviour should be confirmed against a live Cursor; the mapping degrades safely if they shift.
 
+## Codex (`signalbox hook codex`, stdin JSON)
+
+OpenAI's Codex CLI, via [Codex hooks](https://github.com/openai/codex) (needs `[features] hooks = true` in `~/.codex/config.toml`). Codex hooks mirror Claude Code's: JSON on stdin, snake_case fields, a PascalCase `hook_event_name`.
+
+`init --agent codex` prints a `~/.codex/hooks.json` block to merge by hand; signalbox never edits your config. Hooks coexist, so signalbox's block sits alongside any others (e.g. a security tool's) and Codex fires them all. Codex records a trust hash for a new hook on first run.
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }]
+  }
+}
+```
+
+| Hook | Event |
+|---|---|
+| `SessionStart` | busy (reason `session_start`) - the session appears while Codex boots. |
+| `UserPromptSubmit` | busy - you sent a prompt and Codex is working; `detail` is that prompt (harness/bracket-tag filtered like Claude's). |
+| `Stop` | done (reason `stop`). `reply` is the turn's `last_assistant_message`, carried inline on the payload so no transcript read is needed. |
+| `PermissionRequest` | attention - Codex is blocked waiting for you to approve a command or tool call. |
+| `SessionEnd` | ended - removes the row. |
+
+- `session_key = codex:<session_id>`; title = the session's name when Codex has one, else the `cwd` folder name. A Codex `/rename` writes the thread name to `~/.codex/session_index.jsonl` (one JSON line per named session; last entry for the id wins) and the hook adopts it - toggleable via `codexRenameTitle` (Settings; default on), like Claude's. The user's own jumplist rename still overrides either.
+- `codexClearEnds` mirrors `claudeClearEnds`: false keeps a `SessionEnd` with reason `clear` on the board as done. Inert unless Codex sends that reason.
+- Host prefix (display only): a Codex session in an editor's integrated terminal shows under the editor's mark badged with Codex's glyph (`vscode/codex`), the same `TERM_PROGRAM` check as Claude; the key stays `codex:<id>`.
+- `proc` and `SIGNALBOX_RAW` behave as for Claude (shell-wrapper walk to the agent process; raw-payload diagnostic).
+- Codex also has a legacy `notify` program (fires `agent-turn-complete` as the final argv). The hooks path is preferred: it carries busy and attention too, not just turn-complete.
+
 ## VS Code - terminal jump-back - (available, still in testing)
 
 No adapter and no config. Agents you run in VS Code's *integrated terminal* (claude, opencode, pi) already fire their own hooks; signalbox detects the editor terminal automatically (`TERM_PROGRAM=vscode`, set by VS Code on every terminal process) and captures an editor origin. Jump then raises the VS Code window for the project (`open -b com.microsoft.VSCode` plus a best-effort Accessibility `AXRaise` on the window whose title contains the workspace folder). **Window-level only** - VS Code's editor/terminal tabs are not externally addressable, the same limitation as Cursor.
 
 - Cursor's integrated terminal is detected the same way (Cursor is a VS Code fork and also sets `TERM_PROGRAM=vscode`); the two are told apart by the process's `__CFBundleIdentifier`, defaulting to VS Code when it is absent. Other forks pass their own bundle id through.
-- A tmux pane inside the editor terminal still wins: the pane is the more precise jump target.
+- Icon: a detected editor host prefixes the agent's *display* name so the board shows the editor's mark badged with the agent glyph - `vscode/claude` (VS Code, and forks) or `cursor/claude` (Cursor). Display only: `session_key` keeps the agent family (`claude:<id>`), so a session stays on one row across a plain terminal and the editor. See the Claude adapter's host-prefix note above.
+- A tmux pane inside the editor terminal still wins as the *jump* target (the pane is more precise), but the editor host still prefixes the display name.
 - VS Code's *own* agent (Copilot Chat / agent mode) has no external hook system, so there is no event adapter for it - terminal jump-back is the whole VS Code surface for now.
 
 ## tmux - in-terminal signals and jump-back
@@ -134,7 +168,7 @@ signalbox init --agent pi
 
 
 `agent_start` → busy · `agent_end` → done · `session_shutdown` → ended.
-`session_key = pi:<session id>`; title = pi's session name (cwd basename fallback); detail = the last prompt, cached from the `input` event (`agent_start` carries no payload); reply from `agent_end`'s messages. pi exposes no error or permission events, so a pi session never shows error or attention - busy/done/ended is its whole vocabulary.
+`session_key = pi:<session id>`; title = pi's session name (cwd basename fallback); detail = the last prompt, cached from the `input` event (`agent_start` carries no payload); reply from `agent_end`'s messages. pi exposes no error or permission events, so a pi session shows only busy, done, or ended.
 
 **Serialize fires** in any adapter that spawns the CLI per event: spawn the next CLI only after the previous exits. The hub applies events in arrival order, and `agent_end`/`session_shutdown` fire back-to-back - concurrent processes could deliver `ended` before `done` and resurrect a removed session. These in-process adapters (opencode, pi) also pass their own `--pid`/`--pid-name` on every fire, so the hub's liveness sweep can end sessions whose agent died without an exit event.
 

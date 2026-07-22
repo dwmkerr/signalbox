@@ -1,0 +1,198 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>signalbox init</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0d0d0f; color:#c9c9ce; font-size:16px; line-height:1.6;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Arial,sans-serif;
+         display:flex; flex-direction:column; align-items:center; padding:48px 20px; }
+  .page { width:900px; max-width:100%; }
+  .nav { color:#6E6E73; font-size:13px; margin-bottom:18px; }
+  .nav a { color:#0A84FF; text-decoration:none; }
+  h1 { color:#EDEDED; font-size:26px; margin-bottom:6px; }
+  .subtitle { color:#98989D; font-size:15px; margin-bottom:16px; }
+  .prose h2 { color:#EDEDED; font-size:19px; font-weight:600; margin:30px 0 10px;
+              padding-bottom:6px; border-bottom:1px solid #ffffff1a; }
+  .prose h3 { color:#EDEDED; font-size:15.5px; font-weight:600; margin:18px 0 6px; }
+  .prose p { margin-bottom:10px; }
+  .prose ul { padding-left:22px; margin-bottom:10px; }
+  .prose li { margin-bottom:5px; }
+  code { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:13.5px;
+         background:#ffffff12; border-radius:4px; padding:1px 5px; color:#D8D8DC; }
+  .prose a { color:#0A84FF; text-decoration:none; }
+  .prose table { border-collapse:collapse; margin:10px 0; width:100%; }
+  .prose th, .prose td { border:1px solid #ffffff1e; padding:7px 12px; text-align:left;
+                         font-size:14px; vertical-align:top; }
+  .prose th { color:#EDEDED; background:#ffffff08; }
+
+  .chip { display:inline-block; font-size:11px; font-weight:700; letter-spacing:.4px;
+          text-transform:uppercase; padding:2px 7px; border-radius:4px; vertical-align:2px;
+          margin-left:8px; }
+  .chip.proposed { background:#FF9F0A22; color:#FF9F0A; border:1px solid #FF9F0A55; }
+  .banner { border:1px solid #FF9F0A55; background:#FF9F0A14; border-radius:8px;
+            padding:12px 14px; margin-bottom:22px; font-size:14px; }
+  .banner b { color:#FF9F0A; }
+
+  /* Terminal mockups: the init TUI is a terminal surface, so the mock is a
+     terminal. The mock IS the spec for the states and copy. */
+  .term { background:#0a0a0c; border:1px solid #ffffff1f; border-radius:10px;
+          font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:13px; line-height:1.65;
+          padding:14px 16px; margin:10px 0 6px; white-space:pre; overflow-x:auto;
+          box-shadow:0 10px 30px rgba(0,0,0,.4); }
+  .term .bar { display:block; color:#6E6E73; font-size:11px; margin:-2px 0 8px;
+               padding-bottom:8px; border-bottom:1px solid #ffffff12; letter-spacing:.3px; }
+  .termcap { color:#6E6E73; font-size:11.5px; margin:0 0 18px; }
+  .g  { color:#34C759; }  /* green - active / configured */
+  .a  { color:#FF9F0A; }  /* amber - needs a manual step */
+  .r  { color:#FF453A; }  /* red */
+  .b  { color:#0A84FF; }  /* blue - accents, keys */
+  .dim{ color:#6E6E73; }
+  .w  { color:#EDEDED; }
+  .cur{ color:#0A84FF; }  /* cursor */
+  .sel{ color:#EDEDED; }
+  .add{ color:#34C759; }  /* diff + */
+  .del{ color:#FF453A; }  /* diff - */
+  .two { display:flex; gap:16px; flex-wrap:wrap; }
+  .two > div { flex:1; min-width:300px; }
+</style>
+</head>
+<body>
+<div class="page">
+<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | <a href="settings.html">settings</a> | <a href="menubar.html">menu bar</a> | <a href="ios.html">ios</a> | <a href="architecture.html">architecture</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
+
+<h1>signalbox init <span class="chip proposed">proposed</span></h1>
+<div class="subtitle">The guided setup: how it decides between writing your config and printing a snippet, and how it says which.</div>
+
+<div class="banner"><b>Proposed.</b> This redesigns the interactive setup and adds config editing behind consent. Today <code>init</code> only prints blocks for user-owned files and shows a misleading "Applying... Done". The mockups below are the spec for the new states and copy.</div>
+
+<div class="prose">
+
+<h2>The problem</h2>
+<p>Toggling a print-only integration reads as if it configured itself:</p>
+<div class="term"><span class="bar">signalbox init  (today)</span><span class="dim">Applying...</span>
+
+  <span class="dim">&#9675; Codex</span> - merge the JSON block below into ~/.codex/hooks.json
+  <span class="dim">{ ...block the user must paste... }</span>
+
+<span class="g">&#10004; Done.</span> Open a session and press <span class="b">&#8963;&#8997;J</span>.</div>
+<p class="termcap">"Done" after nothing was written, and Codex still shows &#9675; (not set up). The output contradicts itself.</p>
+
+<h2>The model: classify by ownership</h2>
+<p>What init does depends on <b>who owns the file</b>. Three cases, drawn from how conda, rustup, gcloud, Homebrew, pre-commit and Claude Code behave:</p>
+<table>
+  <tr><th>Case</th><th>Examples</th><th>What init does</th></tr>
+  <tr><td><b>1. signalbox owns it</b></td><td>the OpenCode / pi plugin symlinks, signalbox's own config</td><td>Write it directly, no prompt, show <span class="g">&#10004; Configured</span>. Like <code>git config</code> / <code>claude mcp add</code>.</td></tr>
+  <tr><td><b>2. You own it, we understand it, nothing else manages it</b></td><td><code>~/.tmux.conf</code>; a plain <code>~/.claude/settings.json</code> or <code>hooks.json</code></td><td><b>Offer</b> to edit behind a named-file opt-in: preview, backup, managed block, idempotent, reversible. Decline &#8594; print, and the row stays <span class="a">not done</span>.</td></tr>
+  <tr><td><b>3. Another tool manages it</b></td><td>Codex's <code>hooks.json</code> under <b>koi</b> (trust hashes)</td><td><b>Print by default</b>. A blind rewrite breaks the trust hash and Codex skips the hook. Edit only if signalbox also refreshes the trust ledger.</td></tr>
+</table>
+<p>The evidence, in one line: <b>consent is the trigger to edit; a managed marker, idempotent replace-in-place, a backup, and a working <code>--reverse</code> are the license.</b> Tools that asked-and-wrote without those (nvm, atuin, husky) are the ones users complain about; <code>gh</code> got consent to edit <code>~/.gitconfig</code> but never reverts it on logout - an orphaned edit we must not copy.</p>
+
+<h2>The setup screen</h2>
+<p>Every row carries an honest state. Nothing is ever a check until it is actually written or verified.</p>
+<div class="term"><span class="bar">signalbox init</span><span class="w">signalbox</span>     <span class="g">&#9679;</span> Menu bar app running (hub + jumplist)
+
+<span class="dim">Integrations</span>
+    <span class="dim">&#9675;</span> Claude Code   <span class="dim">not set up</span>
+    <span class="g">&#9679;</span> Cursor        <span class="dim">hooks active</span>
+  <span class="cur">&#10095;</span> <span class="b">&#9673;</span> <span class="sel">Codex         set up &#8250;</span>
+    <span class="g">&#9679;</span> VS Code       <span class="dim">jump-back (automatic)</span>
+    <span class="dim">&#9675;</span> OpenCode      <span class="dim">not set up</span>
+    <span class="dim">&#9675;</span> pi            <span class="dim">not set up</span>
+    <span class="g">&#9679;</span> tmux          <span class="dim">active</span>
+
+<span class="dim">&#8593;&#8595; move &#183; space toggle &#183; &#8629; apply &#183; d details &#183; q quit</span></div>
+<p class="termcap">States: <span class="g">&#9679;</span> configured &#183; <span class="a">&#9673;</span> selected to apply &#183; <span class="dim">&#9675;</span> not set up. A row never shows a check until its file is written.</p>
+
+<h3>Applying, with a per-component decision</h3>
+<p>For a case-2 or case-3 file, applying pauses on a choice that <b>names the exact file</b> (the rustup / gcloud / fzf pattern), never a silent write:</p>
+<div class="term"><span class="bar">signalbox init  &#183;  applying Codex</span><span class="w">Codex hooks</span> live in <span class="b">~/.codex/hooks.json</span>.
+<span class="a">This file is managed by koi</span> (it records Codex trust hashes), so editing it
+can break trust. Recommended: print the snippet and add it yourself.
+
+  <span class="b">[P]</span> Print the snippet to paste   <span class="dim">(recommended here)</span>
+  <span class="b">[E]</span> Edit the file for me         <span class="dim">(backup first, then refresh trust)</span>
+  <span class="b">[S]</span> Skip
+
+<span class="dim">&#8250;</span> </div>
+<p class="termcap">Case 3 (koi-managed) defaults to Print. A plain case-2 file (tmux.conf) leads with <span class="b">[E] Edit</span> instead, since it is safe to write.</p>
+
+<h3>After an edit (case 2, or case 3 when trust can be refreshed)</h3>
+<div class="term"><span class="bar">signalbox init  &#183;  wrote the file</span><span class="g">&#10004;</span> Wrote <span class="b">~/.tmux.conf</span>   <span class="dim">backup: ~/.config/signalbox/backups/tmux.conf.2026-07-21T08-40-11</span>
+   Undo anytime: <span class="b">signalbox init --reverse</span></div>
+
+<h3>After a print (declined edit, or koi-managed)</h3>
+<div class="term"><span class="bar">signalbox init  &#183;  printed a snippet</span><span class="a">&#9888;</span> Codex needs one manual step. Add this to <span class="b">~/.codex/hooks.json</span>:
+
+  {
+    "hooks": {
+      "Stop": [{ "hooks": [{ "type": "command", "command": "signalbox hook codex" }] }],
+      <span class="dim">... SessionStart, UserPromptSubmit, PermissionRequest, SessionEnd ...</span>
+    }
+  }
+
+  Then run <span class="b">/hooks</span> in Codex to trust it.</div>
+
+<h3>The summary reconciles - it never claims blanket success</h3>
+<div class="term"><span class="bar">signalbox init  &#183;  done</span><span class="g">2 configured</span> &#183; <span class="a">1 needs a manual step</span> &#183; <span class="dim">1 skipped</span>
+
+<span class="a">Codex</span>  - snippet printed above, add it to ~/.codex/hooks.json
+Run <span class="b">signalbox status</span> to see what is left.</div>
+<p class="termcap">A component that was only printed stays <span class="a">&#9673;</span>/<span class="dim">&#9675;</span> and counts under "needs a manual step", never under configured. This is the whole fix for the misleading "Done".</p>
+
+<h2>How an edit is written</h2>
+
+<h3>Text files: a managed sentinel block</h3>
+<p>Comment-capable files (<code>.tmux.conf</code>, shell rc) get a fenced block, matched and replaced whole on every run so re-running updates in place (the conda / pnpm idiom):</p>
+<div class="term"><span class="bar">~/.tmux.conf</span><span class="dim"># ... your existing config, untouched ...</span>
+
+<span class="g"># &gt;&gt;&gt; signalbox managed &gt;&gt;&gt;</span>
+<span class="dim"># !! Managed by `signalbox init`. Edit: signalbox init  Remove: signalbox init --reverse !!</span>
+set -g status-right '#(command -v signalbox &gt;/dev/null && signalbox tmux status)  %Y-%m-%d %H:%M'
+bind-key j display-popup -E -w 80% -h 15 "signalbox pick"
+<span class="g"># &lt;&lt;&lt; signalbox managed &lt;&lt;&lt;</span></div>
+<p>Where the body is more than a line, inject a single stable pointer into a signalbox-owned file (the rustup <code>source ~/.cargo/env</code> trick), so the footprint in your file stays tiny and stable across versions.</p>
+
+<h3>JSON files: keyed entries + a sidecar manifest</h3>
+<p>JSON holds no comments, so signalbox never fakes a marker key inside another tool's schema. Instead it (a) names its own entries recognisably - a hook whose command is <code>signalbox hook codex</code> - and (b) records authoritative ownership in a sidecar it owns:</p>
+<div class="term"><span class="bar">~/.config/signalbox/managed.json</span>[
+  {
+    "file": "~/.codex/hooks.json",
+    "managedKeys": ["hooks.Stop[sb]", "hooks.SessionStart[sb]", "..."],
+    "backup": "~/.config/signalbox/backups/hooks.json.2026-07-21T08-40-11",
+    "externalOwner": "koi"
+  }
+]</div>
+<p>The manifest is what makes a JSON edit both <b>idempotent</b> (compare by <code>managedKeys</code>, replace in place) and <b>cleanly removable</b> (delete exactly those keys, restore the backup if nothing of ours remains). It is also where the koi trust interaction is tracked.</p>
+
+<h2>The koi case, precisely</h2>
+<ul>
+  <li><b>Detect external management first</b>: trust-hash entries in <code>~/.codex/config.toml</code>, a koi marker, or hooks with a <code>trusted_hash</code> set.</li>
+  <li><b>Default to print</b> for a managed file: emit the exact hook entry plus the trust step (<code>/hooks</code> in Codex). Mark the row <span class="a">&#9888; needs a manual step</span>, not a check.</li>
+  <li><b>Edit only as a whole transaction</b>: merge the entry <i>and</i> refresh the trust ledger so the hook stays trusted, and record <code>externalOwner: "koi"</code> so removal also cleans the trust entry. Never bypass trust.</li>
+</ul>
+
+<h2>Flags and removal</h2>
+<ul>
+  <li><b><code>--dry-run</code></b> prints the exact diff and writes nothing (conda / pipx):</li>
+</ul>
+<div class="term"><span class="bar">signalbox init --agent codex --dry-run</span><span class="dim">--- ~/.codex/hooks.json</span>
+<span class="dim">+++ ~/.codex/hooks.json (proposed)</span>
+   "PermissionRequest": [ ... koi ... <span class="add">, { "hooks": [{ "command": "signalbox hook codex" }] }</span> ],
+<span class="add">+  "Stop": [{ "hooks": [{ "command": "signalbox hook codex" }] }],</span>
+<span class="add">+  "SessionEnd": [{ "hooks": [{ "command": "signalbox hook codex" }] }]</span>
+
+<span class="dim">no changes written (--dry-run)</span></div>
+<ul>
+  <li><b><code>--yes</code> never silently edits a user file.</b> It applies signalbox-owned steps and <i>prints</i> for user files. To write user files non-interactively, pass <code>--write-user-config</code> as well (the rustup <code>-y</code> vs <code>--no-modify-path</code> gate).</li>
+  <li><b><code>signalbox init --reverse</code></b> removes only signalbox's blocks and keys (by marker + manifest), restores backups, and revokes any trust entry it added - a first-class undo, so we never leave an orphaned edit the way <code>gh</code> does.</li>
+</ul>
+
+<h2>What stays the same</h2>
+<ul>
+  <li>Files signalbox owns (the plugin symlinks) are still written directly, no prompt.</li>
+  <li>Print is still the default for anything shared or foreign - it is endorsed practice (Homebrew, starship, Claude Code's read-only <code>/hooks</code>). The change is that a printed step is honestly marked, and editing is now <i>available</i> behind consent for files we fully own the format of.</li>
+</ul>
+
+</div>
+</div>
+</body></html>

@@ -7,13 +7,18 @@ import { basename } from "node:path";
 import * as ev from "./event";
 import type { Event, Origin, Proc } from "./event";
 import { Client, fetchState, hubURL, stateDir, logTo, DefaultURL } from "./client";
-import { Hub, listen } from "./hub";
+import { Hub, listen, validateBindConfig, isLoopbackAddress } from "./hub";
 import * as tmux from "./tmux";
 import { jump } from "./jump";
+import { runPair } from "./pair";
 import { captureProc, captureAgentProc } from "./proc";
 import { mapClaudeHook, claudeReply, sessionName, type ClaudeHook } from "./claude";
-import { mapCursorHook, cursorReply, cursorWorkspace, cursorBundle, editorTerminalOrigin, type CursorHook } from "./cursor";
-import { loadSettings } from "./config";
+import { mapCursorHook, cursorReply, cursorWorkspace, cursorBundle, editorTerminalOrigin, hostPrefixedAgent, type CursorHook } from "./cursor";
+import { mapCodexHook, codexReply, codexSessionName, type CodexHook } from "./codex";
+import {
+  loadSettings, saveSettings, settingsPath, normalizeBindInput, lanHint,
+  shouldGenerateToken, generateToken,
+} from "./config";
 import { runSetup } from "./setup";
 import {
   glyph, coloredGlyph, statusWord, titleOf, age, printSessions, tmuxStatusLine,
@@ -48,11 +53,22 @@ function usage(): string {
 usage: signalbox <command> [flags]
 
   init         guided setup: the app, coding-agent hooks, tmux [--yes]
-               scope with --app, --tmux, --agent <claude|cursor|opencode|pi|all>
+               scope with --app, --tmux, --agent <claude|cursor|codex|opencode|pi|all>
                (repeatable); no scope flag sets up everything
                --status shows the checklist without the interactive picker
-  hub          run the hub in the foreground [--port 8377]
+  hub          run the hub in the foreground [--port 8377] [--bind 127.0.0.1]
                (the menu bar app runs one for you; use this headless or in dev)
+               --bind wide (e.g. 0.0.0.0) needs SIGNALBOX_TOKEN; non-loopback
+               clients must then send Authorization: Bearer <token>
+  pair         show a QR a phone scans to pair: it carries this hub's LAN URL
+               and a one-time code the phone trades for the token [--host <ip>]
+               (run on the hub machine; needs --bind wide + SIGNALBOX_TOKEN)
+  config       persist how the hub binds so it needs no flags to let other
+               devices connect:
+               config get                       show the effective hub config
+               config set hub.bind <loopback|any|IP>  (loopback = this Mac only;
+                                                any = every interface, incl. VPN)
+               config set hub.token <value>     ("" or --generate mints one)
   state        show the board [--json] [--all] [--tag T] [--exclude-tag T]
   jump <key>   jump to a session's origin (tmux pane or URL) and mark it seen
   pick         pick a waiting session interactively and jump to it
@@ -63,6 +79,9 @@ usage: signalbox <command> [flags]
 
   session ack <key>          mark a session seen (clears the flag; row stays)
   session hide <key>         hide until its next agent event (hide on busy = seen)
+  session show <key>         unhide a hidden session (reappears in place)
+  session pin <key>          pin a session to the top of the board
+  session unpin <key>        remove the pin
   session rename <key> [t…]  set your own name for a session (empty clears)
   session remove <key>       take a session off the board now
   session tag <key> <tag>    add a discreet tag to a session (e.g. work)
@@ -75,6 +94,7 @@ usage: signalbox <command> [flags]
 
   hook claude                read a Claude Code hook payload on stdin, fire it
   hook cursor                read a Cursor hook payload on stdin, fire it
+  hook codex                 read a Codex hook payload on stdin, fire it
 
   drain        flush the offline spool to the hub
 
@@ -82,6 +102,8 @@ env: SIGNALBOX_URL (default ${DefaultURL})
      SIGNALBOX_STATE_DIR (default ~/.local/state/signalbox)
      SIGNALBOX_PROFILE=full|redacted
      SIGNALBOX_EXPIRE (hub: end sessions with no agent event for this long, default 24h)
+     SIGNALBOX_BIND (hub: bind address, default 127.0.0.1; --bind wins)
+     SIGNALBOX_TOKEN (bearer token; required to bind non-loopback, sent by clients)
 `;
 }
 
@@ -156,7 +178,11 @@ async function buildEvent(opts: {
   else origin = tmux.currentOrigin() ?? editorTerminalOrigin(process.env);
   let sessionKey = opts.sessionKey ?? "";
   if (!sessionKey) {
-    sessionKey = origin?.tmux ? `${opts.agent}:${origin.tmux.pane}` : `${opts.agent}:${shortHash(cwd)}`;
+    // Key on the agent family, never the host-prefixed display name: a
+    // "vscode/claude" session must derive "claude:<...>" so it cannot split
+    // from the same session seen in a plain terminal (specs/events.md).
+    const family = ev.agentFamily(opts.agent);
+    sessionKey = origin?.tmux ? `${family}:${origin.tmux.pane}` : `${family}:${shortHash(cwd)}`;
   }
   const e: Event = {
     v: ev.Version,
@@ -249,6 +275,30 @@ async function runHide(args: string[]): Promise<void> {
   await deliver(ev.newHide(args[0]));
 }
 
+async function runShow(args: string[]): Promise<void> {
+  if (args.length !== 1 || !args[0]) {
+    logTo(stateDir(), "show: usage: signalbox session show <session_key>");
+    return;
+  }
+  await deliver(ev.newShow(args[0]));
+}
+
+async function runPin(args: string[]): Promise<void> {
+  if (args.length !== 1 || !args[0]) {
+    logTo(stateDir(), "pin: usage: signalbox session pin <session_key>");
+    return;
+  }
+  await deliver(ev.newPin(args[0]));
+}
+
+async function runUnpin(args: string[]): Promise<void> {
+  if (args.length !== 1 || !args[0]) {
+    logTo(stateDir(), "unpin: usage: signalbox session unpin <session_key>");
+    return;
+  }
+  await deliver(ev.newUnpin(args[0]));
+}
+
 async function runLabel(args: string[]): Promise<void> {
   if (args.length < 1 || !args[0]) {
     logTo(stateDir(), "rename: usage: signalbox session rename <session_key> [text...]");
@@ -330,6 +380,13 @@ async function runClaudeHook(): Promise<void> {
   // happen silently.
   const key = payload.session_id ? `claude:${payload.session_id}` : "";
   if (!payload.session_id) logTo(dir, "claude-hook: no session_id; falling back to a pane/cwd key (session rows may split)");
+  // A Claude session running inside an editor's integrated terminal is shown
+  // under that editor's icon: the DISPLAY agent gains a host prefix
+  // ("vscode/claude", "cursor/claude") so the board draws the editor mark
+  // badged with Claude's glyph. Display-only - the key stays "claude:<id>"
+  // above, so the same session keeps one identity in a plain terminal or an
+  // editor (specs/adapters.md, specs/events.md).
+  const agent = hostPrefixedAgent("claude", process.env);
   // Explicit names beat inferred ones: a /rename is the user telling us what
   // this session IS; the cwd basename is only a guess. Off (claudeRenameTitle
   // false) skips the custom title so the cwd basename fallback below wins; the
@@ -342,7 +399,7 @@ async function runClaudeHook(): Promise<void> {
   // agent itself so the liveness sweep tracks the right process.
   const proc = captureAgentProc(process.ppid);
   const e = await buildEvent({
-    agent: "claude",
+    agent,
     eventType: mapped.eventType,
     reason: mapped.reason,
     title,
@@ -403,6 +460,50 @@ async function runCursorHook(): Promise<void> {
   await fireEvent(e);
 }
 
+// ---- codex hook --------------------------------------------------------------
+
+async function runCodexHook(): Promise<void> {
+  const dir = stateDir();
+  let payload: CodexHook;
+  let text: string;
+  try {
+    text = await Bun.stdin.text();
+    payload = JSON.parse(text.slice(0, 1 << 20));
+  } catch (err) {
+    logTo(dir, `codex-hook: parse stdin: ${err}`);
+    return;
+  }
+  const settings = loadSettings();
+  const mapped = mapCodexHook(payload, settings.codexClearEnds);
+  if (!mapped) return;
+  // Without a session_id we cannot form the stable codex:<id> key, so buildEvent
+  // falls back to a pane/cwd key that can split one session across rows - log it.
+  const key = payload.session_id ? `codex:${payload.session_id}` : "";
+  if (!payload.session_id) logTo(dir, "codex-hook: no session_id; falling back to a pane/cwd key (session rows may split)");
+  // Codex run inside an editor terminal shows under the editor mark, badged with
+  // Codex's glyph (display only; the key stays codex:<id>).
+  const agent = hostPrefixedAgent("codex", process.env);
+  // A Codex /rename names the session; adopt it like Claude's (toggleable). The
+  // cwd folder name is the fallback; a jumplist rename still overrides either.
+  let title =
+    settings.codexRenameTitle && payload.session_id ? codexSessionName(payload.session_id) : "";
+  if (!title && payload.cwd) title = basename(payload.cwd);
+  const proc = captureAgentProc(process.ppid);
+  const e = await buildEvent({
+    agent,
+    eventType: mapped.eventType,
+    reason: mapped.reason,
+    title,
+    prompt: mapped.detail,
+    reply: codexReply(payload),
+    sessionKey: key,
+    cwd: payload.cwd,
+    proc,
+  });
+  if (process.env.SIGNALBOX_RAW) e.raw = text;
+  await fireEvent(e);
+}
+
 // ---- hub -----------------------------------------------------------------------
 
 function expireAgeMs(): number {
@@ -427,16 +528,113 @@ function expireAgeMs(): number {
 function runHub(args: string[]): void {
   const { flags } = parseFlags(args);
   const port = parseInt(flags["port"] ?? "8377", 10);
-  const hub = new Hub(stateDir(), version);
+  const settings = loadSettings();
+  // Bind resolution order: --bind flag, then SIGNALBOX_BIND, then the persisted
+  // config.hub.bind, then loopback. The persisted value is what lets the
+  // app-spawned hub (which passes no --bind) come up reachable by other devices
+  // with zero flags. The same normalizer runs whichever source wins, so a
+  // friendly word ("any", "loopback") works identically from the flag, the env,
+  // or the file, and the result is always the literal address we bind.
+  const bindInput = flags["bind"] || process.env.SIGNALBOX_BIND || settings.hub.bind || "127.0.0.1";
+  const norm = normalizeBindInput(bindInput);
+  if (norm.error) fatal(norm.error);
+  const bind = norm.value!;
+  // Token: env wins over the persisted config token. The token is the only way
+  // a non-loopback client authenticates.
+  let token = process.env.SIGNALBOX_TOKEN || settings.hub.token || "";
+  // A non-loopback bind with no token would be refused below. Rather than fail,
+  // mint a stable token and persist it, so a bind other devices can reach plus a
+  // bare `signalbox hub` Just Works and stays reachable across restarts on one
+  // token.
+  if (shouldGenerateToken(bind, token)) {
+    token = generateToken();
+    try {
+      saveSettings({ hub: { token } });
+      console.error(`signalbox: generated a hub token and saved it to ${settingsPath()}`);
+    } catch (err) {
+      // Persisting failed (read-only home?); still boot with the token for this
+      // run, but warn that it will not survive a restart.
+      console.error(`signalbox: generated a hub token but could not save it (${err}); it will not persist`);
+    }
+  }
+  // Backstop: still refuse a non-loopback bind with no token. The auto-generate
+  // path above should mean this never fires, but a bad SIGNALBOX_TOKEN="" plus a
+  // wildcard bind must never slip through.
+  const bindErr = validateBindConfig(bind, token);
+  if (bindErr) fatal(bindErr);
+  const hub = new Hub(stateDir(), version, token, bind);
   const expire = expireAgeMs();
   hub.startExpiry(10 * 60 * 1000, expire);
   // Much shorter than expiry: a dead process shows as an eternal spinner
   // until the sweep catches it.
   hub.startLiveness(30 * 1000);
-  listen(hub, port);
+  listen(hub, port, bind);
   console.error(
-    `signalbox hub ${version} listening on http://127.0.0.1:${port} (state: ${stateDir()}, expire: ${expire / 3600000}h)`
+    `signalbox hub ${version} listening on http://${bind}:${port} (state: ${stateDir()}, expire: ${expire / 3600000}h)`
   );
+  if (!isLoopbackAddress(bind)) {
+    console.error(
+      `signalbox: bound to ${bind}; non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN (loopback clients need no token)`
+    );
+  }
+}
+
+// ---- config ----------------------------------------------------------------
+
+// runConfig reads and writes the persistent hub network settings that runHub
+// (and the app-spawned hub) honor. A deliberately tiny two-key surface
+// (hub.bind, hub.token), not a general config editor: the app owns everything
+// else in settings.json.
+function runConfig(args: string[]): void {
+  const { flags, rest } = parseFlags(args, ["generate"]);
+  const sub = rest[0] ?? "get";
+  if (sub === "get") {
+    const s = loadSettings();
+    // The stored value is a literal address; normalize once more only to absorb
+    // a value an older build may have written (e.g. "loopback"). Describe it by
+    // who can reach it, in the same "allow other devices" language config set
+    // uses - never "LAN mode", which hid that a wildcard also answers VPN. For a
+    // wildcard bind, add the LAN IPv4 a device would actually dial. The token
+    // value is never printed, only whether one is set, so it cannot leak.
+    const bind = normalizeBindInput(s.hub.bind).value ?? s.hub.bind;
+    let reach: string;
+    if (isLoopbackAddress(bind)) {
+      reach = "this Mac only";
+    } else if (bind === "0.0.0.0" || bind === "::") {
+      const ip = lanHint();
+      reach = ip
+        ? `other devices may connect; this Mac is reachable at ${ip}`
+        : "other devices may connect; no network interface detected";
+    } else {
+      reach = `other devices may connect; this Mac is reachable at ${bind}`;
+    }
+    console.log(`hub.bind:  ${bind} (${reach})`);
+    console.log(`hub.token: ${s.hub.token ? "set" : "none"}`);
+    return;
+  }
+  if (sub === "set") {
+    const key = rest[1] ?? "";
+    const value = rest[2] ?? "";
+    if (key === "hub.bind") {
+      // Store the literal address, never the word the user typed: bind means
+      // bind. "lan" is refused here with guidance toward "any" or a specific IP.
+      const norm = normalizeBindInput(value);
+      if (norm.error) fatal(norm.error);
+      saveSettings({ hub: { bind: norm.value! } });
+      console.log(`hub.bind set to ${norm.value}`);
+      return;
+    }
+    if (key === "hub.token") {
+      // An empty value or --generate mints a fresh token; otherwise the given
+      // value is stored verbatim.
+      const token = flags["generate"] || value === "" ? generateToken() : value;
+      saveSettings({ hub: { token } });
+      console.log("token saved");
+      return;
+    }
+    fatal(`unknown config key ${JSON.stringify(key)} (settable: hub.bind, hub.token)`);
+  }
+  fatal(`unknown config subcommand ${JSON.stringify(sub)} (try: config get, config set hub.bind <value>, config set hub.token <value|--generate>)`);
 }
 
 // ---- state / pick / tmux-status / drain -------------------------------------------
@@ -568,9 +766,9 @@ function fatal(err: unknown): never {
 // switch below dispatches.
 function normalize(rawCmd: string | undefined, rawArgs: string[]): { cmd: string | undefined; args: string[] } {
   const groups: Record<string, Record<string, string>> = {
-    session: { ack: "ack", hide: "hide", rename: "label", remove: "remove", list: "state", tag: "tag", untag: "untag" },
+    session: { ack: "ack", hide: "hide", show: "show", pin: "pin", unpin: "unpin", rename: "label", remove: "remove", list: "state", tag: "tag", untag: "untag" },
     tmux: { status: "tmux-status", "seen-pane": "seen-pane" },
-    hook: { claude: "claude-hook", cursor: "cursor-hook" },
+    hook: { claude: "claude-hook", cursor: "cursor-hook", codex: "codex-hook" },
   };
   const group = rawCmd ? groups[rawCmd] : undefined;
   if (group) {
@@ -596,6 +794,15 @@ switch (cmd) {
   case "hide":
     await runHookSafe(() => runHide(args));
     break;
+  case "show":
+    await runHookSafe(() => runShow(args));
+    break;
+  case "pin":
+    await runHookSafe(() => runPin(args));
+    break;
+  case "unpin":
+    await runHookSafe(() => runUnpin(args));
+    break;
   case "label":
     await runHookSafe(() => runLabel(args));
     break;
@@ -617,8 +824,17 @@ switch (cmd) {
   case "cursor-hook":
     await runHookSafe(() => runCursorHook());
     break;
+  case "codex-hook":
+    await runHookSafe(() => runCodexHook());
+    break;
   case "hub":
     runHub(args);
+    break;
+  case "pair":
+    await runPair(args).catch(fatal);
+    break;
+  case "config":
+    runConfig(args);
     break;
   case "init":
   case "install": // aliases - init is the documented verb
