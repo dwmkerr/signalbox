@@ -317,6 +317,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let prev = sessions[key]
             let date = EventDate.parse(event.ts) ?? Date()
             let engaged = engagedDate(for: event, date: date, prev: prev)
+            // An enriched ask is not clobbered by its bare twin: one blocked
+            // dialog reaches the SSE stream twice (a permission_request/question
+            // with the real ask in reply, plus a bare permission notification).
+            // Mirror the hub reducer (state.ts) so the raw SSE path keeps the
+            // rich reply that /state already merges - without this the bare
+            // notification, arriving second, overwrites it here. Only the reply
+            // is preserved; the new event still drives status, ts and ordering.
+            let richAsk: (String?) -> Bool = { $0 == "permission_request" || $0 == "question" }
+            let keepRichAsk = prev?.event.event == "attention" && richAsk(prev?.event.reason)
+                && event.event == "attention" && !richAsk(event.reason)
+            let mergedReply = keepRichAsk ? prev?.reply : firstNonEmpty(event.reply, prev?.reply)
             // Any agent event resets acked and hidden unless the payload says
             // otherwise - this is what resurfaces hidden rows and re-arms
             // notifications for previously acked ones.
@@ -327,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 acked: event.acked ?? false,
                 hidden: event.hidden ?? false,
                 detail: firstNonEmpty(event.prompt, prev?.detail),
-                reply: firstNonEmpty(event.reply, prev?.reply),
+                reply: mergedReply,
                 origin: event.origin ?? prev?.origin,
                 // SSE broadcasts raw agent events (pre-merge), which never
                 // carry a label - keep the one we know.

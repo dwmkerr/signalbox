@@ -40,7 +40,9 @@ const claudeHooksBlock = `{
     "Stop": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }]
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
+    "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }]
   }
 }`;
 
@@ -161,6 +163,16 @@ class Setup {
     return a === "y" || a === "yes";
   }
 
+  // readSettingsSafe parses a JSON settings file and runs a predicate over it;
+  // a missing or unparseable file reads as false, matching scan's ENOENT path.
+  readSettingsSafe(path: string, predicate: (settings: any) => boolean): boolean {
+    try {
+      return predicate(JSON.parse(readFileSync(path, "utf8")));
+    } catch {
+      return false;
+    }
+  }
+
   // Installs one adapter link (the same ln -sf the adapters' install.sh
   // scripts do, so replacing a stale link is safe by design).
   stepSymlink(name: string, src: string, dest: string): StepResult {
@@ -209,38 +221,62 @@ class Setup {
     } catch (err) {
       return { status: statusNeeds, name, detail: `cannot read ${settingsPath}: ${err}` };
     }
-    // Every event calls signalbox directly - the canonical setup.
-    if (scan.ours.length === claudeHookEvents.length) {
-      return { status: statusDone, name, detail: settingsPath };
-    }
-    // Every event has *some* hook, but not the literal signalbox command:
-    // the user routes through a wrapper/dispatcher (e.g. a dotfiles script
-    // that calls signalbox). We cannot verify what a script does, and
-    // merging would double-fire every hook - so report it as
-    // present-but-unverified, never as missing, and never write.
-    if (scan.empty.length === 0) {
+    // The classic events are wrapper-routed: every one has some hook, none the
+    // literal signalbox command (a dotfiles dispatcher that calls signalbox).
+    // We cannot verify what a script does and merging would double-fire, so
+    // report present-but-unverified and never write - including the additive
+    // ask hooks, which could double-fire whatever the wrapper already does.
+    const classicWrapper = scan.empty.length === 0 && scan.ours.length !== claudeHookEvents.length;
+    if (classicWrapper) {
       return {
         status: statusDone,
         name,
         detail: `${settingsPath} (hooks present via a wrapper - ensure it calls 'signalbox hook claude')`,
       };
     }
+    // The additive ask-enrichment hooks (only trusted when the classic setup
+    // is signalbox's own, which the wrapper guard above has ensured).
+    const permPresent = this.readSettingsSafe(settingsPath, (s) => signalboxHookOnEvent(s, "PermissionRequest"));
+    const askPresent = this.readSettingsSafe(settingsPath, askQuestionPresent);
+    // Every classic event calls signalbox directly and both ask hooks are
+    // wired - the canonical setup.
+    if (scan.ours.length === claudeHookEvents.length && permPresent && askPresent) {
+      return { status: statusDone, name, detail: settingsPath };
+    }
+    const missing = [
+      ...scan.empty,
+      ...(permPresent ? [] : ["PermissionRequest"]),
+      ...(askPresent ? [] : ["PreToolUse[AskUserQuestion]"]),
+    ];
     if (!this.confirm(`merge the signalbox hooks into ${settingsPath} (backup taken)`)) {
       return {
         status: statusNeeds,
         name,
         detail: `merge the JSON block below into ${settingsPath}`,
-        after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${scan.empty.join(", ")}):\n${claudeHooksBlock}`,
+        after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${missing.join(", ")}):\n${claudeHooksBlock}`,
       };
     }
     try {
-      // Only the events with no hooks at all are touched (scan.empty) -
-      // anything the user routes elsewhere is left exactly as it was.
+      // Only the classic events with no hook at all are touched (scan.empty) -
+      // anything the user routes elsewhere is left as it was. The additive ask
+      // hooks are appended only when absent; the AskUserQuestion entry sits
+      // alongside any PreToolUse matchers the user already has.
       const backup = mergeJSONFile(settingsPath, (settings) => {
         settings.hooks ??= {};
         for (const ev of scan.empty) {
           settings.hooks[ev] ??= [];
           settings.hooks[ev].push({ hooks: [{ type: "command", command: "signalbox hook claude" }] });
+        }
+        if (!signalboxHookOnEvent(settings, "PermissionRequest")) {
+          settings.hooks.PermissionRequest ??= [];
+          settings.hooks.PermissionRequest.push({ hooks: [{ type: "command", command: "signalbox hook claude" }] });
+        }
+        if (!askQuestionPresent(settings)) {
+          settings.hooks.PreToolUse ??= [];
+          settings.hooks.PreToolUse.push({
+            matcher: "AskUserQuestion",
+            hooks: [{ type: "command", command: "signalbox hook claude" }],
+          });
         }
       });
       return { status: statusInstalled, name, detail: `${settingsPath}${backup ? ` (backup: ${backup})` : ""}` };
@@ -249,7 +285,7 @@ class Setup {
         status: statusNeeds,
         name,
         detail: `could not merge (${err}) - apply the block below by hand`,
-        after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${scan.empty.join(", ")}):\n${claudeHooksBlock}`,
+        after: `Claude Code hooks - merge this into ${settingsPath} (missing: ${missing.join(", ")}):\n${claudeHooksBlock}`,
       };
     }
   }
@@ -584,7 +620,36 @@ function mergeJSONFile(path: string, mutate: (obj: any) => void): string | null 
   return backup;
 }
 
+// The classic events decide the install state (direct / wrapper / empty).
+// The two ask-enrichment hooks - PermissionRequest and the AskUserQuestion
+// PreToolUse - are ADDITIVE: they are only merged when the classic setup is
+// signalbox's own, never over a wrapper we cannot inspect (adding a direct
+// hook then could double-fire whatever the wrapper already does).
 const claudeHookEvents = ["Notification", "Stop", "UserPromptSubmit", "SessionStart", "SessionEnd"];
+
+// signalboxHookOnEvent reports whether a plain (matcher-less) event routes to
+// signalbox. Used for the additive PermissionRequest hook.
+function signalboxHookOnEvent(settings: any, ev: string): boolean {
+  const entries = settings?.hooks?.[ev];
+  if (!Array.isArray(entries)) return false;
+  return entries.some((e: any) =>
+    (e?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes("signalbox"))
+  );
+}
+
+// askQuestionPresent reports whether settings already route the AskUserQuestion
+// PreToolUse hook to signalbox. Matcher-scoped, so it is checked on the exact
+// entry, not by the PreToolUse event merely existing - a user's formatter hook
+// on another matcher must not mask a missing signalbox entry.
+function askQuestionPresent(settings: any): boolean {
+  const entries = settings?.hooks?.PreToolUse;
+  if (!Array.isArray(entries)) return false;
+  return entries.some(
+    (e: any) =>
+      e?.matcher === "AskUserQuestion" &&
+      (e?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes("signalbox"))
+  );
+}
 
 interface HookScan {
   ours: string[]; // events whose hook calls signalbox directly

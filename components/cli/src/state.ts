@@ -131,6 +131,17 @@ export class Store {
       // when the session already existed untagged. Only tag/untag events clear
       // them.
       if (!e.tags) e.tags = prev.tags;
+      // An enriched ask is not clobbered by its bare twin: one blocked dialog
+      // can reach the hub twice (a permission_request/question attention with
+      // the real ask in reply, plus a bare notification). While the row is
+      // already in attention with a rich reason, a plain attention duplicate
+      // keeps the rich reply and reason, whatever order they arrived in. Any
+      // non-attention agent event ends the ask and normal rules resume.
+      const richAsk = (r?: string) => r === "permission_request" || r === "question";
+      if (prev.event === ev.Attention && e.event === ev.Attention && richAsk(prev.reason) && !richAsk(e.reason)) {
+        e.reply = prev.reply;
+        e.reason = prev.reason;
+      }
       e.engaged_ts = prev.engaged_ts;
     } else {
       // Never-engaged sessions take their arrival slot.

@@ -217,6 +217,23 @@
   <p>Right-click any row for the same actions as a menu: <b>Pin/Unpin</b>, <b>Rename</b>,
   <b>Hide</b> (or <b>Unhide</b> on a revealed hidden row), and <b>Remove</b>.</p>
 
+  <h2>Asks on the board</h2>
+  <p>When an agent blocks on you, the row shows the <em>actual ask</em>, not a generic "needs your
+  permission": a pending tool approval reads as the command it wants to run
+  (<code>Bash: git push origin main</code> - the <code>codex-mcp-server</code> and
+  <code>signalbox-hub</code> rows below), and an agent question reads as the question with its
+  options inline (the <code>dwmkerr-toolkit</code> row). Both are ordinary attention events whose
+  <code>reply</code> carries the ask - the amber mark and preview pane render them with no special
+  casing. The wire vocabulary (<code>reason: permission_request</code> / <code>question</code>, and
+  the no-clobber rule that keeps the rich ask when a bare duplicate notification arrives) is
+  specified in <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">events.md</a>;
+  how each agent's adapter captures the ask (Claude Code's <code>PermissionRequest</code> and
+  matcher-scoped <code>PreToolUse[AskUserQuestion]</code> hooks, Codex's native
+  permission requests) is specified in
+  <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">adapters.md</a>.
+  The board never answers for you: asks are read-only signal, and the answer happens where the
+  agent runs - jump.</p>
+
   <h2>Preview</h2>
   <p>The right pane is the last exchange, on black like the terminal it quotes: your prompt, then the
   agent's reply. The bullet is amber for asks and blue for finished work. While a session works you
@@ -253,10 +270,22 @@ const SESSIONS = [
   {key:"claude:7786", agent:"claude", title:"work-project", state:"working", ageSeconds:6, tags:["work"], pinned:true,
    prompt:"yes please send it. please also mark the old batches as read.", reply:null,
    loc:"Jump to iTerm (tmux work-project:1) on localhost"},
+  // A question ask (reason "question"): the AskUserQuestion content, question
+  // plus option labels, rendered from reply like any other attention text.
   {key:"claude:1f72", agent:"claude", title:"dwmkerr-toolkit", state:"ask", ageSeconds:16,
    prompt:"good enough. commit work for now.",
-   reply:"I've generated the style config. Overwrite the existing writing-style.yml with this version? It changes tone rules you wrote manually.",
+   reply:"Which commit style for this batch? (Squash into one / Keep separate / Interactive rebase)",
    loc:"Jump to iTerm (tmux work-project:1) on localhost"},
+  // A permission ask (reason "permission_request"): the pending tool call
+  // itself - tool name and cropped input - never a bare "needs permission".
+  {key:"codex:8e41", agent:"codex", title:"codex-mcp-server", state:"ask", ageSeconds:41,
+   prompt:"wire the streaming endpoint into the MCP layer.",
+   reply:"Allow me to run: npm publish --access public?",
+   loc:"Jump to iTerm (tmux mcp:2) on localhost"},
+  {key:"claude:5d09", agent:"claude", title:"signalbox-hub", state:"ask", ageSeconds:58,
+   prompt:"push the branch and open the PR.",
+   reply:"Bash: git push -u origin feat/attention-asks",
+   loc:"Jump to Ghostty (tmux signalbox:1) on localhost"},
   {key:"claude:bbfc", agent:"claude", title:"writing-studio-dashboard", state:"unread", ageSeconds:8,
    prompt:"add a per-post traffic panel with the substack numbers.",
    reply:"Done - the dashboard now shows per-post traffic with a 30-day sparkline. Build is green, preview at http://localhost:4321.",
