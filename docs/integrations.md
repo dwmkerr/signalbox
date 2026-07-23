@@ -6,8 +6,9 @@ up with `signalbox init` (interactive) or one at a time with
 
 `init` wires JSON agent configs (`~/.claude/settings.json`,
 `~/.cursor/hooks.json`) for you, with consent: it takes a timestamped backup,
-merges only events that have no hooks at all (your own wrappers are never
-touched), and writes atomically. `--remove` reverses exactly that edit.
+appends signalbox alongside any hooks of your own (they compose - yours are
+never touched or doubled), and writes atomically. `--remove` reverses exactly
+that edit.
 Freeform config like `~/.tmux.conf` gets its exact snippet printed for you to
 apply; add `--write-user-config` to have `init` write it as a fenced managed
 block (backup taken, `--reverse` removes only signalbox's own lines).

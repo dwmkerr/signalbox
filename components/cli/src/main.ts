@@ -775,9 +775,13 @@ function normalize(rawCmd: string | undefined, rawArgs: string[]): { cmd: string
     const verb = rawArgs[0];
     const canonical = verb ? group[verb] : undefined;
     if (canonical) return { cmd: canonical, args: rawArgs.slice(1) };
-    // Unknown subcommand under a known noun: report the valid verbs.
+    // Unknown subcommand under a known noun: report the valid verbs. `hook`
+    // runs inside a host agent, and a nonzero exit there blocks the agent's
+    // turn - an unknown hook agent means the config was wired by a newer
+    // signalbox than this binary, which is skew to warn about, never a
+    // reason to break the host. Everything else is interactive misuse.
     console.error(`signalbox ${rawCmd}: unknown subcommand ${JSON.stringify(verb ?? "")} (try: ${Object.keys(group).join(", ")})`);
-    process.exit(2);
+    process.exit(rawCmd === "hook" ? 0 : 2);
   }
   return { cmd: rawCmd, args: rawArgs };
 }

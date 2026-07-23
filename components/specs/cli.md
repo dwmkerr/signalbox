@@ -2,7 +2,9 @@ signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/h
 
 # Specification: signalbox CLI
 
-signalbox is a single binary. The hook-path commands (`fire`, `hook claude`, `hook cursor`, `hook codex`, `tmux seen-pane`, and the `session` verbs `ack`, `hide`, `show`, `pin`, `unpin`, `rename`, `remove`, `tag`, `untag`) are bounded - one POST with a 200ms timeout and a capped backlog drain - and always exit 0, so a notifier cannot break the agent that called it. The commands you run yourself (`state`, `jump`, `pick`, `init`, `hub`, `config`, `drain`) may fail loudly.
+signalbox is a single binary. The hook-path commands (`fire`, `hook claude`, `hook cursor`, `hook codex`, `tmux seen-pane`, and the `session` verbs `ack`, `hide`, `show`, `pin`, `unpin`, `rename`, `remove`, `tag`, `untag`) are bounded - one POST with a 200ms timeout and a capped backlog drain - and always exit 0, so a notifier cannot break the agent that called it. That
+includes an unknown `hook <agent>` subcommand (config wired by a newer
+signalbox than the installed binary): it warns on stderr and still exits 0. The commands you run yourself (`state`, `jump`, `pick`, `init`, `hub`, `config`, `drain`) may fail loudly.
 
 Bare `signalbox` (and `-h`/`--help`) prints a short help: just the human commands. `signalbox help` is the full reference - every command, flag, and environment variable. When a command needs the hub and it is not running, the error names the fix (open the Signalbox app, or `signalbox hub`).
 
@@ -50,9 +52,11 @@ missing row shows `◉ · set up` and an unchecked-but-installed row shows `○ 
 User config policy: JSON agent configs (`~/.claude/settings.json`,
 `~/.cursor/hooks.json`) are merged only with consent - checking the row in
 the picker or passing the scope flag IS the consent - with a timestamped
-backup next to the file and an atomic, parse-validated write. Only events
-with no hooks at all are filled; hooks routed through your own wrapper are
-never touched (and never doubled). `--remove` is the same edit in reverse:
+backup next to the file and an atomic, parse-validated write. The literal
+`signalbox hook <agent>` command is the wired marker: an event counts as set
+up only when one of its hook commands contains it; otherwise the entry is
+appended alongside your own hooks (hook arrays compose, so your hooks are
+never doubled and never touched). `--remove` is the same edit in reverse:
 only the literal `signalbox hook <agent>` commands are removed. Freeform
 config (`~/.tmux.conf`) is printed as a snippet by default; `--write-user-config`
 writes it as a fenced managed block instead. The binary itself is not init's business: Homebrew owns the CLI on

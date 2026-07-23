@@ -116,6 +116,8 @@ export function mergeHookCommand(
   for (const ev of events) {
     const groups = (hooks[ev] ??= []);
     if (!Array.isArray(groups)) continue;
+    // The literal hook command is the marker: its presence in the file is the
+    // deterministic "already wired" test (same test init's scan and removal use).
     const present = groups.some((g: any) =>
       (g?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes(command)),
     );
@@ -175,6 +177,7 @@ export function mergeCursorHooks(
   for (const ev of events) {
     const arr = (hooks[ev] ??= []);
     if (!Array.isArray(arr)) continue;
+    // The literal hook command is the marker (same test as init's scan/removal).
     if (arr.some((h: any) => typeof h?.command === "string" && h.command.includes(command))) continue;
     arr.push({ command });
     changed.push(ev);
