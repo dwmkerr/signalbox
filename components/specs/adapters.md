@@ -4,6 +4,22 @@ signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/h
 
 How each coding agent connects to signalbox, and how its hooks map to events. Adapters live in `components/cli/adapters/`.
 
+## What each agent surfaces
+
+An adapter can only surface what its agent's hooks emit, so the board shows different depth per agent. This is the user-facing summary; the per-agent sections below have the exact hook mapping. `-` means the agent has no hook for it, not a signalbox gap.
+
+| Agent | Live status | Prompt + reply | Permission ask | Question ask | Errors | Jump-back |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|
+| Claude Code | yes | yes | command shown | yes, with options | yes | tmux / editor |
+| Codex | yes | yes | command shown | - | - `*` | tmux / Cursor |
+| Cursor | yes | yes | yes (shell / MCP) | - | yes | Cursor window |
+| OpenCode | yes | yes | yes | - | yes | tmux |
+| pi | yes | yes | - | - | - | tmux |
+| GitHub Actions | as fired | as fired | - | - | yes (fire) | opens on GitHub |
+
+- **Question ask** is Claude Code's `AskUserQuestion` (the agent asks you to pick an option); no other agent has an equivalent tool, so the column is Claude-only by nature.
+- `*` **Codex has no error hook.** Its hook set is `session_start, user_prompt_submit, stop, permission_request, session_end` - there is no turn-failure event, so a Codex turn that errors just stops emitting and the row ages out via the liveness sweep rather than showing an error. Surfacing it would mean inferring failure from silence, which is worse than an honest gap. Not a bug to fix here - it needs an upstream Codex hook.
+
 Installing: `signalbox init` converges everything ([cli.md](cli.md); `install` and `setup` are aliases); `signalbox init --agent <name>` (repeatable, `--agent all` for every agent) scopes the run to one or more agents and applies without the picker; `--remove` turns the same components off. `--app` and `--tmux` scope to the other components.
 
 ## Claude Code (`signalbox hook claude`, stdin JSON)
