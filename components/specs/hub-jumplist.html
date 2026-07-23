@@ -228,7 +228,7 @@
   the no-clobber rule that keeps the rich ask when a bare duplicate notification arrives) is
   specified in <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">events.md</a>;
   how each agent's adapter captures the ask (Claude Code's <code>PermissionRequest</code> and
-  <code>PreToolUse[AskUserQuestion]</code> hooks with the tool sidecar, Codex's native
+  matcher-scoped <code>PreToolUse[AskUserQuestion]</code> hooks, Codex's native
   permission requests) is specified in
   <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">adapters.md</a>.
   The board never answers for you: asks are read-only signal, and the answer happens where the
