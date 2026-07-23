@@ -1,0 +1,332 @@
+<!doctype html>
+<!--
+  signalbox hero - "Focus Pull". A rack-focus reveal: an ordinary agent-running
+  desktop (four real terminal windows) racks soft and dim behind glass while the
+  crisp signalbox palette snaps into focus over it, Spotlight-high. The caret
+  blinks in a real search field, a short query filters the board live to the
+  agent that needs you, then esc dismisses to form the loop seam.
+
+  One 6s master loop; big choreography rides `animation: <kf> 6s linear infinite`
+  with % stops so Playwright can step it by Animation.currentTime. Tiny
+  continuous motions (caret blink, working spinners) run on their own short
+  infinite loops that wrap cleanly under the same stepping. prefers-reduced-motion
+  rests on a complete palette-present frame.
+-->
+<html lang="en"><head><meta charset="utf-8">
+<title>signalbox - spotlight for your agents</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='%23FF9F0A' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='2.4' fill='%23FF9F0A' stroke='none'/%3E%3Cpath d='M6.5 6.5 A 5 5 0 0 1 13.5 6.5'/%3E%3Cpath d='M6.5 13.5 A 5 5 0 0 0 13.5 13.5'/%3E%3Cpath d='M4.2 4.2 A 8 8 0 0 1 15.8 4.2' opacity='.55'/%3E%3Cpath d='M4.2 15.8 A 8 8 0 0 0 15.8 15.8' opacity='.55'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { background:#000; }
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+  .stage { position:relative; width:1280px; height:720px; overflow:hidden;
+           background:radial-gradient(120% 100% at 50% 12%, #202533 0%, #14161e 45%, #0b0c10 100%); }
+  .mono { font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* ---------- BEHIND: the frosted, dimmed desktop of real agent windows ---------- */
+  .desk { position:absolute; inset:0; z-index:1;
+          animation:deskfocus 6s linear infinite; will-change:filter; }
+  @keyframes deskfocus {
+    0%   { filter:blur(2px) brightness(.82) saturate(.9); }
+    6%   { filter:blur(2px) brightness(.82) saturate(.9); }
+    15%  { filter:blur(9px) brightness(.45) saturate(.85); }
+    84%  { filter:blur(9px) brightness(.45) saturate(.85); }
+    92%  { filter:blur(3px) brightness(.7) saturate(.9); }
+    100% { filter:blur(2px) brightness(.82) saturate(.9); }
+  }
+  .win { position:absolute; border-radius:9px; overflow:hidden; border:1px solid #ffffff2e;
+         box-shadow:0 30px 64px rgba(0,0,0,.55); background:#0d0d11; }
+  .win .bar { height:27px; display:flex; align-items:center; gap:9px; padding:0 12px;
+              font-size:11px; color:#9a9aa1; letter-spacing:.2px; }
+  .win .bar .lights { display:flex; gap:6px; }
+  .win .bar .lights i { width:10px; height:10px; border-radius:50%; display:block; }
+  .win .scr { padding:11px 14px; font-family:'SF Mono',ui-monospace,Menlo,monospace;
+              font-size:12px; line-height:1.72; color:#c3c3c8; }
+  .win .scr .pr { color:#5f6b62; } .win .scr .amb { color:#FF9F0A; }
+  .win .scr .grn { color:#32D74B; } .win .scr .blu { color:#5aa9ff; } .win .scr .dim { color:#6f6f77; }
+  .win.iterm .bar { background:#26262b; } .win.ghostty .bar { background:#241f2b; }
+  .tmuxbar { position:absolute; left:0; right:0; bottom:0; height:22px; background:#2f7d4f;
+             color:#dff5e6; font-size:11px; display:flex; align-items:center; gap:14px; padding:0 12px;
+             font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* the vignette + dim that lifts the desktop out of attention as focus racks away */
+  .dim { position:absolute; inset:0; z-index:2; pointer-events:none;
+         background:radial-gradient(120% 105% at 50% 40%, rgba(6,7,10,.10) 0%, rgba(6,7,10,.52) 60%, rgba(3,4,7,.92) 100%);
+         animation:dimrise 6s linear infinite; }
+  @keyframes dimrise {
+    0%,6% { opacity:.28 } 15% { opacity:.74 } 84% { opacity:.74 } 92% { opacity:.42 } 100% { opacity:.28 }
+  }
+
+  /* ---------- ABOVE: the chord, then the crisp palette ---------- */
+  .caps { position:absolute; z-index:5; top:38px; left:50%; transform:translateX(-50%);
+          display:flex; gap:10px; }
+  .cap { min-width:44px; height:44px; padding:0 13px; display:flex; align-items:center; justify-content:center;
+         background:linear-gradient(#33333a,#26262b); color:#e9e9ee;
+         font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:20px; font-weight:600;
+         border:1px solid #ffffff2e; border-bottom-width:3px; border-bottom-color:#ffffff12;
+         border-radius:10px; box-shadow:0 10px 26px rgba(0,0,0,.55);
+         animation:capkey 6s linear infinite; }
+  @keyframes capkey {
+    0%,4% { opacity:.46; transform:translateY(0) scale(1); filter:brightness(1); }
+    6%    { opacity:.92; transform:translateY(2px) scale(.97); filter:brightness(1.4); }
+    9%    { opacity:.9;  transform:translateY(0) scale(1); filter:brightness(1.18); }
+    16%   { opacity:.46; filter:brightness(1); }
+    84%   { opacity:.46; } 90% { opacity:.3; } 100% { opacity:.46; }
+  }
+
+  .palette { position:absolute; z-index:4; top:104px; left:50%; width:848px;
+             transform:translateX(-50%) translateY(0) scale(1);
+             animation:paletteIn 6s linear infinite; will-change:transform,opacity; }
+  @keyframes paletteIn {
+    0%,9% { opacity:0; transform:translateX(-50%) translateY(13px) scale(.965); }
+    16%   { opacity:1; transform:translateX(-50%) translateY(0) scale(1); }
+    83%   { opacity:1; transform:translateX(-50%) translateY(0) scale(1); }
+    90%   { opacity:0; transform:translateX(-50%) translateY(-6px) scale(.978); }
+    100%  { opacity:0; transform:translateX(-50%) translateY(-6px) scale(.978); }
+  }
+  .panel { background:linear-gradient(#212228,#17181c); border:1px solid #ffffff26; border-radius:17px;
+           box-shadow:0 44px 100px rgba(0,0,0,.7), 0 10px 42px rgba(0,0,0,.5), 0 0 0 1px #00000055;
+           overflow:hidden; }
+
+  .head { display:flex; align-items:center; gap:12px; height:48px; padding:0 20px;
+          border-bottom:1px solid #ffffff14; }
+  .head .mk { width:22px; height:22px; display:flex; }
+  .head .mk svg { width:22px; height:22px; }
+  .head .wm { color:#fff; font-size:15px; font-weight:600; }
+  .head .search { flex:1; display:flex; align-items:center; margin:0 6px; color:#EDEDED; font-size:14px;
+                  min-width:0; overflow:hidden; }
+  .head .search .typed { display:inline-block; overflow:hidden; white-space:nowrap; max-width:0;
+                         font-family:'SF Mono',ui-monospace,Menlo,monospace; color:#EDEDED; letter-spacing:.2px;
+                         animation:typequery 6s linear infinite; }
+  @keyframes typequery {
+    0%,42% { max-width:0 } 43% { max-width:12px } 44% { max-width:24px } 45% { max-width:36px }
+    46% { max-width:48px } 70% { max-width:48px } 72% { max-width:0 } 100% { max-width:0 }
+  }
+  .head .search .caret { width:1.5px; height:16px; background:#EDEDED; margin:0 1px; flex-shrink:0;
+                         animation:blink 1.06s step-end infinite; }
+  @keyframes blink { 0% { opacity:1 } 50% { opacity:0 } 100% { opacity:1 } }
+  .head .search .ph { color:#63636a; margin-left:3px; white-space:nowrap; animation:phfade 6s linear infinite; }
+  @keyframes phfade { 0%,41% { opacity:1 } 43% { opacity:0 } 71% { opacity:0 } 73% { opacity:1 } 100% { opacity:1 } }
+  .head .jp { color:#9a9aa1; font-size:13px; flex-shrink:0; }
+  .head .jp kbd { color:#c8c8ce; }
+
+  .body { display:flex; }
+  .list { width:432px; height:318px; border-right:1px solid #ffffff14; padding:8px 8px; overflow:hidden; }
+  .r { position:relative; display:flex; align-items:center; gap:13px; height:50px; padding:0 12px;
+       border-radius:10px; overflow:hidden; }
+  .r.dim5 { animation:rowfilter 6s linear infinite; }
+  @keyframes rowfilter {
+    0%,46% { opacity:1; height:50px } 50% { opacity:0; height:0 } 70% { opacity:0; height:0 }
+    73% { opacity:1; height:50px } 100% { opacity:1; height:50px }
+  }
+  .r.sel { background:#2C2C31; }
+  .r.sel::after { content:""; position:absolute; inset:0; border:1px solid #ffffff1e; border-radius:10px; pointer-events:none; }
+  .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
+  .dot { width:9px; height:9px; border-radius:50%; box-sizing:border-box; }
+  .dot.a { background:#FF9F0A; } .dot.b { background:#0A84FF; }
+  .fail { color:#FF453A; font-size:13px; font-weight:700; line-height:1; }
+  .spin { width:12px; height:12px; border-radius:50%; border:2px solid #ffffff2e; border-top-color:#d3d3d8;
+          animation:rotate .9s linear infinite; }
+  @keyframes rotate { to { transform:rotate(360deg) } }
+  .gl { width:22px; display:flex; justify-content:center; flex-shrink:0; }
+  .gl svg { display:block; }
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:14.5px; color:#c3c3c9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .txt .t b { color:#fff; font-weight:600; }
+  .r.sel .txt .t, .r.sel .txt .t b { color:#fff; }
+  .txt .d { font-size:12px; color:#7e7e85; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .r.sel .txt .d { color:#d7bf88; }
+  .age { color:#9a9aa1; font-size:12.5px; flex-shrink:0; font-variant-numeric:tabular-nums; }
+
+  .preview { flex:1; background:#000; padding:18px 22px; }
+  .term { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:12px; line-height:1.75; color:#C8C8CC; }
+  .term .you { color:#98989D; white-space:pre-wrap; }
+  .term .you::before { content:"\276F "; color:#5A5A5F; }
+  .term .gap { height:13px; }
+  .term .resp { display:flex; gap:8px; }
+  .term .resp .b { color:#FF9F0A; } .term .resp .body-t { white-space:pre-wrap; color:#E4D6B4; }
+  .term .actline { margin-top:20px; font-size:11px; color:#6E6E73;
+                   font-family:-apple-system,sans-serif; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .term .actline kbd { color:#c8c8ce; }
+  .term .actline .need { color:#FF9F0A; font-weight:600; }
+  kbd { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:.92em; }
+
+  .foot { display:flex; align-items:center; height:36px; padding:0 20px; gap:18px;
+          border-top:1px solid #ffffff12; color:#63636a; font-size:11.5px;
+          font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .foot .sep { color:#3a3a40; }
+  .foot kbd { color:#8a8a90; }
+
+  /* ---------- BELOW: brand line + brew, sitting over the frosted backdrop ---------- */
+  .brand { position:absolute; z-index:5; top:544px; left:0; right:0; text-align:center; }
+  .brand .tl { color:#c3c3c9; font-size:16.5px; } .brand .tl b { color:#fff; font-weight:600; }
+  .brand .in { margin-top:13px; display:inline-block; background:#141418; border:1px solid #ffffff1c;
+               border-radius:10px; padding:10px 18px; color:#EDEDED; font-size:14px; }
+  .brand .in .d { color:#75757c; }
+
+  @media (prefers-reduced-motion:reduce) {
+    * { animation:none !important; }
+    .desk { filter:blur(9px) brightness(.45) saturate(.85) !important; }
+    .dim { opacity:.74 !important; }
+    .caps .cap { opacity:.46 !important; transform:translateY(0) scale(1) !important; }
+    .palette { opacity:1 !important; transform:translateX(-50%) translateY(0) scale(1) !important; }
+    .head .search .typed { max-width:0 !important; }
+    .head .search .ph { opacity:1 !important; }
+    .head .search .caret { opacity:1 !important; }
+    .r.dim5 { opacity:1 !important; height:50px !important; }
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- BEHIND: a tidy macOS-style workspace of real agent terminals, frosted + dimmed -->
+  <div class="desk">
+    <div class="win iterm" style="top:34px; left:40px; width:546px; height:312px;">
+      <div class="bar"><span class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span><span>claude - work-project - tmux work-project:1</span></div>
+      <div class="scr">
+        <div><span class="amb">&#10087;</span> Working&#8230; (6s) &#183; wiring the streaming endpoint</div>
+        <div><span class="grn">&#9679;</span> Read <span class="dim">src/index.ts</span> (214 lines)</div>
+        <div><span class="grn">&#9679;</span> Edited <span class="dim">src/hub/stream.ts</span>, <span class="dim">events.ts</span></div>
+        <div><span class="grn">&#9679;</span> Bash(<span class="dim">bun test</span>) &#8627; 128 passed</div>
+        <div class="pr">&#10095; yes please send it. also mark the old</div>
+        <div class="pr">&nbsp;&nbsp;batches as read.</div>
+      </div>
+    </div>
+
+    <div class="win ghostty" style="top:24px; left:658px; width:474px; height:242px;">
+      <div class="bar"><span class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span><span>codex - codex-mcp-server</span></div>
+      <div class="scr">
+        <div class="pr">&#10095; wire the streaming endpoint into the MCP layer</div>
+        <div class="dim">&nbsp;&nbsp;proposed patch &#8594; src/mcp/stream.ts (+64 -8)</div>
+        <div><span class="amb">&#9679;</span> Allow command: <span class="dim">npm publish --access</span></div>
+        <div>&nbsp;&nbsp;<span class="dim">public</span>?&nbsp;&nbsp;<span class="amb">[y/N]</span></div>
+      </div>
+    </div>
+
+    <div class="win iterm" style="top:300px; left:820px; width:420px; height:372px;">
+      <div class="bar"><span class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span><span>tmux qa:1</span></div>
+      <div class="scr">
+        <div class="pr">$ bun test:e2e</div>
+        <div><span class="grn">&#10003;</span> checkout flow <span class="dim">(3.2s)</span></div>
+        <div><span class="grn">&#10003;</span> cart hydration <span class="dim">(1.1s)</span></div>
+        <div><span class="grn">&#10003;</span> attention asks <span class="dim">(0.8s)</span></div>
+        <div class="dim">&#9203; running 12 / 40&#8230;</div>
+        <div class="blu">&nbsp;&nbsp;PASS &#183; 24 files &#183; 0 failed</div>
+      </div>
+      <div class="tmuxbar"><span class="mono">[qa]</span><span>1:vitest*</span><span>2:logs</span><span style="margin-left:auto">"mbp" 14:22</span></div>
+    </div>
+
+    <div class="win iterm" style="top:400px; left:96px; width:566px; height:290px;">
+      <div class="bar"><span class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span><span>opencode - docs-site-astro</span></div>
+      <div class="scr">
+        <div class="pr">&#10095; regenerate the search index after the refactor</div>
+        <div class="dim">&nbsp;&nbsp;indexing 214 docs&#8230;</div>
+        <div><span class="grn">&#8635;</span> building lunr index <span class="dim">(chunk 6/9)</span></div>
+        <div class="dim">&nbsp;&nbsp;emit &#8594; public/search-index.json</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dim"></div>
+
+  <!-- the chord you pressed to summon it, resting dim -->
+  <div class="caps">
+    <div class="cap">&#8963;</div>
+    <div class="cap">&#8997;</div>
+    <div class="cap">J</div>
+  </div>
+
+  <!-- ON TOP: the crisp signalbox palette, rendered faithfully from hub-jumplist -->
+  <div class="palette">
+    <div class="panel">
+      <div class="head">
+        <div class="mk"><svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg></div>
+        <div class="wm">signalbox</div>
+        <div class="search"><span class="typed">push</span><span class="caret"></span><span class="ph">Search sessions&#8230;</span></div>
+        <div class="jp">Jump <kbd>&#8629;</kbd></div>
+      </div>
+
+      <div class="body">
+        <div class="list">
+
+          <!-- claude, working -->
+          <div class="r dim5">
+            <div class="mark"><div class="spin"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+            <div class="txt"><div class="t">work-project</div><div class="d">yes please send it. also mark the old batches as read.</div></div>
+            <div class="age">6s</div>
+          </div>
+
+          <!-- claude, ASKING - the one that needs you, selected; a real permission ask -->
+          <div class="r sel">
+            <div class="mark"><div class="dot a"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+            <div class="txt"><div class="t"><b>signalbox-hub</b></div><div class="d">Bash: git push -u origin feat/attention-asks</div></div>
+            <div class="age">12s</div>
+          </div>
+
+          <!-- opencode, working -->
+          <div class="r dim5">
+            <div class="mark"><div class="spin"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+            <div class="txt"><div class="t">docs-site-astro</div><div class="d">regenerate the search index after the content refactor.</div></div>
+            <div class="age">22s</div>
+          </div>
+
+          <!-- codex, ASKING - the pending tool call, verbatim -->
+          <div class="r dim5">
+            <div class="mark"><div class="dot a"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+            <div class="txt"><div class="t"><b>codex-mcp-server</b></div><div class="d">Allow me to run: npm publish --access public?</div></div>
+            <div class="age">41s</div>
+          </div>
+
+          <!-- pi, done (unread) -->
+          <div class="r dim5">
+            <div class="mark"><div class="dot b"></div></div>
+            <div class="gl"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#0A84FF;font-size:15px;line-height:1">&#960;</span></div>
+            <div class="txt"><div class="t"><b>log-triage</b></div><div class="d">Grouped 1,204 errors into 7 clusters - the top two are the same timeout.</div></div>
+            <div class="age">3m</div>
+          </div>
+
+          <!-- github, failed -->
+          <div class="r dim5">
+            <div class="mark"><div class="fail">&#10005;</div></div>
+            <div class="gl"><svg width="19" height="19" viewBox="0 0 16 16"><path fill="#B5B5BA" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg></div>
+            <div class="txt"><div class="t"><b>toolkit-deploy</b></div><div class="d">Workflow run #9182 failed - deploy step exited 1.</div></div>
+            <div class="age">21m</div>
+          </div>
+
+        </div>
+
+        <!-- full-black preview quoting the selected ask, verbatim -->
+        <div class="preview">
+          <div class="term">
+            <div class="you">push the branch and open the PR.</div>
+            <div class="gap"></div>
+            <div class="resp"><span class="b">&#9679;</span><span class="body-t">Bash: git push -u origin feat/attention-asks</span></div>
+            <div class="actline"><kbd>&#8629;</kbd> Jump to Ghostty (tmux signalbox:1) on localhost <span class="sep">&#183;</span> <span class="need">needs your input</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="foot">
+        <span>type to search</span><span class="sep">&#183;</span>
+        <span><kbd>&#8963;J</kbd>/<kbd>&#8963;K</kbd> move</span><span class="sep">&#183;</span>
+        <span><kbd>&#8629;</kbd> jump</span><span class="sep">&#183;</span>
+        <span><kbd>esc</kbd> close</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- BELOW: the brand line, over the frosted work -->
+  <div class="brand">
+    <div class="tl">One board for every agent, terminal, and job you run.</div>
+    <div class="in mono">brew install <span style="color:#EDEDED">dwmkerr/tools/signalbox</span> <span class="d">&#183; &#8963;&#8997;J</span></div>
+  </div>
+
+</div>
+</body></html>
