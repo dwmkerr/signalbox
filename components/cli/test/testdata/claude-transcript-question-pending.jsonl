@@ -1,0 +1,15 @@
+{"type": "last-prompt"}
+{"type": "mode"}
+{"type": "permission-mode"}
+{"type": "file-history-snapshot"}
+{"type": "file-history-snapshot"}
+{"type": "attachment"}
+{"type": "user", "session_id": "s1", "message": {"role": "user", "content": "prompt text"}}
+{"type": "attachment"}
+{"type": "attachment"}
+{"type": "attachment"}
+{"type": "attachment"}
+{"type": "last-prompt"}
+{"type": "mode"}
+{"type": "permission-mode"}
+{"type": "ai-title"}
