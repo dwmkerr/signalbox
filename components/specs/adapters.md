@@ -23,7 +23,9 @@ signalbox init --agent claude
     "Stop": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }]
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }]
   }
 }
 ```
@@ -34,7 +36,10 @@ signalbox init --agent claude
 | `UserPromptSubmit` | busy + `prompt` = cropped prompt text |
 | `Stop` | done (reason `stop`) |
 | `Notification` - idle | done (reason `idle`). Matched by `notification_type: idle_prompt`, or (current Claude Code sends no type) by a typeless `message` mentioning idle/finished/"waiting for your input"/"no longer" (case-insensitive). |
-| `Notification` - anything else (permission prompt, elicitation, unknown type, or a typeless permission `message`) | attention. Claude is blocked waiting on you. Defaulting to attention keeps the needs-you state correct across Claude Code versions that change these payloads. |
+| `Notification` - anything else (permission prompt, elicitation, unknown type, or a typeless permission `message`) | attention. Claude is blocked waiting on you. Defaulting to attention keeps the needs-you state correct across Claude Code versions that change these payloads. Enriched from the tool sidecar when one is fresh (below) - the bare "Claude needs your permission" text is a last resort, not the signal. |
+| `PermissionRequest` (any tool) | attention (reason `permission_request`) + `reply` = the actual ask, formatted from `tool_name` and `tool_input` (e.g. `Bash: git push origin main`). Fires when the permission dialog appears, so this is the authoritative blocked-on-you signal with content. |
+| `PreToolUse` - `tool_name: AskUserQuestion` | attention (reason `question`) + `reply` = the question and its option labels (e.g. `Which auth approach? (JWT / sessions / magic links)`). AskUserQuestion is always interactive, so PreToolUse firing IS the dialog appearing - the question never reaches the transcript or the Notification payload while it waits, so this hook is the only passive source of the question text. |
+| `PreToolUse` - any other tool | no event. Updates the tool sidecar only (below). PreToolUse fires for every tool call including auto-approved ones, so treating it as attention would flood the board while the agent works normally. |
 | `StopFailure` | error (reason = `error_type`) |
 | `SessionEnd` | ended - except reason `clear` when the `claudeClearEnds` setting is off, which maps to done (reason `clear`) so the old exchange stays on the board ([settings.html](https://dwmkerr.github.io/signalbox/specs/settings.html)) |
 | anything else | ignore, exit 0 |
@@ -44,6 +49,8 @@ signalbox init --agent claude
 - Title: explicit `/rename` from the transcript's `custom-title` entries (bounded head+tail read, last one wins) beats the cwd basename. The `claudeRenameTitle` setting turns the `/rename` lookup off; your own jumplist rename (a label event) overrides either.
 - `reply`: final assistant text from the transcript (bounded tail read of `transcript_path`, never the full file). Captured on `Stop` and on **any idle notification** - by the same idle test the mapping uses, so a typeless idle `message` on current Claude Code refreshes the reply just like a typed `idle_prompt`. **Not** captured on permission/attention notifications, where the transcript's last line is stale. Filtered like the prompt; empty on any miss, so the previous reply carries.
 - Prompt filter (shared with reply): strip leading bracket-tag prefixes (`[Image #1]` etc.); skip text that then starts with `<` (harness XML) - detail is the last *human* prompt.
+- Tool sidecar: every `PreToolUse` writes a small per-session file in the state dir recording the last tool call (`tool_name` + cropped input summary + timestamp) - grab everything locally, forward selectively. It never fires a hub event; it exists so a bare `Notification` (older Claude Code without `PermissionRequest`) can still be enriched with the pending ask, and it is only trusted when fresh (seconds old). Input summaries are cropped like `reply` and never carry file contents - a `Write`/`Edit` input is summarized to its path.
+- Ask dedup: one dialog can produce both a `PermissionRequest` and a `Notification`. Both map to attention for the same session; the reducer's no-clobber rule ([events.md](events.md)) keeps the enriched reply regardless of arrival order.
 - Hooks run under a transient shell (`sh -c`, or a dispatcher script), so the hook's parent is walked past shell wrappers (bounded) to the agent process, captured as `proc` for the liveness sweep.
 - `SIGNALBOX_RAW` (diagnostic, off by default): attaches the untouched hook payload to the event as `raw`, so it can be inspected in the hub's own event log (`state --json` / events.jsonl). Stripped by the redacted profile; never sent in normal operation. Applies to `hook cursor` too.
 

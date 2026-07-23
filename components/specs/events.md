@@ -44,6 +44,12 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   "event": "done",
 
   // Optional detail on the event: permission_prompt, stop, session_end, ...
+  // Attention reasons an adapter should prefer when it knows why the agent is
+  // blocked: "permission_request" (a tool call awaits approval; reply carries
+  // the actual ask, e.g. "Bash: git push origin main") and "question" (the
+  // agent asked the user something; reply carries the question and its
+  // options). Surfaces may render these distinctly; unknown reasons render as
+  // plain attention, so the vocabulary can grow without breaking anyone.
   "reason": "stop",
 
   // The stable identity of the session: "<agent-family>:<session id>". Every
@@ -126,6 +132,7 @@ The hub keeps one row per `session_key`, following these rules:
 
 - **Latest event wins.** A new agent event replaces the row's status. `ended` removes the row (the event log keeps everything).
 - **Breadcrumbs carry.** `prompt`, `reply`, `origin` and `proc` persist across events that omit them, so a done without prompt text keeps showing the prompt that started it. `label` always carries, and only a `label` event can change or clear it.
+- **An enriched ask is not clobbered by its bare twin.** One blocked dialog can reach the hub twice (e.g. Claude's `PermissionRequest` with the real ask in `reply`, and its bare `Notification` with only "Claude needs your permission"). While a row is in attention, a second attention event whose `reply` is empty or carries no more than the generic message keeps the richer `reply` already on the row, regardless of arrival order. Any non-attention agent event ends the ask and normal reply rules resume.
 - **Tags carry.** `tags` persist across agent events that omit them (like `prompt`/`reply`), but an event carrying its own `tags` keeps them - even when the session already existed untagged. `tag`/`untag` events add or remove them. Filter with `state --tag` / `--exclude-tag`.
 - **New activity resets your flags.** Any agent event clears `acked` and `hidden` - a hidden session that speaks again comes back.
 - **A pin is yours until you drop it.** `pinned` (set by `pin`, cleared by `unpin`) carries across agent events like `label`: new activity never clears it, so a pinned session that speaks again stays pinned. Only `unpin` or `hide` removes a pin. `ended`/expiry removes the whole session; a pin does not resurrect or protect it.
