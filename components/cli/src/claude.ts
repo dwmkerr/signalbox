@@ -19,6 +19,9 @@ export interface ClaudeHook {
   prompt?: string;
   raw_prompt?: string;
   transcript_path?: string;
+  // PermissionRequest / PreToolUse: the pending tool call itself.
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
 }
 
 // Harness-prepended bracket tags ("[Image #1]" etc., possibly repeated) at
@@ -84,6 +87,28 @@ export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
       if (isIdleNotification(h)) return { eventType: Done, reason: "idle", detail: "" };
       return { eventType: Attention, reason: h.notification_type || "notification", detail: "" };
     }
+    case "PermissionRequest":
+      // The permission dialog is up: the authoritative blocked-on-you signal,
+      // with the actual ask carried in reply (claudeReply formats it). Older
+      // Claude Code never fires this and degrades to the bare Notification.
+      // AskUserQuestion rides the permission system, so it arrives here too -
+      // keep its reason "question" so the flavor survives whichever of the
+      // two hooks lands last.
+      return {
+        eventType: Attention,
+        reason: h.tool_name === "AskUserQuestion" ? "question" : "permission_request",
+        detail: "",
+      };
+    case "PreToolUse":
+      // Matcher-scoped to AskUserQuestion in hooks-settings.json: the question
+      // never reaches the transcript or the Notification payload while it
+      // waits, so this hook is the only passive source of the question text.
+      // Any other tool arriving here (hand-edited settings) is ignored -
+      // PreToolUse fires for every tool call and must not flood the board.
+      if (h.tool_name === "AskUserQuestion") {
+        return { eventType: Attention, reason: "question", detail: "" };
+      }
+      return null;
     case "StopFailure":
       return { eventType: ErrorType, reason: h.error_type ?? "", detail: "" };
     case "SessionEnd":
@@ -107,6 +132,11 @@ export function claudeReply(h: ClaudeHook): string {
   if (speaking && h.transcript_path) {
     return cropReply(stripHarness(lastAssistantText(h.transcript_path)));
   }
+  // A pending tool call: the reply is the actual ask, formatted and cropped
+  // here at the emitter (asks travel to the phone - specs/adapters.md).
+  if (h.hook_event_name === "PermissionRequest" || h.hook_event_name === "PreToolUse") {
+    return cropReply(formatAsk(h.tool_name ?? "", h.tool_input ?? {}));
+  }
   // A permission/attention notification: show the notification message (it names
   // what Claude needs) rather than let the row fall back to a stale prompt. The
   // transcript is deliberately NOT read here - on a permission prompt its last
@@ -116,6 +146,31 @@ export function claudeReply(h: ClaudeHook): string {
     return cropReply(stripHarness(h.message || ""));
   }
   return "";
+}
+
+// formatAsk renders a pending tool call as the ask the user actually faces:
+// a question with its option labels, or the tool and its target. Never file
+// contents - a Write/Edit input is summarized to its path (specs/adapters.md).
+export function formatAsk(tool: string, input: Record<string, unknown>): string {
+  if (tool === "AskUserQuestion") {
+    const questions = Array.isArray(input.questions) ? input.questions : [];
+    const parts: string[] = [];
+    for (const q of questions) {
+      if (typeof q?.question !== "string" || !q.question) continue;
+      const labels = (Array.isArray(q.options) ? q.options : [])
+        .map((o: unknown) => (typeof o === "string" ? o : (o as any)?.label))
+        .filter((l: unknown): l is string => typeof l === "string" && l !== "");
+      parts.push(labels.length ? `${q.question} (${labels.join(" / ")})` : q.question);
+    }
+    return parts.join(" · ");
+  }
+  if (!tool) return "";
+  // One target string per tool, checked in specificity order. command before
+  // description so a Bash ask shows what would RUN, not its summary; file
+  // paths cover Write/Edit/Read without ever touching their content field.
+  const str = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : "");
+  const target = str("command") || str("file_path") || str("path") || str("url") || str("description") || str("prompt");
+  return target ? `${tool}: ${target}` : tool;
 }
 
 // Bounds how much of a transcript the hook path reads: the last assistant
