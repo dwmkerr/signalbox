@@ -25,7 +25,7 @@ const fs = require('fs');
 
 const FILE = 'file://' + path.resolve(__dirname, 'demo.html');
 const OUT = path.resolve(process.cwd(), 'frames');
-const DURATION_MS = 28000;   // must match the CSS master timeline
+const DURATION_MS = 4500;   // must match the CSS master loop
 const FPS = 25;
 const FRAMES = (DURATION_MS / 1000) * FPS;
 
