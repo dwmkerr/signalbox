@@ -1,0 +1,414 @@
+<style>
+  /* board-raycast: refined board-as-hero, Raycast/Ghostty fidelity.
+     The panel is the hero, summoned over a near-black desktop. */
+  .stage-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+    background: #050506;
+  }
+  .stage {
+    position: relative;
+    width: 1280px;
+    height: 720px;
+    overflow: hidden;
+    /* desktop, near-black with a cool wash toward the top */
+    background: radial-gradient(120% 100% at 50% 12%, #202533 0%, #14161e 45%, #0b0c10 100%);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 34px;
+    color: #fff;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* faint desktop grid so the panel reads as floating over something */
+  .stage::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(#ffffff05 1px, transparent 1px),
+      linear-gradient(90deg, #ffffff05 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(80% 70% at 50% 40%, #000 0%, transparent 75%);
+    pointer-events: none;
+  }
+
+  .mono {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  }
+
+  /* ---- the panel ---- */
+  .panel {
+    position: relative;
+    width: 792px;
+    border-radius: 16px;
+    background: linear-gradient(#212228, #17181c);
+    border: 1px solid #ffffff26;
+    box-shadow: 0 44px 100px rgba(0, 0, 0, .7);
+    overflow: hidden;
+    z-index: 1;
+    animation: panelIn .62s cubic-bezier(.16, .84, .3, 1) both;
+  }
+
+  /* slim macOS window strip for true OS fidelity */
+  .titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 15px;
+    border-bottom: 1px solid #ffffff0f;
+  }
+  .light {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+  }
+  .light.r { background: #ff5f57; }
+  .light.y { background: #febc2e; }
+  .light.g { background: #28c840; }
+
+  /* search header */
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid #ffffff12;
+  }
+  .search .mark {
+    display: flex;
+    width: 22px;
+    height: 22px;
+  }
+  .search .brand {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .1px;
+    color: #f4f4f6;
+  }
+  .search .divider {
+    width: 1px;
+    height: 18px;
+    background: #ffffff1f;
+  }
+  .search .field {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 15px;
+    color: #63636a;
+  }
+  .caret {
+    display: inline-block;
+    width: 2px;
+    height: 17px;
+    margin-right: 6px;
+    background: #8a8a90;
+    animation: blink 1.1s steps(1) infinite;
+  }
+  .search .jump {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: #8a8a90;
+  }
+
+  kbd {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: 5px;
+    background: #ffffff10;
+    border: 1px solid #ffffff1a;
+    color: #c4c4ca;
+    white-space: nowrap;
+  }
+
+  /* rows */
+  .rows {
+    padding: 8px;
+  }
+  .row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+  }
+  .row.selected {
+    background: #ffffff12;
+    border-color: #ffffff1f;
+    animation: selectIn .5s cubic-bezier(.16, .84, .3, 1) both;
+    animation-delay: .5s;
+  }
+
+  /* status indicator: dot or spinner, fixed slot */
+  .ind {
+    width: 12px;
+    height: 12px;
+    flex: 0 0 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+  }
+  .dot.amber {
+    background: #FF9F0A;
+    box-shadow: 0 0 0 4px #ff9f0a24;
+    animation: amberPulse 2.4s ease-in-out infinite;
+  }
+  .dot.blue {
+    background: #0A84FF;
+    box-shadow: 0 0 0 4px #0a84ff20;
+  }
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid #ffffff2e;
+    border-top-color: #d3d3d8;
+    animation: spin .9s linear infinite;
+  }
+
+  .glyph {
+    display: flex;
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+  }
+
+  .body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .title {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .title .opts {
+    color: #FF9F0A;
+    font-weight: 500;
+  }
+  .title .reply {
+    color: #7fb4ff;
+    font-weight: 500;
+  }
+  .crumb {
+    font-size: 12.5px;
+    color: #7e7e85;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .age {
+    font-size: 12.5px;
+    color: #9a9aa1;
+    flex: 0 0 auto;
+    font-variant-numeric: tabular-nums;
+  }
+  .age.live { color: #FF9F0A; }
+
+  /* footer keybar */
+  .keybar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    border-top: 1px solid #ffffff12;
+    font-size: 12px;
+    color: #7e7e85;
+  }
+  .keybar .grp {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .keybar .sep {
+    flex: 1;
+  }
+  .keybar .highlight {
+    color: #c4c4ca;
+  }
+
+  /* caption under the board */
+  .caption {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    animation: panelIn .62s cubic-bezier(.16, .84, .3, 1) both;
+    animation-delay: .12s;
+  }
+  .tagline {
+    font-size: 16px;
+    color: #b9b9bf;
+    letter-spacing: .1px;
+  }
+  .brew {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 15px;
+    border-radius: 9px;
+    background: #ffffff08;
+    border: 1px solid #ffffff14;
+    font-size: 13.5px;
+    color: #cfcfd4;
+  }
+  .brew .prompt { color: #63636a; }
+
+  @keyframes panelIn {
+    from { opacity: 0; transform: translateY(-16px) scale(.985); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes selectIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes amberPulse {
+    0%, 100% { box-shadow: 0 0 0 4px #ff9f0a24; }
+    50% { box-shadow: 0 0 0 6px #ff9f0a12; }
+  }
+  @keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .panel, .caption, .row.selected { animation: none; opacity: 1; transform: none; }
+    .spinner, .dot.amber, .caret { animation: none; }
+  }
+</style>
+
+<div class="stage-wrap">
+  <div class="stage">
+
+    <div class="panel">
+      <div class="titlebar">
+        <span class="light r"></span>
+        <span class="light y"></span>
+        <span class="light g"></span>
+      </div>
+
+      <div class="search">
+        <span class="mark">
+          <svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg>
+        </span>
+        <span class="brand">signalbox</span>
+        <span class="divider"></span>
+        <span class="field"><span class="caret"></span>Search sessions...</span>
+        <span class="jump">Jump <kbd>return</kbd></span>
+      </div>
+
+      <div class="rows">
+
+        <!-- WORKING: cursor -->
+        <div class="row">
+          <span class="ind"><span class="spinner"></span></span>
+          <span class="glyph">
+            <svg width="20" height="20" viewBox="0 0 20 20"><g fill="none" stroke="#B5B5BA" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M10 2.6 L16.4 6.3 L16.4 13.7 L10 17.4 L3.6 13.7 L3.6 6.3 Z"/><path d="M3.6 6.3 L10 10 L16.4 6.3"/><path d="M10 10 L10 17.4"/></g></svg>
+          </span>
+          <span class="body">
+            <span class="title">Running e2e suite, 214 of 380 passing</span>
+            <span class="crumb">cursor · web · pr-482</span>
+          </span>
+          <span class="age">3m</span>
+        </div>
+
+        <!-- WORKING: opencode -->
+        <div class="row">
+          <span class="ind"><span class="spinner"></span></span>
+          <span class="glyph">
+            <svg width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </span>
+          <span class="body">
+            <span class="title">Indexing repository, 1,204 files</span>
+            <span class="crumb">opencode · monorepo · main</span>
+          </span>
+          <span class="age">1m</span>
+        </div>
+
+        <!-- ASKING: claude, amber, resting selection -->
+        <div class="row selected">
+          <span class="ind"><span class="dot amber"></span></span>
+          <span class="glyph">
+            <svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg>
+          </span>
+          <span class="body">
+            <span class="title">Overwrite writing-style.yml? <span class="opts">(Overwrite / Keep mine)</span></span>
+            <span class="crumb">claude · signalbox · main</span>
+          </span>
+          <span class="age live">now</span>
+        </div>
+
+        <!-- DONE: codex, blue reply -->
+        <div class="row">
+          <span class="ind"><span class="dot blue"></span></span>
+          <span class="glyph">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="body">
+            <span class="title"><span class="reply">Fixed the failing migration and pushed to CI.</span></span>
+            <span class="crumb">codex · signalbox · fix-migrate</span>
+          </span>
+          <span class="age">5m</span>
+        </div>
+
+        <!-- WORKING: claude -->
+        <div class="row">
+          <span class="ind"><span class="spinner"></span></span>
+          <span class="glyph">
+            <svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg>
+          </span>
+          <span class="body">
+            <span class="title">Refactoring the auth middleware</span>
+            <span class="crumb">claude · acme-api · feat-oauth</span>
+          </span>
+          <span class="age">2m</span>
+        </div>
+
+      </div>
+
+      <div class="keybar mono">
+        <span class="grp">type to search</span>
+        <span class="grp"><kbd>Ctrl</kbd><kbd>J</kbd><kbd>Ctrl</kbd><kbd>K</kbd> move</span>
+        <span class="grp"><kbd>return</kbd> jump</span>
+        <span class="sep"></span>
+        <span class="grp highlight"><kbd>Ctrl</kbd><kbd>Opt</kbd><kbd>J</kbd> open from anywhere</span>
+      </div>
+    </div>
+
+    <div class="caption">
+      <div class="tagline">One board for every agent, terminal, and job you run.</div>
+      <div class="brew mono"><span class="prompt">$</span> brew install dwmkerr/tools/signalbox</div>
+    </div>
+
+  </div>
+</div>

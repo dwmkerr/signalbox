@@ -1,0 +1,229 @@
+<!doctype html>
+<!--
+  signalbox hero - "One Moment". A tight loop cropped to the board: a claude
+  session that was Working visibly flips to amber ASKING (its breadcrumb becomes
+  the real question, "Bash: git push -u origin feat/attention-asks"), then the
+  selection snaps up onto it. That is the whole clip - the reason signalbox
+  exists, shown once and held.
+
+  One 6s master loop. Every large motion rides `animation: <kf> 6s linear
+  infinite` with % stops so a capture can step it with Animation.currentTime.
+  The reset back to the Working state happens under a brief focus-veil at the
+  seam, so 100% equals 0% and the loop reads as one continuous take. Tiny
+  continuous motions (caret blink, working spinners, the amber attention pulse)
+  run on their own short infinite loops that wrap cleanly under the stepping.
+  prefers-reduced-motion rests on the held payoff frame.
+-->
+<html lang="en"><head><meta charset="utf-8">
+<title>signalbox - the moment a session needs you</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='%23FF9F0A' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='2.4' fill='%23FF9F0A' stroke='none'/%3E%3Cpath d='M6.5 6.5 A 5 5 0 0 1 13.5 6.5'/%3E%3Cpath d='M6.5 13.5 A 5 5 0 0 0 13.5 13.5'/%3E%3Cpath d='M4.2 4.2 A 8 8 0 0 1 15.8 4.2' opacity='.55'/%3E%3Cpath d='M4.2 15.8 A 8 8 0 0 0 15.8 15.8' opacity='.55'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { background:#000; }
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+  .stage { position:relative; width:1280px; height:720px; overflow:hidden;
+           background:radial-gradient(120% 100% at 50% 12%, #202533 0%, #14161e 45%, #0b0c10 100%); }
+  .mono { font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* ---------- the board, present from frame 1 (no intro card) ---------- */
+  .palette { position:absolute; top:112px; left:50%; width:980px; transform:translateX(-50%); }
+  .panel { position:relative; background:linear-gradient(#212228,#17181c);
+           border:1px solid #ffffff26; border-radius:16px;
+           box-shadow:0 44px 100px rgba(0,0,0,.7), 0 12px 40px rgba(0,0,0,.5), 0 0 0 1px #00000055;
+           overflow:hidden; }
+
+  .head { display:flex; align-items:center; gap:14px; height:58px; padding:0 22px;
+          border-bottom:1px solid #ffffff14; }
+  .head .mk svg { width:24px; height:24px; display:block; }
+  .head .wm { color:#fff; font-size:17px; font-weight:600; letter-spacing:.1px; }
+  .head .search { flex:1; display:flex; align-items:center; margin:0 8px; min-width:0; }
+  .head .search .ph { color:#63636a; font-size:15px; }
+  .head .search .caret { width:2px; height:18px; background:#EDEDED; margin-right:3px;
+                         animation:blink 1.06s step-end infinite; }
+  @keyframes blink { 0%{opacity:1} 50%{opacity:0} 100%{opacity:1} }
+  .head .jp { color:#9a9aa1; font-size:14px; flex-shrink:0; }
+  .head .jp kbd { color:#c8c8ce; }
+
+  /* ---------- the list ---------- */
+  .list { position:relative; padding:8px 12px; }
+  .selbar { position:absolute; left:12px; right:12px; top:0; height:64px;
+            background:#ffffff12; border-radius:12px; box-shadow:inset 0 0 0 1px #ffffff1e;
+            transform:translateY(200px); animation:selMove 6s linear infinite; will-change:transform; }
+  @keyframes selMove {
+    0%,14% { transform:translateY(200px); }   /* resting on the cursor row */
+    18%    { transform:translateY(4px); }      /* snaps up, small overshoot */
+    20%    { transform:translateY(11px); }
+    22%    { transform:translateY(8px); }       /* settles on the flipped row */
+    93%    { transform:translateY(8px); }
+    94%    { transform:translateY(200px); }      /* reset under the seam veil */
+    100%   { transform:translateY(200px); }
+  }
+
+  .r { position:relative; display:flex; align-items:center; gap:16px; height:64px;
+       padding:0 14px; border-radius:12px; }
+  .mark { width:22px; display:flex; justify-content:center; align-items:center; flex-shrink:0; }
+  .gl { width:24px; display:flex; justify-content:center; flex-shrink:0; }
+  .gl svg { display:block; }
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:16.5px; font-weight:600; color:#e6e6ec; white-space:nowrap;
+            overflow:hidden; text-overflow:ellipsis; }
+  .txt .d { position:relative; height:20px; margin-top:3px; }
+  .txt .d span { position:absolute; left:0; top:0; right:0; font-size:14.5px; color:#7e7e85;
+                 white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .age { color:#9a9aa1; font-size:13.5px; flex-shrink:0; font-variant-numeric:tabular-nums; }
+
+  /* dots + spinner */
+  .dot { width:10px; height:10px; border-radius:50%; display:block; }
+  .dot.a { background:#FF9F0A; } .dot.b { background:#0A84FF; }
+  .spin { width:12px; height:12px; border-radius:50%; border:2px solid #ffffff2e;
+          border-top-color:#d3d3d8; animation:rotate .9s linear infinite; }
+  @keyframes rotate { to { transform:rotate(360deg); } }
+
+  /* ---------- the hero row: Working -> ASKING ---------- */
+  .hero .mark { position:relative; }
+  .hero .swap-spin { animation:flipOut 6s linear infinite; }
+  .hero .swap-dot  { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+                     opacity:0; animation:flipIn 6s linear infinite; }
+  /* the amber attention pulse under the dot */
+  .hero .swap-dot::before { content:""; position:absolute; width:10px; height:10px; border-radius:50%;
+                            background:#FF9F0A; opacity:.55; animation:pulse 2s ease-out infinite; }
+  @keyframes pulse { 0%{transform:scale(1);opacity:.5} 70%{transform:scale(2.6);opacity:0} 100%{opacity:0} }
+
+  .hero .d .working  { animation:flipOut 6s linear infinite; }
+  .hero .d .asking   { color:#f2b45a; opacity:0; animation:flipIn 6s linear infinite; }
+  .hero .t           { animation:heroTitle 6s linear infinite; }
+  @keyframes heroTitle {
+    0%,14% { color:#e6e6ec; } 22% { color:#ffffff; } 93% { color:#ffffff; }
+    94.5% { color:#e6e6ec; } 100% { color:#e6e6ec; }
+  }
+
+  /* left amber accent bar + the "needs you" tag, both keyed to the flip */
+  .hero .accent { position:absolute; left:-14px; top:14px; bottom:14px; width:3px; border-radius:2px;
+                  background:#FF9F0A; opacity:0; animation:flipIn 6s linear infinite; }
+  .needs { color:#FF9F0A; font-size:12.5px; font-weight:600; letter-spacing:.2px;
+           margin-left:12px; opacity:0; animation:flipIn 6s linear infinite; }
+
+  @keyframes flipOut { 0%,6%{opacity:1} 12%{opacity:0} 93.5%{opacity:0} 94.5%{opacity:1} 100%{opacity:1} }
+  @keyframes flipIn  { 0%,6%{opacity:0} 12%{opacity:1} 93.5%{opacity:1} 94.5%{opacity:0} 100%{opacity:0} }
+
+  /* the focus-veil that hides the reset at the loop seam */
+  .veil { position:absolute; inset:0; pointer-events:none; border-radius:16px;
+          background:radial-gradient(120% 120% at 50% 30%, rgba(10,11,15,.72), rgba(6,7,10,.94));
+          opacity:0; animation:veil 6s linear infinite; }
+  @keyframes veil { 0%,87%{opacity:0} 94%{opacity:.94} 100%{opacity:0} }
+
+  /* ---------- footer keybar: teach the keys while showing them ---------- */
+  .foot { display:flex; align-items:center; height:42px; padding:0 22px; gap:18px;
+          border-top:1px solid #ffffff12; color:#63636a; font-size:12.5px;
+          font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .foot .sep { color:#3a3a40; }
+  .foot kbd { color:#8a8a90; }
+  .foot .right { margin-left:auto; color:#7e7e85; }
+  .foot .right kbd { color:#c8c8ce; }
+
+  /* ---------- brand line under the board ---------- */
+  .brand { position:absolute; top:632px; left:0; right:0; text-align:center; }
+  .brand .tl { color:#c3c3c9; font-size:16px; } .brand .tl b { color:#fff; font-weight:600; }
+  .brand .in { margin-top:12px; display:inline-block; background:#141418; border:1px solid #ffffff1c;
+               border-radius:10px; padding:9px 18px; color:#EDEDED; font-size:14px; }
+  .brand .in .d { color:#75757c; }
+
+  @media (prefers-reduced-motion:reduce) {
+    * { animation:none !important; }
+    .selbar { transform:translateY(8px) !important; }        /* rest on the flipped row */
+    .hero .swap-spin, .hero .d .working { opacity:0 !important; }
+    .hero .swap-dot, .hero .d .asking, .hero .accent, .needs { opacity:1 !important; }
+    .hero .t { color:#fff !important; }
+    .veil { opacity:0 !important; }
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="palette">
+    <div class="panel">
+
+      <div class="head">
+        <div class="mk"><svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg></div>
+        <div class="wm">signalbox</div>
+        <div class="search"><span class="caret"></span><span class="ph">Search sessions&#8230;</span></div>
+        <div class="jp">Jump <kbd>&#8629;</kbd></div>
+      </div>
+
+      <div class="list">
+        <div class="selbar"></div>
+
+        <!-- HERO: claude session, Working -> ASKING. This is the whole clip. -->
+        <div class="r hero">
+          <div class="accent"></div>
+          <div class="mark">
+            <div class="spin swap-spin"></div>
+            <div class="swap-dot"><span class="dot a"></span></div>
+          </div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+          <div class="txt">
+            <div class="t">work-project</div>
+            <div class="d">
+              <span class="working">Working&#8230; wiring the streaming endpoint into the hub</span>
+              <span class="asking">Bash: git push -u origin feat/attention-asks</span>
+            </div>
+          </div>
+          <span class="needs">needs you</span>
+          <div class="age">12s</div>
+        </div>
+
+        <!-- opencode, Working -->
+        <div class="r">
+          <div class="mark"><div class="spin"></div></div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <div class="txt"><div class="t">docs-site-astro</div><div class="d"><span>Regenerating the search index after the content refactor</span></div></div>
+          <div class="age">22s</div>
+        </div>
+
+        <!-- codex, Done (this is the cursor's resting row before the snap) -->
+        <div class="r">
+          <div class="mark"><div class="dot b"></div></div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+          <div class="txt"><div class="t">codex-mcp-server</div><div class="d"><span>Applied the patch and ran the suite. 128 passed, 0 failed.</span></div></div>
+          <div class="age">1m</div>
+        </div>
+
+        <!-- cursor, Done -->
+        <div class="r">
+          <div class="mark"><div class="dot b"></div></div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g fill="none" stroke="#B5B5BA" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M10 2.6 L16.4 6.3 L16.4 13.7 L10 17.4 L3.6 13.7 L3.6 6.3 Z"/><path d="M3.6 6.3 L10 10 L16.4 6.3"/><path d="M10 10 L10 17.4"/></g></svg></div>
+          <div class="txt"><div class="t">web-dashboard</div><div class="d"><span>Refactored the auth guard and updated the tests, all green.</span></div></div>
+          <div class="age">4m</div>
+        </div>
+
+        <!-- claude, Done -->
+        <div class="r">
+          <div class="mark"><div class="dot b"></div></div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+          <div class="txt"><div class="t">log-triage</div><div class="d"><span>Grouped 1,204 errors into 7 clusters. The top two are the same timeout.</span></div></div>
+          <div class="age">6m</div>
+        </div>
+
+      </div>
+
+      <div class="foot">
+        <span>type to search</span><span class="sep">&#183;</span>
+        <span><kbd>&#8963;J</kbd>/<kbd>&#8963;K</kbd> move</span><span class="sep">&#183;</span>
+        <span><kbd>&#8629;</kbd> jump</span>
+        <span class="right">open from anywhere <kbd>&#8963;&#8997;J</kbd></span>
+      </div>
+
+      <div class="veil"></div>
+    </div>
+  </div>
+
+  <div class="brand">
+    <div class="tl">One board for every agent, terminal, and job you run.</div>
+    <div class="in mono">brew install <span style="color:#EDEDED">dwmkerr/tools/signalbox</span> <span class="d">&#183; &#8963;&#8997;J</span></div>
+  </div>
+
+</div>
+</body></html>

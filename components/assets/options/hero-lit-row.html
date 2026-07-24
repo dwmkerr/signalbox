@@ -1,0 +1,197 @@
+<!doctype html>
+<!--
+  signalbox hero - "Lit Row". A dark, calm board summoned over the desktop.
+  Every working session is dimmed to a hum; only the single amber ASKING row
+  is lit and fully legible, its real question readable at a glance. The board
+  triages for you by light: the one thing that needs you is the one thing you
+  can read.
+
+  Essentially a still - the payoff is a state, not a motion. The only movement
+  is a slow amber breath under the lit row (5s), so the light reads as alive
+  rather than painted on. Everything else is at rest. Working spinners turn on
+  their own short loop. prefers-reduced-motion freezes the breath.
+-->
+<html lang="en"><head><meta charset="utf-8">
+<title>signalbox - the row that needs you, lit</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='%23FF9F0A' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='2.4' fill='%23FF9F0A' stroke='none'/%3E%3Cpath d='M6.5 6.5 A 5 5 0 0 1 13.5 6.5'/%3E%3Cpath d='M6.5 13.5 A 5 5 0 0 0 13.5 13.5'/%3E%3Cpath d='M4.2 4.2 A 8 8 0 0 1 15.8 4.2' opacity='.55'/%3E%3Cpath d='M4.2 15.8 A 8 8 0 0 0 15.8 15.8' opacity='.55'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { background:#000; }
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+  .stage { position:relative; width:1280px; height:720px; overflow:hidden;
+           background:radial-gradient(120% 100% at 50% 12%, #202533 0%, #14161e 45%, #0b0c10 100%); }
+  .mono { font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* A single soft pool of light behind the panel - the board is the only lit
+     object in the room. Nothing else competes for attention. */
+  .pool { position:absolute; left:50%; top:96px; width:1020px; height:520px;
+          transform:translateX(-50%);
+          background:radial-gradient(60% 55% at 50% 46%, rgba(255,159,10,.07) 0%, rgba(255,159,10,0) 70%);
+          pointer-events:none; }
+
+  /* ---------- THE BOARD (the hero) ---------- */
+  .panel { position:absolute; top:120px; left:50%; width:912px; transform:translateX(-50%);
+           background:linear-gradient(#212228,#17181c); border:1px solid #ffffff26; border-radius:16px;
+           box-shadow:0 44px 100px rgba(0,0,0,.7), 0 12px 40px rgba(0,0,0,.5), 0 0 0 1px #00000055;
+           overflow:hidden; }
+
+  .head { display:flex; align-items:center; gap:12px; height:50px; padding:0 20px;
+          border-bottom:1px solid #ffffff14; }
+  .head .lights { display:flex; gap:8px; margin-right:4px; }
+  .head .lights i { width:11px; height:11px; border-radius:50%; display:block; }
+  .head .mk { width:22px; height:22px; display:flex; }
+  .head .mk svg { width:22px; height:22px; }
+  .head .wm { color:#fff; font-size:15px; font-weight:600; letter-spacing:.1px; }
+  .head .search { flex:1; display:flex; align-items:center; margin:0 8px; min-width:0; }
+  .head .search .ph { color:#63636a; font-size:14px; white-space:nowrap; }
+  .head .jp { color:#9a9aa1; font-size:13px; flex-shrink:0; }
+  .head .jp kbd { color:#c8c8ce; }
+
+  .list { padding:9px; }
+  .r { position:relative; display:flex; align-items:center; gap:14px; height:52px; padding:0 14px;
+       border-radius:11px; }
+
+  /* The hum: working sessions are present but dimmed right down. You can see
+     the board is busy; you are not asked to read any of it. */
+  .r.hum { opacity:.34; }
+
+  /* The lit row: the one that needs you. Resting selection highlight, a faint
+     border, and an amber edge so the eye lands here first and reads the ask. */
+  .r.lit { background:#ffffff12; }
+  .r.lit::before { content:""; position:absolute; left:0; top:9px; bottom:9px; width:3px;
+                   border-radius:3px; background:#FF9F0A; box-shadow:0 0 12px 1px rgba(255,159,10,.55); }
+  .r.lit::after { content:""; position:absolute; inset:0; border:1px solid #ffffff1e; border-radius:11px;
+                  pointer-events:none; }
+  /* The slow breath under the lit row - the only motion on the board. */
+  .r.lit .glow { position:absolute; inset:-1px; border-radius:11px; pointer-events:none;
+                 background:radial-gradient(80% 120% at 8% 50%, rgba(255,159,10,.16) 0%, rgba(255,159,10,0) 60%);
+                 animation:breath 5s ease-in-out infinite; }
+  @keyframes breath { 0%,100% { opacity:.55 } 50% { opacity:1 } }
+
+  .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
+  .dot { width:9px; height:9px; border-radius:50%; box-sizing:border-box; }
+  .dot.a { background:#FF9F0A; box-shadow:0 0 9px 1px rgba(255,159,10,.7); }
+  .dot.b { background:#0A84FF; }
+  .spin { width:12px; height:12px; border-radius:50%; border:2px solid #ffffff2e; border-top-color:#d3d3d8;
+          animation:rotate .9s linear infinite; }
+  @keyframes rotate { to { transform:rotate(360deg) } }
+
+  .gl { width:22px; display:flex; justify-content:center; flex-shrink:0; }
+  .gl svg { display:block; }
+
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:14.5px; color:#b9b9bf; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .txt .t b { color:#fff; font-weight:600; }
+  .txt .d { font-size:12.5px; color:#7e7e85; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+  /* The lit row is bigger and fully legible - its real question is the one
+     thing on the board you are meant to read. */
+  .r.lit .txt .t { font-size:15.5px; color:#fff; }
+  .r.lit .txt .d { font-size:14px; color:#FFB752; margin-top:3px; }
+  .r.lit .age { color:#FF9F0A; }
+
+  .age { color:#9a9aa1; font-size:12.5px; flex-shrink:0; font-variant-numeric:tabular-nums; }
+
+  .foot { display:flex; align-items:center; height:38px; padding:0 20px; gap:16px;
+          border-top:1px solid #ffffff12; color:#63636a; font-size:11.5px;
+          font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .foot .sep { color:#3a3a40; }
+  .foot kbd { color:#8a8a90; font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* ---------- brand line, quiet, below the board ---------- */
+  .brand { position:absolute; top:592px; left:0; right:0; text-align:center; }
+  .brand .tl { color:#b9b9bf; font-size:16px; }
+  .brand .in { margin-top:13px; display:inline-block; background:#141418; border:1px solid #ffffff1c;
+               border-radius:10px; padding:9px 18px; color:#EDEDED; font-size:13.5px; }
+  .brand .in .d { color:#75757c; }
+
+  @media (prefers-reduced-motion:reduce) {
+    .r.lit .glow { animation:none !important; opacity:.85 !important; }
+    .spin { animation:none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="pool"></div>
+
+  <div class="panel">
+    <div class="head">
+      <span class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>
+      <div class="mk"><svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg></div>
+      <div class="wm">signalbox</div>
+      <div class="search"><span class="ph">Search sessions&#8230;</span></div>
+      <div class="jp">Jump <kbd>&#8629;</kbd></div>
+    </div>
+
+    <div class="list">
+
+      <!-- claude, working: dimmed to a hum -->
+      <div class="r hum">
+        <div class="mark"><div class="spin"></div></div>
+        <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+        <div class="txt"><div class="t">work-project</div><div class="d">Wiring the streaming endpoint into the hub.</div></div>
+        <div class="age">8s</div>
+      </div>
+
+      <!-- codex, working: hum -->
+      <div class="r hum">
+        <div class="mark"><div class="spin"></div></div>
+        <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+        <div class="txt"><div class="t">codex-mcp-server</div><div class="d">Regenerating the tool schema from the spec.</div></div>
+        <div class="age">15s</div>
+      </div>
+
+      <!-- claude, ASKING: the one lit row. Its real question, readable. -->
+      <div class="r lit">
+        <div class="glow"></div>
+        <div class="mark"><div class="dot a"></div></div>
+        <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+        <div class="txt"><div class="t"><b>writing-style</b></div><div class="d">Overwrite writing-style.yml? (Overwrite / Keep mine)</div></div>
+        <div class="age">12s</div>
+      </div>
+
+      <!-- opencode, working: hum -->
+      <div class="r hum">
+        <div class="mark"><div class="spin"></div></div>
+        <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+        <div class="txt"><div class="t">docs-site-astro</div><div class="d">Rebuilding the search index after the refactor.</div></div>
+        <div class="age">34s</div>
+      </div>
+
+      <!-- cursor, working: hum -->
+      <div class="r hum">
+        <div class="mark"><div class="spin"></div></div>
+        <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g fill="none" stroke="#B5B5BA" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M10 2.6 L16.4 6.3 L16.4 13.7 L10 17.4 L3.6 13.7 L3.6 6.3 Z"/><path d="M3.6 6.3 L10 10 L16.4 6.3"/><path d="M10 10 L10 17.4"/></g></svg></div>
+        <div class="txt"><div class="t">infra-terraform</div><div class="d">Planning changes to the staging cluster.</div></div>
+        <div class="age">1m</div>
+      </div>
+
+      <!-- codex, done: a quiet blue reply, still part of the hum -->
+      <div class="r hum">
+        <div class="mark"><div class="dot b"></div></div>
+        <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+        <div class="txt"><div class="t">log-triage</div><div class="d">Grouped 1,204 errors into 7 clusters. Top two share a timeout.</div></div>
+        <div class="age">4m</div>
+      </div>
+
+    </div>
+
+    <div class="foot">
+      <span>type to search</span><span class="sep">&#183;</span>
+      <span><kbd>&#8963;J</kbd>/<kbd>&#8963;K</kbd> move</span><span class="sep">&#183;</span>
+      <span><kbd>&#8629;</kbd> jump</span><span class="sep">&#183;</span>
+      <span><kbd>&#8963;&#8997;J</kbd> open from anywhere</span>
+    </div>
+  </div>
+
+  <div class="brand">
+    <div class="tl">One board for every agent, terminal, and job you run.</div>
+    <div class="in mono">brew install <span style="color:#EDEDED">dwmkerr/tools/signalbox</span> <span class="d">&#183; &#8963;&#8997;J</span></div>
+  </div>
+
+</div>
+</body></html>

@@ -1,0 +1,283 @@
+<!doctype html>
+<!--
+  signalbox hero - "Roll Call" (multi-machine). The board is the hero, on
+  near-black: real jumplist rows aggregated from three connected machines, each
+  row wearing a host chip (laptop, mac-studio, devbox) and a slim connected-
+  machines rail under the header. The reactive beat is the whole pitch: a working
+  session on the devbox - a box you were not sitting at - flips to amber and the
+  selection lands on it. One amber ask, on a remote host, surfaced in one list.
+
+  One 6s master loop. Big choreography rides `animation:<kf> 6s linear infinite`
+  with % stops so a capture can step it by Animation.currentTime; tiny continuous
+  motions (spinner rotation) run their own short loops that wrap cleanly under the
+  stepping. prefers-reduced-motion rests on the asked frame (the payoff).
+-->
+<html lang="en"><head><meta charset="utf-8">
+<title>signalbox - one board across all your machines</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='%23FF9F0A' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='2.4' fill='%23FF9F0A' stroke='none'/%3E%3Cpath d='M6.5 6.5 A 5 5 0 0 1 13.5 6.5'/%3E%3Cpath d='M6.5 13.5 A 5 5 0 0 0 13.5 13.5'/%3E%3Cpath d='M4.2 4.2 A 8 8 0 0 1 15.8 4.2' opacity='.55'/%3E%3Cpath d='M4.2 15.8 A 8 8 0 0 0 15.8 15.8' opacity='.55'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { background:#000; }
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+  .stage { position:relative; width:1280px; height:720px; overflow:hidden;
+           background:radial-gradient(120% 100% at 50% 12%, #202533 0%, #14161e 45%, #0b0c10 100%); }
+  .mono { font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* ---------- eyebrow: the chord recast as a static "from any machine" mark ---------- */
+  .eyebrow { position:absolute; z-index:6; top:44px; left:50%; transform:translateX(-50%);
+             display:flex; align-items:center; gap:12px; }
+  .chord { display:flex; gap:6px; }
+  .cap { min-width:30px; height:30px; padding:0 9px; display:flex; align-items:center; justify-content:center;
+         background:linear-gradient(#2c2d34,#232429); color:#e9e9ee;
+         font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:14px; font-weight:600;
+         border:1px solid #ffffff24; border-bottom-width:2.5px; border-bottom-color:#ffffff10;
+         border-radius:8px; box-shadow:0 6px 16px rgba(0,0,0,.45); }
+  .eyebrow .lbl { color:#9a9aa1; font-size:13.5px; letter-spacing:.2px; }
+
+  /* ---------- the board: the hero object ---------- */
+  .palette { position:absolute; z-index:4; top:108px; left:50%; width:944px;
+             transform:translateX(-50%); }
+  .panel { background:linear-gradient(#212228,#17181c); border:1px solid #ffffff26; border-radius:16px;
+           box-shadow:0 44px 100px rgba(0,0,0,.7), 0 10px 42px rgba(0,0,0,.5), 0 0 0 1px #00000055;
+           overflow:hidden; }
+
+  .head { display:flex; align-items:center; gap:12px; height:50px; padding:0 20px;
+          border-bottom:1px solid #ffffff14; }
+  .head .mk svg { width:22px; height:22px; display:block; }
+  .head .wm { color:#fff; font-size:15px; font-weight:600; }
+  .head .search { flex:1; margin:0 8px; color:#63636a; font-size:14px; }
+  .head .jp { color:#9a9aa1; font-size:13px; flex-shrink:0; }
+  .head .jp kbd { color:#c8c8ce; font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* connected-machines rail, Tailscale-style: online dots + hostnames */
+  .rail { display:flex; align-items:center; gap:0; height:38px; padding:0 20px;
+          border-bottom:1px solid #ffffff12; background:#ffffff05; }
+  .machines { display:flex; align-items:center; gap:16px; flex:1; }
+  .mchip { display:flex; align-items:center; gap:7px; color:#b9b9bf; font-size:12.5px;
+           font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .mchip .on { width:7px; height:7px; border-radius:50%; background:#32D74B;
+               box-shadow:0 0 0 3px rgba(50,215,75,.14); }
+  .rail .count { color:#7e7e85; font-size:12.5px; letter-spacing:.2px; flex-shrink:0; }
+
+  .body { display:flex; }
+  .list { width:512px; border-right:1px solid #ffffff14; padding:9px 8px; }
+  .r { position:relative; display:flex; align-items:center; gap:12px; height:56px; padding:0 12px;
+       border-radius:10px; }
+  .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; position:relative; height:14px; }
+  .dot { width:9px; height:9px; border-radius:50%; box-sizing:border-box; position:absolute; top:2.5px; left:2.5px; }
+  .dot.a { background:#FF9F0A; } .dot.b { background:#0A84FF; }
+  .spin { width:12px; height:12px; border-radius:50%; border:2px solid #ffffff2e; border-top-color:#d3d3d8;
+          animation:rotate .9s linear infinite; position:absolute; top:1px; left:1px; }
+  @keyframes rotate { to { transform:rotate(360deg) } }
+  .gl { width:22px; display:flex; justify-content:center; flex-shrink:0; }
+  .gl svg { display:block; }
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:14.5px; color:#c3c3c9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .txt .t b { color:#fff; font-weight:600; }
+  .sub { position:relative; height:16px; margin-top:2px; }
+  .sub .ln { position:absolute; inset:0; font-size:12.5px; color:#7e7e85; white-space:nowrap;
+             overflow:hidden; text-overflow:ellipsis; }
+  .sub .ln.ask { color:#d7bf88; }
+
+  /* host chip on every row - which machine this session is reporting from */
+  .host { flex-shrink:0; font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px;
+          color:#9a9aa1; padding:2px 8px; border:1px solid #ffffff1c; border-radius:6px;
+          background:#ffffff08; letter-spacing:.2px; }
+  .age { color:#9a9aa1; font-size:12.5px; flex-shrink:0; width:34px; text-align:right;
+         font-variant-numeric:tabular-nums; }
+
+  /* the hero row: working -> asking, and the selection lands on it */
+  .r.hero .m-spin { animation:spinOut 6s linear infinite; }
+  .r.hero .m-amber { animation:amberIn 6s linear infinite; }
+  .r.hero .sub .work { animation:fadeOutHalf 6s linear infinite; }
+  .r.hero .sub .ask { animation:fadeInHalf 6s linear infinite; }
+  .r.hero .host { animation:hostRemote 6s linear infinite; }
+  .land { position:absolute; inset:0; border-radius:10px; background:#ffffff12;
+          border:1px solid #ffffff1e; opacity:0; pointer-events:none;
+          animation:land 6s linear infinite; }
+  .landring { position:absolute; inset:-1px; border-radius:11px; border:1.5px solid #FF9F0A;
+              opacity:0; pointer-events:none; animation:landring 6s linear infinite; }
+  @keyframes spinOut { 0%,44%{opacity:1} 50%,90%{opacity:0} 96%,100%{opacity:1} }
+  @keyframes amberIn { 0%,44%{opacity:0} 54%,90%{opacity:1} 96%,100%{opacity:0} }
+  @keyframes fadeOutHalf { 0%,44%{opacity:1} 52%,100%{opacity:0} }
+  @keyframes fadeInHalf { 0%,46%{opacity:0} 54%,90%{opacity:1} 97%,100%{opacity:0} }
+  @keyframes hostRemote {
+    0%,44%   { color:#9a9aa1; border-color:#ffffff1c; background:#ffffff08; }
+    54%,90%  { color:#FF9F0A; border-color:#FF9F0A55; background:#FF9F0A14; }
+    97%,100% { color:#9a9aa1; border-color:#ffffff1c; background:#ffffff08; }
+  }
+  @keyframes land {
+    0%,44%{opacity:0} 54%{opacity:1} 90%{opacity:1} 100%{opacity:0}
+  }
+  @keyframes landring {
+    0%,45%{opacity:0; transform:scale(1)} 50%{opacity:.9; transform:scale(1)}
+    62%{opacity:0; transform:scale(1.04)} 100%{opacity:0; transform:scale(1.04)}
+  }
+
+  /* full-black preview, quoting the devbox session: working -> the ask, verbatim */
+  .preview { flex:1; background:#000; padding:18px 22px; position:relative; }
+  .term { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:12px; line-height:1.75; color:#C8C8CC; }
+  .term .you { color:#98989D; white-space:pre-wrap; }
+  .term .you::before { content:"\276F "; color:#5A5A5F; }
+  .term .gap { height:13px; }
+  .pv-stack { position:relative; }
+  .pv-layer { position:absolute; top:0; left:0; right:0; }
+  .pv-work { animation:fadeOutHalf 6s linear infinite; }
+  .pv-ask  { animation:fadeInHalf 6s linear infinite; }
+  .term .working { color:#E8B339; }
+  .term .working .sp { display:inline-block; width:14px; }
+  .term .resp { display:flex; gap:8px; }
+  .term .resp .b { color:#FF9F0A; } .term .resp .body-t { white-space:pre-wrap; color:#E4D6B4; }
+  .actline { margin-top:20px; font-size:11px; color:#6E6E73;
+             font-family:-apple-system,sans-serif; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .actline kbd { color:#c8c8ce; font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .actline .host-t { color:#9a9aa1; }
+  .actline .need { color:#FF9F0A; font-weight:600; }
+
+  .foot { display:flex; align-items:center; height:36px; padding:0 20px; gap:16px;
+          border-top:1px solid #ffffff12; color:#63636a; font-size:11.5px;
+          font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .foot .sep { color:#3a3a40; }
+  .foot kbd { color:#8a8a90; font-family:inherit; }
+
+  /* ---------- brand line + brew, under the board ---------- */
+  .brand { position:absolute; z-index:5; top:576px; left:0; right:0; text-align:center; }
+  .brand .hl { color:#fff; font-size:19px; font-weight:600; letter-spacing:-.1px; }
+  .brand .sl { color:#9a9aa1; font-size:14px; margin-top:8px; }
+  .brand .in { margin-top:15px; display:inline-block; background:#141418; border:1px solid #ffffff1c;
+               border-radius:10px; padding:9px 18px; color:#EDEDED; font-size:14px; }
+  .brand .in .d { color:#75757c; }
+
+  @media (prefers-reduced-motion:reduce) {
+    * { animation:none !important; }
+    .r.hero .m-spin, .r.hero .sub .work, .pv-work { opacity:0 !important; }
+    .r.hero .m-amber, .r.hero .sub .ask, .pv-ask { opacity:1 !important; }
+    .r.hero .host { color:#FF9F0A !important; border-color:#FF9F0A55 !important; background:#FF9F0A14 !important; }
+    .land { opacity:1 !important; }
+    .landring { opacity:0 !important; }
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- the chord, recast as a static identity mark: this board reaches every machine -->
+  <div class="eyebrow">
+    <div class="chord"><span class="cap">&#8963;</span><span class="cap">&#8997;</span><span class="cap">J</span></div>
+    <span class="lbl">opens the board from any machine</span>
+  </div>
+
+  <!-- the board, rendered from the jumplist spec, with a host chip on every row -->
+  <div class="palette">
+    <div class="panel">
+      <div class="head">
+        <div class="mk"><svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg></div>
+        <div class="wm">signalbox</div>
+        <div class="search">Search sessions&#8230;</div>
+        <div class="jp">Jump <kbd>&#8629;</kbd></div>
+      </div>
+
+      <!-- connected-machines rail -->
+      <div class="rail">
+        <div class="machines">
+          <span class="mchip"><span class="on"></span>laptop</span>
+          <span class="mchip"><span class="on"></span>mac-studio</span>
+          <span class="mchip"><span class="on"></span>devbox</span>
+        </div>
+        <span class="count">3 machines connected</span>
+      </div>
+
+      <div class="body">
+        <div class="list">
+
+          <!-- codex, working, on the laptop in front of you -->
+          <div class="r">
+            <div class="mark"><div class="spin"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+            <div class="txt"><div class="t">codex-mcp-server</div><div class="sub"><div class="ln">wire the streaming endpoint into the MCP layer.</div></div></div>
+            <div class="host">laptop</div>
+            <div class="age">8s</div>
+          </div>
+
+          <!-- opencode, done, on the studio mac -->
+          <div class="r">
+            <div class="mark"><div class="dot b"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+            <div class="txt"><div class="t"><b>release-notes</b></div><div class="sub"><div class="ln">Draft ready in RELEASE_NOTES.md - three sections, sixteen entries.</div></div></div>
+            <div class="host">mac-studio</div>
+            <div class="age">3m</div>
+          </div>
+
+          <!-- claude, on the headless devbox: the hero row. working -> asking. -->
+          <div class="r hero">
+            <div class="land"></div>
+            <div class="landring"></div>
+            <div class="mark">
+              <div class="spin m-spin"></div>
+              <div class="dot a m-amber"></div>
+            </div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+            <div class="txt"><div class="t"><b>signalbox-hub</b></div><div class="sub"><div class="ln work">push the branch and open the PR.</div><div class="ln ask">Bash: git push -u origin feat/attention-asks</div></div></div>
+            <div class="host">devbox</div>
+            <div class="age">12s</div>
+          </div>
+
+          <!-- pi, done, back on the laptop -->
+          <div class="r">
+            <div class="mark"><div class="dot b"></div></div>
+            <div class="gl"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#0A84FF;font-size:15px;line-height:1">&#960;</span></div>
+            <div class="txt"><div class="t"><b>log-triage</b></div><div class="sub"><div class="ln">Grouped 1,204 errors into 7 clusters - the top two are the same timeout.</div></div></div>
+            <div class="host">laptop</div>
+            <div class="age">5m</div>
+          </div>
+
+          <!-- claude, working, on the studio mac -->
+          <div class="r">
+            <div class="mark"><div class="spin"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+            <div class="txt"><div class="t">payments-webhook</div><div class="sub"><div class="ln">switch the retry backoff to full jitter.</div></div></div>
+            <div class="host">mac-studio</div>
+            <div class="age">20s</div>
+          </div>
+
+        </div>
+
+        <!-- preview: the devbox session, working then asking, quoted verbatim -->
+        <div class="preview">
+          <div class="term">
+            <div class="you">push the branch and open the PR.</div>
+            <div class="gap"></div>
+            <div class="pv-stack">
+            <div class="pv-layer pv-work">
+              <div class="working"><span class="sp">&#10087;</span> Working&#8230; (12s)</div>
+              <div class="actline"><kbd>&#8629;</kbd> Jump to Ghostty (tmux signalbox:1) <span class="host-t">on devbox</span></div>
+            </div>
+            <div class="pv-layer pv-ask">
+              <div class="resp"><span class="b">&#9679;</span><span class="body-t">Bash: git push -u origin feat/attention-asks</span></div>
+              <div class="actline"><kbd>&#8629;</kbd> Jump to Ghostty (tmux signalbox:1) <span class="host-t">on devbox</span> <span class="sep">&#183;</span> <span class="need">needs your input</span></div>
+            </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="foot">
+        <span>type to search</span><span class="sep">&#183;</span>
+        <span><kbd>&#8963;J</kbd>/<kbd>&#8963;K</kbd> move</span><span class="sep">&#183;</span>
+        <span><kbd>&#8629;</kbd> jump</span><span class="sep">&#183;</span>
+        <span><kbd>&#8963;&#8997;J</kbd> open from anywhere</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- brand line under the board -->
+  <div class="brand">
+    <div class="hl">One board across all your machines.</div>
+    <div class="sl">One board for every agent, terminal, and job you run.</div>
+    <div class="in mono">brew install <span style="color:#EDEDED">dwmkerr/tools/signalbox</span></div>
+  </div>
+
+</div>
+</body></html>
