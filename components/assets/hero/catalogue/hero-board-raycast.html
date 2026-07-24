@@ -21,7 +21,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 34px;
+    gap: 24px;
     color: #fff;
     -webkit-font-smoothing: antialiased;
   }
@@ -301,14 +301,34 @@
     51%, 100% { opacity: 0; }
   }
 
+  /* lead-in: title + the shortcut, prominent */
+  .topline {
+    display: flex; flex-direction: column; align-items: center; gap: 13px;
+    animation: panelIn .62s cubic-bezier(.16, .84, .3, 1) both;
+  }
+  .topline .title { font-size: 31px; font-weight: 700; letter-spacing: -.015em; color: #fff; }
+  .topline .press { font-size: 15.5px; color: #9a9aa1; display: flex; align-items: center; gap: 9px; }
+  .keychip { display: inline-flex; gap: 5px; margin: 0 3px; }
+  .keychip kbd {
+    font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 14px; font-weight: 600;
+    color: #fff; background: linear-gradient(#33343b, #25262c);
+    border: 1px solid #ffffff33; border-bottom-width: 3px; border-bottom-color: #ffffff18;
+    border-radius: 8px; padding: 5px 10px; box-shadow: 0 3px 10px rgba(0, 0, 0, .5);
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .panel, .caption, .row.selected { animation: none; opacity: 1; transform: none; }
+    .panel, .caption, .topline, .row.selected { animation: none; opacity: 1; transform: none; }
     .spinner, .dot.amber, .caret { animation: none; }
   }
 </style>
 
 <div class="stage-wrap">
   <div class="stage">
+
+    <div class="topline">
+      <div class="title">Stop tab-hunting your agents.</div>
+      <div class="press">Press <span class="keychip"><kbd>Ctrl</kbd><kbd>Opt</kbd><kbd>J</kbd></span> to see every session and jump to the one that needs you.</div>
+    </div>
 
     <div class="panel">
       <div class="titlebar">
@@ -406,7 +426,6 @@
     </div>
 
     <div class="caption">
-      <div class="tagline">One board for every agent, terminal, and job you run.</div>
       <div class="brew mono"><span class="prompt">$</span> brew install dwmkerr/tools/signalbox</div>
     </div>
 
