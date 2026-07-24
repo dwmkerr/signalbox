@@ -259,7 +259,7 @@
           <line x1="18" y1="16" x2="57" y2="59"/>
         </svg>
         <div class="etitle">Not connected</div>
-        <div class="etext">Choose 'Connect Phone' from the desktop app, run 'signalbox pair' from the CLI or configure in 'Settings'.</div>
+        <div class="etext">Choose 'Connect Phone' on the desktop app, or run 'signalbox pair' from the CLI.</div>
         <div style="margin-top:14px;background:#0A84FF;color:#fff;font-size:13.5px;font-weight:600;border-radius:9px;padding:8px 16px;display:inline-flex;align-items:center;gap:6px;">
           <svg width="15" height="15" viewBox="0 0 22 22" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5V4.5A1.5 1.5 0 0 1 4.5 3H7.5"/><path d="M14.5 3H17.5A1.5 1.5 0 0 1 19 4.5V7.5"/><path d="M19 14.5V17.5A1.5 1.5 0 0 1 17.5 19H14.5"/><path d="M7.5 19H4.5A1.5 1.5 0 0 1 3 17.5V14.5"/><rect x="7" y="7" width="3.2" height="3.2" rx="0.5" fill="#fff" stroke="none"/><rect x="11.8" y="7" width="3.2" height="3.2" rx="0.5" fill="#fff" stroke="none"/><rect x="7" y="11.8" width="3.2" height="3.2" rx="0.5" fill="#fff" stroke="none"/><rect x="12.3" y="12.3" width="2.2" height="2.2" rx="0.5" fill="#fff" stroke="none"/></svg>
           Scan to Connect</div>
@@ -381,11 +381,17 @@ stays small.</p>
 </ul>
 
 <h3>Empty states</h3>
-<p>An empty board means two different things, and the app says which. On a <b>live</b> hub with nothing
-running, it is the quiet moon: <i>No sessions. Fire an agent and it appears here.</i> Before the first
-connection lands - not paired, offline, or a rejected token - the app shows <b>Not connected</b>
-instead, pointing at the <code>qrcode.viewfinder</code> button top-right to scan a pairing code, or the
-manual address in Settings.</p>
+<p>An empty board means three different things, and the app says which - and the board agrees with
+Settings rather than telling a different story on reload. On a <b>live</b> hub with nothing running it is
+the quiet moon: <i>No sessions. Fire an agent and it appears here.</i></p>
+<p>A hub that is <b>configured but unreachable</b> is <b>Hub offline</b>, not "not connected": the board is
+a memory and says so, with <b>Reconnect</b> (retry now, skipping the backoff), <b>Scan a New Hub</b>, and a
+destructive <b>Disconnect</b> behind the same confirm as Settings. A <b>rejected token</b> is its own line -
+a retry cannot fix it, so it leads with <b>Scan to Re-pair</b>. This is the state a relaunch lands on when
+the hub is down, and it must match the Offline row in Settings, not fall back to the first-run pitch.</p>
+<p>Only a hub the phone was <b>never paired with</b> shows <b>Not connected</b>, pointing at the
+<code>qrcode.viewfinder</code> button top-right. The words name the desktop app and the CLI - the two ways a
+power user pairs - and deliberately do not send them to Settings, which only repeats the same scan.</p>
 
 <h2>The bottom menu</h2>
 <table>

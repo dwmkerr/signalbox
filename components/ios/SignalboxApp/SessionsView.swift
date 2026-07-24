@@ -10,9 +10,14 @@ import SwiftUI
 // The cards are list rows dressed up.
 struct SessionsView: View {
     @ObservedObject var hub: HubClient
+    // The saved hub address, the same binding Settings drives. The board reads it
+    // so its empty state agrees with Settings: a hub we set up but cannot reach is
+    // "offline", not the cold "never paired" pitch. One truth, two surfaces.
+    @Binding var hubURL: String
     @State private var expanded: String?
     @State private var pressed: String?
     @State private var query = ""
+    @State private var confirmDisconnect = false
     // The Hidden section starts collapsed and the user opens it. A search
     // overrides this to auto-reveal matches (see hiddenSectionExpanded).
     @State private var hiddenExpanded = false
@@ -107,14 +112,27 @@ struct SessionsView: View {
             // The escape hatch when a stream has gone strange.
             .refreshable { try? await hub.resyncState() }
             .sheet(isPresented: $showPairSheet) { PairSheet() }
+            // Same destructive Disconnect as Settings, behind the same confirm:
+            // it deletes the token, so it says so before it acts.
+            .confirmationDialog(
+                "Disconnect from this hub?",
+                isPresented: $confirmDisconnect,
+                titleVisibility: .visible
+            ) {
+                Button("Disconnect", role: .destructive) { disconnect() }
+            } message: {
+                Text("This removes the hub. Scan or enter it again to reconnect.")
+            }
             .overlay(alignment: .bottom) { JumpToast(feedback: hub.jumpFeedback) }
         }
     }
 
-    // Two different kinds of empty. An empty board on a live hub means nothing is
-    // running - wait for an agent. An empty board on a hub we cannot reach means
-    // there is nothing to show yet because we are not paired or not connected, so
-    // point at the way in rather than implying the board is quiet.
+    // Three kinds of empty, and the board says which. Live with nothing running
+    // is the quiet moon - wait for an agent. A hub we set up but cannot reach is
+    // offline: the board is a memory, and the way back is Reconnect / Scan /
+    // Disconnect, matching what Settings shows. Only a hub we never set up gets
+    // the cold first-run pitch - anything else reads "you were never paired" and
+    // that is the bug where the board and Settings disagreed on reload.
     @ViewBuilder
     private var emptyState: some View {
         if isLive {
@@ -123,32 +141,103 @@ struct SessionsView: View {
                 systemImage: "moon.zzz",
                 description: Text("Nothing is running. Fire an agent and it appears here.")
             )
+        } else if isConfigured {
+            offlineState
         } else {
+            notConnectedState
+        }
+    }
+
+    // Paired, but the hub is not answering right now. Rejected is split out: a
+    // retry with the same token just fails again, so it leads with re-pairing
+    // rather than a Reconnect that cannot succeed.
+    @ViewBuilder
+    private var offlineState: some View {
+        let host = hub.config.url.host ?? "the hub"
+        switch hub.connection {
+        case .connecting:
             ContentUnavailableView {
-                Label("Not connected", systemImage: "antenna.radiowaves.left.and.right.slash")
+                Label("Connecting...", systemImage: "antenna.radiowaves.left.and.right")
             } description: {
-                Text("Choose 'Connect Phone' from the desktop app, run 'signalbox pair' from the CLI or configure in 'Settings'.")
+                Text("Reaching \(host).")
+            }
+        case .rejected:
+            ContentUnavailableView {
+                Label("Hub rejected this device", systemImage: "lock.trianglebadge.exclamationmark")
+            } description: {
+                Text("The token is no longer good. Scan the hub's QR again to re-pair.")
             } actions: {
-                // The hint should not make the user hunt for the toolbar icon:
-                // the way in belongs right under the words that name it.
-                Button {
-                    showPairSheet = true
-                } label: {
-                    Label("Scan to Connect", systemImage: "qrcode.viewfinder")
+                scanButton("Scan to Re-pair", prominent: true)
+                disconnectButton
+            }
+        default: // .offline
+            ContentUnavailableView {
+                Label("Hub offline", systemImage: "antenna.radiowaves.left.and.right.slash")
+            } description: {
+                Text("Can't reach \(host). The board is the last thing it told us.")
+            } actions: {
+                // hub.start() cancels the backoff wait and retries now, rather
+                // than leaving the user to wait out the loop's own timer.
+                Button { hub.start() } label: {
+                    Label("Reconnect", systemImage: "arrow.clockwise")
                         .font(.system(size: 15, weight: .semibold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 4)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.blue)
+                scanButton("Scan a New Hub", prominent: false)
+                disconnectButton
             }
         }
+    }
+
+    // A hub we never set up. Power users pair from the desktop app or the CLI, so
+    // the words name only those two ways in - pointing at Settings just sends them
+    // to a screen that says the same thing. The scan button is the one-tap path.
+    private var notConnectedState: some View {
+        ContentUnavailableView {
+            Label("Not connected", systemImage: "antenna.radiowaves.left.and.right.slash")
+        } description: {
+            Text("Choose 'Connect Phone' on the desktop app, or run 'signalbox pair' from the CLI.")
+        } actions: {
+            scanButton("Scan to Connect", prominent: true)
+        }
+    }
+
+    private func scanButton(_ title: String, prominent: Bool) -> some View {
+        Button {
+            showPairSheet = true
+        } label: {
+            Label(title, systemImage: "qrcode.viewfinder")
+                .font(.system(size: 15, weight: .semibold))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(prominent ? Theme.blue : Theme.faint)
+    }
+
+    private var disconnectButton: some View {
+        Button("Disconnect", role: .destructive) { confirmDisconnect = true }
+    }
+
+    // Forget the hub: the same three steps Settings runs, kept in step so a
+    // Disconnect from either surface leaves the same clean state.
+    private func disconnect() {
+        Keychain.delete(Keychain.hubTokenAccount)
+        hubURL = ""
+        hub.disconnect()
     }
 
     private var isLive: Bool {
         if case .live = hub.connection { return true }
         return false
     }
+
+    // Configured means a hub address is saved - the same test Settings uses to
+    // choose its connected face.
+    private var isConfigured: Bool { !hubURL.isEmpty }
 
     // A board card. `dimmed` draws a hidden row: faded, an eye-slash where its
     // status mark would be (it is deliberately silenced, so its live status is

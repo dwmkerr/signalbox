@@ -48,7 +48,7 @@ struct SignalboxApp: App {
     var body: some Scene {
         WindowGroup {
             TabView(selection: $tab) {
-                SessionsView(hub: hub)
+                SessionsView(hub: hub, hubURL: $hubURL)
                     .tabItem { Label("Sessions", systemImage: "list.bullet") }.tag(0)
                 SettingsView(hub: hub, hubURL: $hubURL)
                     .tabItem { Label("Settings", systemImage: "gearshape") }.tag(1)

@@ -265,7 +265,7 @@ the same binary and the same API; what changes is where it binds and what it dem
       <span>Bearer token</span>
     </div>
     <div class="col">
-      <div class="node hub"><b>signalbox hub</b><span class="sub">0.0.0.0:8377, TLS at the platform</span></div>
+      <div class="node hub"><b>signalbox hub</b><span class="sub">network HTTPS, native or platform TLS</span></div>
       <div class="node store">events.jsonl<span class="sub">on a volume</span></div>
     </div>
     <div class="arrow">
@@ -279,15 +279,16 @@ the same binary and the same API; what changes is where it binds and what it dem
   </div>
 </div>
 
-<h3>What changes</h3>
+<h3>Two listeners</h3>
 <table>
-  <tr><th>Concern</th><th>Local</th><th>Remote</th></tr>
-  <tr><td>Bind</td><td><code>127.0.0.1</code></td><td><code>--bind 0.0.0.0</code></td></tr>
+  <tr><th></th><th>Local</th><th>Network</th></tr>
+  <tr><td>Bind</td><td><code>http://127.0.0.1:8377</code>, always</td><td><code>hub.network.bind</code>, optional; HTTPS on port 8378</td></tr>
   <tr><td>Auth</td><td>none (process boundary)</td><td><code>SIGNALBOX_TOKEN</code>, <code>Authorization: Bearer</code></td></tr>
-  <tr><td>Host check</td><td>loopback literals only</td><td>allowlist the configured hostname</td></tr>
-  <tr><td>TLS</td><td>n/a</td><td>terminated by the platform</td></tr>
-  <tr><td>Offline</td><td>always works</td><td>does not work, by contract</td></tr>
+  <tr><td>TLS</td><td>not needed</td><td>QR-pinned certificate on a LAN, normal certificate on a public host</td></tr>
 </table>
+<p>Both listeners feed the same hub and store. An unset <code>hub.network.bind</code> keeps the hub
+local. <code>0.0.0.0</code> listens on every IPv4 interface; a specific address limits the listener to
+that interface. Using an address rather than a boolean keeps the exposure explicit.</p>
 
 <h3>Two jobs, one check</h3>
 <p>The loopback <code>Host</code> check currently does <b>two</b> things: it defends against DNS
