@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/dwmkerr/signalbox/compare/v0.1.3...v0.1.4) (2026-07-27)
+
+
+### Bug Fixes
+
+* clearer offline state, macOS version in Settings, brew install UX ([#33](https://github.com/dwmkerr/signalbox/issues/33)) ([17614e6](https://github.com/dwmkerr/signalbox/commit/17614e65abb52303d81c57521a772878fd08d01b))
+
 ## [0.1.3](https://github.com/dwmkerr/signalbox/compare/v0.1.2...v0.1.3) (2026-07-27)
 
 
