@@ -20,6 +20,14 @@ cask "signalbox" do
   app "Signalbox.app"
   binary "#{appdir}/Signalbox.app/Contents/Resources/signalbox"
 
+  # Open it on install. Signalbox is a menu-bar app with no Dock icon, so a
+  # fresh install is otherwise invisible - nothing launches, and the caveats
+  # scroll past. Opening it puts the icon in the menu bar where the next step
+  # (scan a phone, run init) can actually be found.
+  postflight do
+    system_command "/usr/bin/open", args: ["-a", "#{appdir}/Signalbox.app"]
+  end
+
   uninstall quit:       "com.dwmkerr.signalbox",
             login_item: "Signalbox"
 
@@ -37,8 +45,11 @@ cask "signalbox" do
       ]
 
   caveats <<~EOS
-    Open Signalbox (it lives in the menu bar and runs the hub), then wire up
-    your coding agents:
-      signalbox init
+    Signalbox is opening now - look for its icon in the menu bar (top-right of
+    the screen). It runs the hub in the background. Next:
+
+      signalbox init      # wire up Claude Code, Cursor, Codex, ...
+
+    Then click the menu bar icon -> Connect Phone to watch your board on iOS.
   EOS
 end

@@ -337,13 +337,23 @@ final class SettingsController: NSObject, NSTextFieldDelegate {
         stack.setCustomSpacing(4, after: filterHeading)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
+        // The version sits quietly at the bottom of the window - the discreet
+        // "which build am I on" belongs on the settings screen, not the menu.
+        let versionLabel = NSTextField(labelWithString: "Signalbox \(Self.appVersion())")
+        versionLabel.font = .systemFont(ofSize: 11)
+        versionLabel.textColor = .tertiaryLabelColor
+        versionLabel.translatesAutoresizingMaskIntoConstraints = false
+
         let content = NSView()
         content.addSubview(stack)
+        content.addSubview(versionLabel)
         NSLayoutConstraint.activate([
             stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 20),
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: content.bottomAnchor, constant: -20),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: versionLabel.topAnchor, constant: -12),
+            versionLabel.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            versionLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
         ])
         window.contentView = content
         window.setContentSize(NSSize(width: 400, height: 600))
@@ -372,6 +382,15 @@ final class SettingsController: NSObject, NSTextFieldDelegate {
             SharedSettings.disableNetworkAccess()
         }
         Task { await restartHub() }
+    }
+
+    // "<short> (<build>)" from the bundle, e.g. "0.1.4 (42)". A released build
+    // is stamped by the release pipeline; a dev build shows the Info.plist
+    // placeholder.
+    static func appVersion() -> String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "\(short) (\(build))"
     }
 
     // The reachable address the phone dials: this Mac's LAN IP and the hub port.

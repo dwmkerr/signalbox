@@ -818,26 +818,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         settingsItem.target = self
         menu.addItem(settingsItem)
-        menu.addItem(.separator())
-        // The version, disabled so it reads as a quiet label not a command - a
-        // discreet "which build am I on" for support and dogfooding. In a
-        // released build this is the stamped version; a dev build shows the
-        // Info.plist placeholder (the release pipeline stamps, dev does not).
-        let versionItem = NSMenuItem(title: "Signalbox \(Self.appVersionString())", action: nil, keyEquivalent: "")
-        versionItem.isEnabled = false
-        menu.addItem(versionItem)
         menu.addItem(NSMenuItem(
             title: "Quit Signalbox",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         ))
-    }
-
-    // "<short> (<build>)" from the bundle, e.g. "0.1.3 (42)".
-    static func appVersionString() -> String {
-        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        return "\(short) (\(build))"
     }
 
     // A small phone glyph on the Connect Phone item. Template-rendered so it

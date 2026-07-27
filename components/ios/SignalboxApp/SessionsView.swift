@@ -91,6 +91,13 @@ struct SessionsView: View {
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
+                    // A cached board on an unreachable hub is a memory, and the
+                    // faint connection dot alone did not say so. This banner does,
+                    // and carries the way back - Reconnect, Scan, Disconnect - so
+                    // the fix is where the problem is, not buried in Settings.
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if let kind = offlineBannerKind { offlineBanner(kind) }
+                    }
                 }
             }
             .background(Theme.bg)
@@ -238,6 +245,66 @@ struct SessionsView: View {
     // Configured means a hub address is saved - the same test Settings uses to
     // choose its connected face.
     private var isConfigured: Bool { !hubURL.isEmpty }
+
+    private enum OfflineBanner { case offline, rejected }
+
+    // The banner shows only when the board has cards to sit above: an empty board
+    // gets the full offlineState screen instead. Connecting is transient, so it
+    // stays with the quiet connection dot rather than flashing a banner.
+    private var offlineBannerKind: OfflineBanner? {
+        guard isConfigured, !hub.sessions.isEmpty else { return nil }
+        switch hub.connection {
+        case .offline: return .offline
+        case .rejected: return .rejected
+        default: return nil
+        }
+    }
+
+    private func offlineBanner(_ kind: OfflineBanner) -> some View {
+        let host = hub.config.url.host ?? "the hub"
+        return HStack(spacing: 10) {
+            Image(systemName: kind == .rejected ? "lock.trianglebadge.exclamationmark" : "antenna.radiowaves.left.and.right.slash")
+                .font(.system(size: 16))
+                .foregroundStyle(Theme.amber)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(kind == .rejected ? "Hub rejected this device" : "Hub offline")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.text)
+                Text(kind == .rejected ? "The token is no longer good - re-pair." : "Can't reach \(host). This is the last board we saw.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.dim)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+            // Reconnect retries now (skipping the backoff wait); rejected cannot
+            // be fixed by a retry, so it leads with re-pairing in the menu.
+            if kind == .offline {
+                Button { hub.start() } label: {
+                    Text("Reconnect")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.blue)
+                }
+                .buttonStyle(.plain)
+            }
+            Menu {
+                Button { showPairSheet = true } label: {
+                    Label(kind == .rejected ? "Scan to Re-pair" : "Scan a New Hub", systemImage: "qrcode.viewfinder")
+                }
+                Button(role: .destructive) { confirmDisconnect = true } label: {
+                    Label("Disconnect", systemImage: "wifi.slash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 17))
+                    .foregroundStyle(Theme.dim)
+                    .frame(width: 30, height: 30)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Theme.amber.opacity(0.14))
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.amber.opacity(0.3)).frame(height: 0.5) }
+    }
 
     // A board card. `dimmed` draws a hidden row: faded, an eye-slash where its
     // status mark would be (it is deliberately silenced, so its live status is
