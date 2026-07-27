@@ -30,7 +30,7 @@ import {
 // This is the whole product's version - the macOS and iOS apps build from it
 // too (see .github/workflows) - and release-please only watches components/cli,
 // so an app/iOS-only release is cut with a `Release-As:` commit under this path.
-const version = "0.1.3"; // x-release-please-version
+const version = "0.1.4"; // x-release-please-version
 
 // The short help: what a person types. Plumbing (hooks, tmux glue, drain)
 // and env vars live in `signalbox help` - the first screen a new user sees
