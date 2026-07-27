@@ -174,6 +174,7 @@ signalbox session unpin claude:9f2a          # remove the pin
 signalbox session rename claude:9f2a deploy  # set your own name for the session
 signalbox session rename claude:9f2a         # empty clears it
 signalbox session remove claude:9f2a         # off the board now
+signalbox session clear                       # every session off the board (start fresh)
 signalbox session list                       # alias for state
 signalbox session tag claude:9f2a work       # add a discreet tag
 signalbox session untag claude:9f2a work     # remove it
@@ -223,14 +224,16 @@ The hub keeps the state of every session, streams changes to the surfaces, and r
 
 ## pair
 
-Pair a phone with the hub without ever putting the token on screen. Run it on the hub machine: it mints a one-time code and prints a QR that encodes this hub's LAN URL and the code, then waits for the phone to scan and redeem it.
+Pair a phone with the hub without ever putting the token on screen. Run it on the hub machine: it mints a one-time code and prints a QR that encodes this hub's LAN URL, the code, and (when the hub serves TLS) the cert pin, then waits for the phone to scan and redeem it.
 
 ```bash
 signalbox pair                       # QR + code, then wait for the phone
 signalbox pair --host 192.168.1.94   # force the advertised IP
 ```
 
-Beneath the QR it prints the plain `signalbox://pair?url=<hub-url>&code=<code>` link and the URL and code on their own lines for manual entry. The code is base64url and good for 180 seconds. The phone POSTs it to `/pair` and the hub trades it for the bearer token, which the phone stores; the token itself never appears on screen, in the QR, or in scrollback. `pair` polls `/pair/status` and prints `phone paired` once the phone redeems, or `code expired - run signalbox pair again` at timeout.
+Beneath the QR it prints the plain `signalbox://pair?url=<hub-url>&code=<code>[&fp=<pin>]` link and the URL and code on their own lines for manual entry. The code is base64url and good for 180 seconds. The phone POSTs it to `/pair` and the hub trades it for the bearer token, which the phone stores; the token itself never appears on screen, in the QR, or in scrollback. `pair` polls `/pair/status` and prints `phone paired` once the phone redeems, or `code expired - run signalbox pair again` at timeout.
+
+**TLS (#25).** When devices are allowed, the hub serves the phone over `https` with a persisted self-signed cert (`tls-cert.pem`/`tls-key.pem` in the state dir), on a listener one port above the loopback http port (e.g. `8378`). Local clients - the menu bar app, CLI, adapters - keep plain http on loopback, untouched. The QR's `url` is `https://<ip>:<tls-port>` and `fp` is the SHA-256 of the cert's DER, which the phone pins: an attacker presenting any other cert fails the pin, so a self-signed cert with no CA still gives MITM-proof transport with no user ceremony. If `openssl` is unavailable the hub cannot mint a cert and falls back to plain http (no `fp`), pairing over http as before. A hand-entered hub in the app's Settings is http and carries no pin.
 
 It only works on a hub started with a wide `--bind` and `SIGNALBOX_TOKEN` set: a loopback-only hub that no phone could reach refuses to mint, and so does a hub with no token. The advertised host is the hub's bind when that is a concrete IP, otherwise this machine's LAN IPv4 (VPN and tunnel interfaces are skipped so a corp VPN address never wins); `--host` overrides. Minting a code and reading pairing status are loopback-only, so only the hub machine can start a pairing, even from a device already holding the token. The endpoints (`POST /pair`, `POST /pair/new`, `GET /pair/status`) and the full security rationale are in the [data model](events.md#pairing).
 

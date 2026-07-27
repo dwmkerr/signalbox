@@ -16,10 +16,31 @@ struct SettingsView: View {
     // Disconnect on a hub you never set up would be a control with nothing to act on.
     private var isConfigured: Bool { !hubURL.isEmpty }
 
+    // "<short> (<build>)" from the bundle, e.g. "0.1.3 (42)".
+    private static var appVersion: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "\(short) (\(build))"
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 if isConfigured { connectedHub } else { notConnectedHub }
+                // The version at the very bottom, quiet and centered, the way
+                // iOS Settings shows a build - a discreet "which build am I on".
+                // Real in a released build; a dev build shows the Info.plist
+                // placeholder unless the iOS build stamps it.
+                Section {
+                } footer: {
+                    HStack {
+                        Spacer()
+                        Text("Signalbox \(Self.appVersion)")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.dim)
+                        Spacer()
+                    }
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -168,12 +189,13 @@ struct SettingsView: View {
         guard let parsed = URL(string: url), parsed.scheme != nil else { return }
         hubURL = url
         Keychain.set(token, account: Keychain.hubTokenAccount)
-        // reconfigure no-ops when nothing changed (its own guard), so on an
-        // unchanged url+token make sure the loop is running either way.
+        // A hand-entered hub carries no cert pin: it is the http path (or a power
+        // user who accepts an unpinned endpoint). Passing nil clears any pin left
+        // from a previous scan so it cannot mismatch the new url.
         if hub.config.url == parsed && (hub.config.token ?? "") == token {
             hub.start()
         } else {
-            hub.reconfigure(url: parsed, token: token)
+            hub.reconfigure(url: parsed, token: token, fingerprint: nil)
         }
     }
 

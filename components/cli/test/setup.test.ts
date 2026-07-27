@@ -8,7 +8,7 @@ import { join } from "node:path";
 // assert the classification via a settings fixture through the public runSetup
 // output. We check the three cases: ours, wrapper (other), empty.
 
-function runInstall(settings: object | null, args: string[]): string {
+function runInstallInHome(settings: object | null, args: string[]): { out: string; home: string } {
   const home = mkdtempSync(join(tmpdir(), "sbhome-"));
   mkdirSync(join(home, ".claude"), { recursive: true });
   if (settings) writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(settings));
@@ -16,7 +16,15 @@ function runInstall(settings: object | null, args: string[]): string {
     [process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "install", "--yes", ...args],
     { env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" }
   );
-  return out.stdout.toString() + out.stderr.toString();
+  return { out: out.stdout.toString() + out.stderr.toString(), home };
+}
+
+function runInstall(settings: object | null, args: string[]): string {
+  return runInstallInHome(settings, args).out;
+}
+
+function readSettings(home: string): any {
+  return JSON.parse(require("node:fs").readFileSync(join(home, ".claude", "settings.json"), "utf8"));
 }
 
 const hookBlock = (cmd: string) => ({
@@ -45,6 +53,61 @@ describe("install claude-hook detection", () => {
     const out = runInstall({}, ["--agent", "claude"]);
     expect(out).toContain("\u2714 Claude Code");
     expect(out).toContain("(backup: ");
+  });
+
+  test("a fresh install wires the two ask hooks", () => {
+    const { home } = runInstallInHome({}, ["--agent", "claude"]);
+    const s = readSettings(home);
+    const cmd = (e: any) => e.hooks[0].command;
+    expect(cmd(s.hooks.PermissionRequest[0])).toBe("signalbox hook claude");
+    const ask = s.hooks.PreToolUse.find((e: any) => e.matcher === "AskUserQuestion");
+    expect(cmd(ask)).toBe("signalbox hook claude");
+  });
+
+  test("an old signalbox setup gains the new ask hooks on re-run", () => {
+    // Classic events already route to signalbox, but the ask hooks predate
+    // this feature - install must add them, not report done.
+    const { out, home } = runInstallInHome(hookBlock("signalbox hook claude"), ["--agent", "claude"]);
+    expect(out).toContain("\u2714 Claude Code");
+    const s = readSettings(home);
+    expect(s.hooks.PermissionRequest?.[0]?.hooks?.[0]?.command).toBe("signalbox hook claude");
+    expect(s.hooks.PreToolUse?.some((e: any) => e.matcher === "AskUserQuestion")).toBe(true);
+  });
+
+  test("the AskUserQuestion hook coexists with a user's own PreToolUse matcher", () => {
+    const settings = {
+      ...hookBlock("signalbox hook claude"),
+    } as any;
+    settings.hooks.PreToolUse = [
+      { matcher: "Edit", hooks: [{ type: "command", command: "prettier-hook.sh" }] },
+    ];
+    const { home } = runInstallInHome(settings, ["--agent", "claude"]);
+    const s = readSettings(home);
+    // The user's formatter survives untouched...
+    expect(s.hooks.PreToolUse.some((e: any) => e.matcher === "Edit")).toBe(true);
+    // ...and ours is appended, not merged into theirs.
+    expect(s.hooks.PreToolUse.some((e: any) => e.matcher === "AskUserQuestion")).toBe(true);
+  });
+
+  test("re-running when already fully wired is idempotent (no duplicate ask hooks)", () => {
+    const settings = { hooks: { ...hookBlock("signalbox hook claude").hooks } } as any;
+    settings.hooks.PermissionRequest = [{ hooks: [{ type: "command", command: "signalbox hook claude" }] }];
+    settings.hooks.PreToolUse = [
+      { matcher: "AskUserQuestion", hooks: [{ type: "command", command: "signalbox hook claude" }] },
+    ];
+    const { out, home } = runInstallInHome(settings, ["--agent", "claude"]);
+    expect(out).toContain("\u2714 Claude Code");
+    const s = readSettings(home);
+    expect(s.hooks.PreToolUse.length).toBe(1);
+    expect(s.hooks.PermissionRequest.length).toBe(1);
+  });
+
+  test("a wrapper setup is not given direct ask hooks (cannot verify, may double-fire)", () => {
+    const { out, home } = runInstallInHome(hookBlock("~/.claude/hooks/agent-notify.sh"), ["--agent", "claude"]);
+    expect(out).toContain("hooks present via a wrapper");
+    const s = readSettings(home);
+    expect(s.hooks.PermissionRequest).toBeUndefined();
+    expect(s.hooks.PreToolUse).toBeUndefined();
   });
 });
 

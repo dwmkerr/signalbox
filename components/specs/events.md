@@ -44,6 +44,12 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   "event": "done",
 
   // Optional detail on the event: permission_prompt, stop, session_end, ...
+  // Attention reasons an adapter should prefer when it knows why the agent is
+  // blocked: "permission_request" (a tool call awaits approval; reply carries
+  // the actual ask, e.g. "Bash: git push origin main") and "question" (the
+  // agent asked the user something; reply carries the question and its
+  // options). Surfaces may render these distinctly; unknown reasons render as
+  // plain attention, so the vocabulary can grow without breaking anyone.
   "reason": "stop",
 
   // The stable identity of the session: "<agent-family>:<session id>". Every
@@ -126,6 +132,7 @@ The hub keeps one row per `session_key`, following these rules:
 
 - **Latest event wins.** A new agent event replaces the row's status. `ended` removes the row (the event log keeps everything).
 - **Breadcrumbs carry.** `prompt`, `reply`, `origin` and `proc` persist across events that omit them, so a done without prompt text keeps showing the prompt that started it. `label` always carries, and only a `label` event can change or clear it.
+- **An enriched ask is not clobbered by its bare twin.** One blocked dialog can reach the hub twice (e.g. Claude's `PermissionRequest` with the real ask in `reply`, and its bare `Notification` with only "Claude needs your permission"). While a row is in attention, a second attention event whose `reply` is empty or carries no more than the generic message keeps the richer `reply` already on the row, regardless of arrival order. Any non-attention agent event ends the ask and normal reply rules resume.
 - **Tags carry.** `tags` persist across agent events that omit them (like `prompt`/`reply`), but an event carrying its own `tags` keeps them - even when the session already existed untagged. `tag`/`untag` events add or remove them. Filter with `state --tag` / `--exclude-tag`.
 - **New activity resets your flags.** Any agent event clears `acked` and `hidden` - a hidden session that speaks again comes back.
 - **A pin is yours until you drop it.** `pinned` (set by `pin`, cleared by `unpin`) carries across agent events like `label`: new activity never clears it, so a pinned session that speaks again stays pinned. Only `unpin` or `hide` removes a pin. `ended`/expiry removes the whole session; a pin does not resurrect or protect it.
@@ -223,7 +230,7 @@ Default `http://127.0.0.1:8377`, loopback only, no auth.
 | `GET /stream?since=N` | Server-sent events: replay everything after seq N, then live. Heartbeat every 15s. Commands are live-only and never appear in the replay. |
 | `GET /healthz` | `{"ok": true, "version": "0.1.0"}` (the running CLI's version). Never authenticated - platform health checks reach it from anywhere. |
 | `POST /pair` | Trade a valid [pairing code](#pairing) for the bearer token: `{"token": "..."}`, or `401 {"error": "invalid or expired pairing code"}` for any failure. Unauthenticated - the code is the credential. Requires `Content-Type: application/json`. |
-| `POST /pair/new` | Mint a pairing code (loopback peer only, even with a valid bearer): `{"code", "expires_in": 180, "bind"}`. `403` off the hub machine; `409` with no token configured or a loopback bind. Requires `Content-Type: application/json`. |
+| `POST /pair/new` | Mint a pairing code (loopback peer only, even with a valid bearer): `{"code", "expires_in": 180, "bind"}`, plus `"fp"` (cert pin) and `"port"` (TLS listener) when the hub serves the phone over https. `403` off the hub machine; `409` with no token configured or a loopback bind. Requires `Content-Type: application/json`. |
 | `GET /pair/status` | The pairing slot's state for `signalbox pair` (loopback peer only): `{"status": "pending" \| "redeemed" \| "none"}`. |
 
 The hub appends every event to `events.jsonl` in the state dir and rebuilds its state from that file on boot; `seq` continues from the highest persisted value. Commands are not written, so they are never rebuilt or replayed. Only `application/json` may post (blocks cross-origin form posts from hostile pages), and bodies are capped at 1 MiB.
@@ -247,6 +254,7 @@ The `hub` section of `~/.config/signalbox/settings.json` (`hub.bind`, `hub.token
 - **`/pair/new` and `/pair/status` are loopback-only regardless of any bearer.** They sit below the auth gate but re-check the peer address explicitly, so a LAN client holding the token still cannot mint or inspect a pairing. Only the hub machine starts a pairing.
 - **A code is single-use and short-lived**: 128 bits from a CSPRNG, base64url, 180 seconds. Redemption is synchronous - the slot is marked redeemed before the handler yields - so racing requests cannot redeem one code twice. There is deliberately **no failed-attempt invalidation and no attempt counter**: a cap is a denial-of-pairing lever and useless against a 128-bit space.
 - **`Content-Type: application/json` is required on `/pair` and `/pair/new`**: it blocks the CORS "simple request" a hostile page could POST cross-origin without a preflight.
+- **The phone's transport is pinned TLS (#25).** When devices are allowed the hub serves them over https with a persisted self-signed cert, on a listener one port above the loopback http port; local clients keep plain http on loopback (no MITM risk there), so nothing local trusts the cert. The mint carries the cert's SHA-256 DER fingerprint (`fp`) and TLS port; the QR carries them into the phone, which pins the fingerprint and refuses any other cert. This closes the LAN's plaintext gap - a same-network attacker could otherwise read prompts/replies or forge events - without a CA or any user ceremony. `openssl`-less hosts fall back to plain http (no `fp`); a hand-entered hub is http and unpinned.
 
 What pairing does and does not do:
 

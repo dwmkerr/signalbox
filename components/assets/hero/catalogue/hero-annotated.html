@@ -1,0 +1,226 @@
+<!doctype html>
+<!--
+  signalbox hero - "Annotated". A crisp, static still of the jumplist summoned
+  over the desktop, with four tasteful margin callouts that teach the board:
+  where the sessions live, which row is asking, how the marks read, and the
+  shortcut to open it from anywhere. No intro card - frame one is the board,
+  already present. Static by design; the only thing worth animating here is a
+  status flipping, and this still is the moment just after it flipped.
+-->
+<html lang="en"><head><meta charset="utf-8">
+<title>signalbox - one board for every agent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='%23FF9F0A' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='2.4' fill='%23FF9F0A' stroke='none'/%3E%3Cpath d='M6.5 6.5 A 5 5 0 0 1 13.5 6.5'/%3E%3Cpath d='M6.5 13.5 A 5 5 0 0 0 13.5 13.5'/%3E%3Cpath d='M4.2 4.2 A 8 8 0 0 1 15.8 4.2' opacity='.55'/%3E%3Cpath d='M4.2 15.8 A 8 8 0 0 0 15.8 15.8' opacity='.55'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { background:#000; }
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+  .stage { position:relative; width:1280px; height:720px; overflow:hidden;
+           background:radial-gradient(120% 100% at 50% 12%, #202533 0%, #14161e 45%, #0b0c10 100%); }
+  .mono { font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* ---------- the board: the hero, at true OS fidelity ---------- */
+  .palette { position:absolute; z-index:3; top:96px; left:360px; width:560px; }
+  .panel { background:linear-gradient(#212228,#17181c); border:1px solid #ffffff26; border-radius:16px;
+           box-shadow:0 44px 100px rgba(0,0,0,.7), 0 10px 42px rgba(0,0,0,.5), 0 0 0 1px #00000055;
+           overflow:hidden; }
+
+  .head { display:flex; align-items:center; gap:11px; height:48px; padding:0 18px;
+          border-bottom:1px solid #ffffff14; }
+  .head .mk svg { width:21px; height:21px; display:block; }
+  .head .wm { color:#fff; font-size:14.5px; font-weight:600; }
+  .head .search { flex:1; display:flex; align-items:center; margin:0 4px; min-width:0; }
+  .head .search .caret { width:1.5px; height:15px; background:#EDEDED; margin-right:6px; flex-shrink:0; }
+  .head .search .ph { color:#63636a; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .head .jp { color:#9a9aa1; font-size:12.5px; flex-shrink:0; }
+  .head .jp kbd { color:#c8c8ce; font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:.92em; }
+
+  .list { padding:8px 8px; }
+  .r { position:relative; display:flex; align-items:center; gap:12px; height:52px; padding:0 12px;
+       border-radius:10px; }
+  .r.sel { background:#2C2C31; }
+  .r.sel::after { content:""; position:absolute; inset:0; border:1px solid #ffffff1e; border-radius:10px; pointer-events:none; }
+  .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
+  .dot { width:9px; height:9px; border-radius:50%; }
+  .dot.a { background:#FF9F0A; box-shadow:0 0 0 4px #FF9F0A22; }
+  .dot.b { background:#0A84FF; }
+  .spin { width:12px; height:12px; border-radius:50%; border:2px solid #ffffff2e; border-top-color:#d3d3d8;
+          transform:rotate(120deg); }
+  .gl { width:22px; display:flex; justify-content:center; flex-shrink:0; }
+  .gl svg { display:block; }
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:14px; color:#c3c3c9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .txt .t b { color:#fff; font-weight:600; }
+  .r.sel .txt .t, .r.sel .txt .t b { color:#fff; }
+  .txt .d { font-size:12px; color:#7e7e85; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .r.sel .txt .d { color:#f0b95a; }
+  .age { color:#9a9aa1; font-size:12px; flex-shrink:0; font-variant-numeric:tabular-nums; }
+
+  .foot { display:flex; align-items:center; height:34px; padding:0 14px; gap:10px;
+          border-top:1px solid #ffffff12; color:#63636a; font-size:10.5px;
+          font-family:'SF Mono',ui-monospace,Menlo,monospace; white-space:nowrap; }
+  .foot .sep { color:#3a3a40; }
+  .foot kbd { color:#8a8a90; font-family:inherit; }
+  .foot .hi { color:#8a8a90; }
+
+  /* ---------- connectors: thin lines from margin labels to the board ---------- */
+  .wires { position:absolute; inset:0; z-index:4; pointer-events:none; }
+
+  /* ---------- callouts, resting in the margins ---------- */
+  .callout { position:absolute; z-index:5; font-size:13px; line-height:1.4; color:#c8c8ce;
+             max-width:236px; }
+  .callout.left { text-align:right; }
+  .callout .k { display:block; color:#7e7e85; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+                margin-bottom:5px; font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .callout b { color:#fff; font-weight:600; }
+  .callout .kbd { font-family:'SF Mono',ui-monospace,Menlo,monospace; color:#fff; font-size:12.5px;
+                  background:#ffffff12; border:1px solid #ffffff20; border-radius:6px; padding:2px 7px; }
+
+  .legend { display:inline-flex; flex-direction:column; gap:6px; align-items:flex-end; }
+  .legend .li { display:inline-flex; align-items:center; gap:8px; color:#c8c8ce; }
+  .legend .li .lb { color:#8a8a90; }
+  .legend .li .lb i { color:#fff; font-style:normal; }
+  .lg-spin { width:12px; height:12px; border-radius:50%; border:2px solid #ffffff2e; border-top-color:#d3d3d8;
+             transform:rotate(120deg); flex-shrink:0; }
+  .lg-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .lg-dot.b { background:#0A84FF; } .lg-dot.a { background:#FF9F0A; box-shadow:0 0 0 3px #FF9F0A22; }
+
+  /* ---------- brand line, below the board ---------- */
+  .brand { position:absolute; z-index:5; top:556px; left:0; right:0; text-align:center; }
+  .brand .tl { color:#c3c3c9; font-size:16px; } .brand .tl b { color:#fff; font-weight:600; }
+  .brand .in { margin-top:12px; display:inline-block; background:#141418; border:1px solid #ffffff1c;
+               border-radius:10px; padding:9px 16px; color:#EDEDED; font-size:13.5px; }
+  .brand .in .d { color:#75757c; }
+
+  @media (prefers-color-scheme: light) { html,body { background:#000; } }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- connectors drawn first so labels sit on top of their line ends -->
+  <svg class="wires" viewBox="0 0 1280 720" fill="none">
+    <g stroke="#ffffff33" stroke-width="1">
+      <!-- every session, one board -> header / wordmark -->
+      <path d="M300 120 L360 120"/>
+      <!-- marks legend -> status column, mid-list -->
+      <path d="M300 300 L360 282"/>
+      <!-- the one asking -> selected row -->
+      <path d="M920 230 L980 230"/>
+      <!-- Ctrl-Opt-J -> footer keybar -->
+      <path d="M920 489 L980 489"/>
+    </g>
+    <g fill="#ffffff88">
+      <circle cx="360" cy="120" r="2.6"/>
+      <circle cx="360" cy="282" r="2.6"/>
+      <circle cx="920" cy="230" r="2.6"/>
+      <circle cx="920" cy="489" r="2.6"/>
+    </g>
+  </svg>
+
+  <!-- ================= callouts ================= -->
+
+  <div class="callout left" style="left:64px; top:98px; width:230px;">
+    <span class="k">the board</span>
+    every session, in <b>one board</b>
+  </div>
+
+  <div class="callout left" style="left:44px; top:262px; width:252px;">
+    <span class="k">status marks</span>
+    <span class="legend">
+      <span class="li"><span class="lb"><i>working</i></span><span class="lg-spin"></span></span>
+      <span class="li"><span class="lb">blue = <i>done</i></span><span class="lg-dot b"></span></span>
+      <span class="li"><span class="lb">amber = <i>needs you</i></span><span class="lg-dot a"></span></span>
+    </span>
+  </div>
+
+  <div class="callout" style="left:988px; top:206px; width:250px;">
+    <span class="k">asking</span>
+    the one asking sits selected, with the <b>real question</b> quoted
+  </div>
+
+  <div class="callout" style="left:988px; top:466px; width:250px;">
+    <span class="k">open from anywhere</span>
+    <span class="kbd">Ctrl-Opt-J</span> brings the board up over whatever you are in
+  </div>
+
+  <!-- ================= the board ================= -->
+  <div class="palette">
+    <div class="panel">
+      <div class="head">
+        <div class="mk"><svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg></div>
+        <div class="wm">signalbox</div>
+        <div class="search"><span class="caret"></span><span class="ph">Search sessions&#8230;</span></div>
+        <div class="jp">Jump <kbd>&#8629;</kbd></div>
+      </div>
+
+      <div class="list">
+
+        <!-- claude, working -->
+        <div class="r">
+          <div class="mark"><div class="spin"></div></div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+          <div class="txt"><div class="t">signalbox-hub</div><div class="d">wiring the streaming endpoint into the MCP layer.</div></div>
+          <div class="age">6s</div>
+        </div>
+
+        <!-- claude, ASKING - selected, a real question -->
+        <div class="r sel">
+          <div class="mark"><div class="dot a"></div></div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+          <div class="txt"><div class="t"><b>content-pipeline</b></div><div class="d">Overwrite writing-style.yml? (Overwrite / Keep mine)</div></div>
+          <div class="age">12s</div>
+        </div>
+
+        <!-- opencode, working -->
+        <div class="r">
+          <div class="mark"><div class="spin"></div></div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <div class="txt"><div class="t">docs-site-astro</div><div class="d">regenerate the search index after the content refactor.</div></div>
+          <div class="age">22s</div>
+        </div>
+
+        <!-- codex, ASKING - a pending command, verbatim -->
+        <div class="r">
+          <div class="mark"><div class="dot a"></div></div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+          <div class="txt"><div class="t"><b>codex-mcp-server</b></div><div class="d">Bash: git push -u origin feat/attention-asks</div></div>
+          <div class="age">41s</div>
+        </div>
+
+        <!-- cursor, done -->
+        <div class="r">
+          <div class="mark"><div class="dot b"></div></div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g fill="none" stroke="#B5B5BA" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M10 2.6 L16.4 6.3 L16.4 13.7 L10 17.4 L3.6 13.7 L3.6 6.3 Z"/><path d="M3.6 6.3 L10 10 L16.4 6.3"/><path d="M10 10 L10 17.4"/></g></svg></div>
+          <div class="txt"><div class="t"><b>ui-kit</b></div><div class="d">Done. Pulled the button variants into their own file.</div></div>
+          <div class="age">3m</div>
+        </div>
+
+        <!-- claude, done -->
+        <div class="r">
+          <div class="mark"><div class="dot b"></div></div>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+          <div class="txt"><div class="t"><b>auth-service</b></div><div class="d">Migrated the tokens table. 1,204 rows, no data loss.</div></div>
+          <div class="age">8m</div>
+        </div>
+
+      </div>
+
+      <div class="foot">
+        <span>type to search</span><span class="sep">&#183;</span>
+        <span><kbd>Ctrl-J</kbd>/<kbd>Ctrl-K</kbd> move</span><span class="sep">&#183;</span>
+        <span><kbd>&#8629;</kbd> jump</span><span class="sep">&#183;</span>
+        <span class="hi"><kbd>Ctrl-Opt-J</kbd> open from anywhere</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- brand line, below the board -->
+  <div class="brand">
+    <div class="tl">One board for every agent, terminal, and job you run.</div>
+    <div class="in mono">brew install <span style="color:#EDEDED">dwmkerr/tools/signalbox</span></div>
+  </div>
+
+</div>
+</body></html>

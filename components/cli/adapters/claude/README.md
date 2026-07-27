@@ -10,6 +10,8 @@ on stdin and maps it per [specs/adapters.md](../../../specs/adapters.md):
 | `Stop` | done (reason `stop`) |
 | `Notification` (`permission_prompt` / `elicitation_dialog`) | attention |
 | `Notification` (`idle_prompt`) | done (reason `idle`) |
+| `PermissionRequest` | attention (reason `permission_request`) + `reply` = the actual ask, e.g. `Bash: git push` |
+| `PreToolUse` (matcher `AskUserQuestion`) | attention (reason `question`) + `reply` = the question and its options |
 | `StopFailure` | error (reason = `error_type`) |
 | `SessionEnd` | ended |
 

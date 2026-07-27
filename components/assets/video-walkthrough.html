@@ -1,0 +1,198 @@
+<!doctype html>
+<!--
+  signalbox walkthrough video (faithful reconstruction, NOT a screen recording).
+  Follows the accurate shot list in docs/launch-playbook.md. One 30s master loop;
+  every animated element is `animation: <kf> 30s ...` stepped by capture.js. This
+  is a "see what it looks like" preview; the honest asset is a real capture (see
+  the playbook). Captions in dwmkerr voice: dry, hyphens not em-dashes.
+-->
+<html><head><meta charset="utf-8"><title>signalbox - walkthrough</title>
+<style>
+  :root{color-scheme:dark}*{margin:0;padding:0;box-sizing:border-box}
+  html,body{background:#000}
+  body{display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif}
+  .stage{position:relative;width:1280px;height:720px;overflow:hidden;background:radial-gradient(120% 100% at 50% 0%, #232838 0%, #171a22 42%, #0c0d12 100%)}
+  .mono{font-family:'SF Mono',ui-monospace,Menlo,monospace}
+  .scene{position:absolute;inset:0;opacity:0}
+
+  /* menu bar top-right */
+  .menubar{position:absolute;top:0;left:0;right:0;height:26px;background:#0000004d;backdrop-filter:blur(8px);display:flex;align-items:center;padding:0 15px;z-index:2;color:#eef0f2;font-size:12.5px}
+  .menubar .right{margin-left:auto;display:flex;align-items:center;gap:14px}.menubar .sb svg{width:15px;height:15px;display:block}
+
+  /* ---------- caption ---------- */
+  .cap{position:absolute;left:50%;bottom:46px;transform:translateX(-50%);color:#eef0f2;font-size:20px;font-weight:500;text-align:center;width:84%;text-shadow:0 2px 24px #000,0 0 40px #000;z-index:15;opacity:0}
+  #c1{animation:c1 30s linear infinite}@keyframes c1{0%,2%{opacity:0}5%,23%{opacity:1}26%{opacity:0}100%{opacity:0}}
+  #c3{animation:c3 30s linear infinite}@keyframes c3{0%,31%{opacity:0}34%,44%{opacity:1}47%{opacity:0}100%{opacity:0}}
+  #c4{animation:c4 30s linear infinite}@keyframes c4{0%,48%{opacity:0}51%,61%{opacity:1}63%{opacity:0}100%{opacity:0}}
+  #c5{animation:c5 30s linear infinite}@keyframes c5{0%,66%{opacity:0}69%,80%{opacity:1}82%{opacity:0}100%{opacity:0}}
+  #c6{animation:c6 30s linear infinite}@keyframes c6{0%,85%{opacity:0}88%,96%{opacity:1}98%{opacity:0}100%{opacity:0}}
+
+  /* ---------- scene timing ---------- */
+  #windows{animation:sWin 30s linear infinite}
+  @keyframes sWin{0%{opacity:0}2%{opacity:1}27%{opacity:1}30%{opacity:.28}62%{opacity:.28}65%{opacity:0}100%{opacity:0}}
+  #kc{z-index:12;animation:sKc 30s linear infinite}
+  @keyframes sKc{0%,26%{opacity:0}28%,29%{opacity:1}31%{opacity:0}100%{opacity:0}}
+  #kc .keycap{animation:pKc 30s linear infinite}
+  @keyframes pKc{0%,26%{transform:translate(-50%,-50%) scale(.9)}28%{transform:translate(-50%,-50%) scale(1.05)}31%,100%{transform:translate(-50%,-50%) scale(1)}}
+  #board{z-index:10;animation:sBoard 30s linear infinite}
+  @keyframes sBoard{0%,29%{opacity:0}32%{opacity:1}62%{opacity:1}65%{opacity:0}100%{opacity:0}}
+  #pane{z-index:11;animation:sPane 30s linear infinite}
+  @keyframes sPane{0%,63%{opacity:0}66%{opacity:1}82%{opacity:1}85%{opacity:0}100%{opacity:0}}
+  #pane .win{animation:pPane 30s linear infinite}
+  @keyframes pPane{0%,63%{transform:translate(-50%,-50%) scale(.97)}66%,100%{transform:translate(-50%,-50%) scale(1)}}
+  #mp{z-index:11;animation:sMp 30s linear infinite}
+  @keyframes sMp{0%,84%{opacity:0}87%{opacity:1}97%{opacity:1}99%{opacity:0}100%{opacity:0}}
+
+  /* ---------- windows (triangle, static) ---------- */
+  .win{position:absolute;border-radius:11px;overflow:hidden;border:1px solid #ffffff2e;box-shadow:0 26px 64px rgba(0,0,0,.72),0 0 0 1px #00000060}
+  .tbar{height:32px;display:flex;align-items:center;padding:0 12px;gap:7px}
+  .tbar i{width:11px;height:11px;border-radius:50%;background:#5a5a5f}
+  .tbar i.r{background:#ff5f57}.tbar i.y{background:#febc2e}.tbar i.g{background:#28c840}
+  .tbar .ti{margin-left:8px;color:#c2c2c8;font-size:11.5px}
+  .cursor{left:360px;top:96px;width:560px;height:340px;z-index:3}
+  .ghost{left:96px;top:402px;width:482px;height:268px;z-index:2}
+  .iterm{left:704px;top:412px;width:520px;height:268px;z-index:1}
+  .iterm .tbar{background:#26262b}.ghost .tbar{background:#241f2b}.cursor .tbar{background:#333338}
+  .iterm .tabs{display:flex;background:#141417;border-bottom:1px solid #ffffff12;font-size:11.5px}
+  .iterm .tab{padding:7px 15px;color:#8a8a90;border-right:1px solid #ffffff10;display:flex;align-items:center;gap:7px;font-family:'SF Mono',ui-monospace,Menlo,monospace}
+  .iterm .tab.on{background:#0d0d11;color:#eaeaef}.iterm .tdot{width:8px;height:8px;border-radius:50%}
+  .term-body{background:#0d0d11;padding:12px 15px;font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:12px;line-height:1.7;color:#d0d0d6;overflow:hidden}
+  .iterm .term-body{height:calc(100% - 32px - 30px)}
+  .ghost .gbody{height:calc(100% - 32px);background:#120f18;padding:12px 15px;font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:12px;line-height:1.7;color:#d3cfe0;overflow:hidden}
+  .cc{color:#D97757}.co{color:#32D74B}.cp{color:#c39bff}.dim{color:#78787f}
+  .cursor .ide{display:flex;height:calc(100% - 32px - 24px);background:#1f1f1f}
+  .cursor .ex{width:150px;background:#191919;border-right:1px solid #00000050;padding:8px 0;font-size:11px}
+  .cursor .ex .hd{color:#9a9aa0;font-size:10px;letter-spacing:.08em;padding:2px 12px 6px}
+  .cursor .ex .f{color:#c0c0c6;padding:3px 12px 3px 22px}.cursor .ex .f.on{background:#2b2f31;color:#fff}
+  .cursor .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .cursor .etabs{display:flex;background:#191919;font-size:11px;border-bottom:1px solid #00000050}
+  .cursor .etab{padding:6px 14px;color:#9a9aa0}.cursor .etab.on{background:#1f1f1f;color:#eaeaef;border-top:2px solid #3FA266}
+  .cursor .code{flex:1;padding:10px 14px;font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:11.5px;line-height:1.8;color:#d4d4d4;min-width:0;overflow:hidden}
+  .kw{color:#c586c0}.fn{color:#dcdcaa}.ty{color:#4ec9b0}.cm{color:#6a9955}
+  .cursor .sbar{height:24px;background:#3FA266;display:flex;align-items:center;padding:0 12px;gap:14px;color:#eafff2;font-size:10.5px}
+
+  /* ---------- keycap ---------- */
+  .keycap{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:linear-gradient(#33333a,#26262b);color:#fff;font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:26px;font-weight:600;letter-spacing:.04em;padding:16px 26px;border-radius:14px;border:1px solid #ffffff33;border-bottom-width:4px;border-bottom-color:#ffffff14;box-shadow:0 14px 40px rgba(0,0,0,.75);white-space:nowrap}
+
+  /* ---------- board ---------- */
+  #board .scrim{position:absolute;inset:0;background:rgba(7,8,12,.66)}
+  #board .panel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:900px;background:linear-gradient(#232429,#191a1e);border:1px solid #ffffff2b;border-radius:16px;box-shadow:0 40px 90px rgba(0,0,0,.8),0 0 0 1px #00000080;overflow:hidden}
+  #board .head{display:flex;align-items:center;gap:12px;padding:15px 20px;border-bottom:1px solid #ffffff16}
+  #board .head .mk{width:22px;height:22px}#board .head .wm{color:#fff;font-size:15px;font-weight:600}
+  #board .head .se{color:#6a6a70;font-size:13.5px}#board .head .jp{margin-left:auto;color:#98989f;font-size:12.5px}
+  #board .rows{padding:8px;position:relative}
+  #board .r{position:relative;display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:10px;height:56px}
+  #board .r .dot{display:block;width:12px;height:12px;border-radius:50%;flex-shrink:0;box-sizing:border-box}
+  #board .r .dot.w{border:2px solid #ffffff2e;border-top-color:#d3d3d8;animation:ring 1s linear infinite}
+  @keyframes ring{to{transform:rotate(360deg)}}
+  #board .r .dot.a{background:#FF9F0A}#board .r .dot.b{background:#0A84FF}
+  #board .gl{width:24px;display:flex;justify-content:center;flex-shrink:0}
+  #board .t{color:#b7b7bd;font-size:15px}#board .t b{color:#fff;font-weight:600}
+  #board .d{color:#7c7c83;font-size:12.5px;margin-top:3px}
+  #board .age{margin-left:auto;color:#98989f;font-size:13px;flex-shrink:0}#board .txt{min-width:0}
+  #board .selpill{position:absolute;left:8px;right:8px;height:56px;border-radius:10px;background:#ffffff14;border:1px solid #ffffff20;animation:sel 30s linear infinite}
+  @keyframes sel{0%,33%{top:8px;opacity:0}35%{top:8px;opacity:1}49%{top:8px}53%{top:64px}62%{top:64px;opacity:1}65%{opacity:0}100%{opacity:0}}
+
+  /* ---------- pane (jump landed) ---------- */
+  #pane .win{left:50%;top:50%;width:760px;height:430px}
+  #pane .ans{opacity:0;animation:ans 30s linear infinite}
+  @keyframes ans{0%,74%{opacity:0}77%,100%{opacity:1}}
+
+  /* ---------- menubar + phone scene ---------- */
+  #mp .drop{position:absolute;top:30px;right:24px;width:340px;background:linear-gradient(#232429,#191a1e);border:1px solid #ffffff26;border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.7);padding:8px;font-size:13px}
+  #mp .drop .row{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px}
+  #mp .drop .row .dot{width:9px;height:9px;border-radius:50%}
+  #mp .drop .row .t{color:#e6e6ea}#mp .drop .row .ag{color:#8a8a90;font-size:11.5px}
+  #mp .phone{position:absolute;left:150px;top:150px;width:300px;height:600px;background:#000;border:2px solid #2a2a2e;border-radius:42px;padding:11px}
+  #mp .scr{width:100%;height:100%;background:#0b0b0d;border-radius:32px;padding:16px 14px;overflow:hidden}
+  #mp .island{width:92px;height:24px;background:#000;border-radius:13px;margin:2px auto 16px}
+  #mp .ph{color:#fff;font-size:18px;font-weight:700;text-align:center}
+  #mp .pc{color:#6E6E73;font-size:11px;text-align:center;margin:3px 0 15px}
+  #mp .card{display:flex;align-items:center;gap:9px;background:#141416;border:1px solid #ffffff1a;border-radius:12px;padding:11px 11px;margin-bottom:9px}
+  #mp .card .md{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+  #mp .card .mt{color:#fff;font-size:13.5px;font-weight:600}#mp .card .mtx{flex:1;min-width:0}
+  #mp .card .mdesc{color:#8e8e93;font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  @media (prefers-reduced-motion:reduce){*{animation:none!important}#windows,#kc,#pane,#mp,.cap{opacity:0!important}#board{opacity:1!important}#board .selpill{top:64px!important;opacity:1!important}}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="menubar"><span class="right"><span class="sb"><svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg></span><span>9:41</span></span></div>
+
+  <!-- SHOT 1: desktop, agents running -->
+  <div class="scene" id="windows">
+    <div class="win ghost"><div class="tbar"><i class="r"></i><i class="y"></i><i class="g"></i><span class="ti">Ghostty - codex</span></div>
+      <div class="gbody"><div><span class="cp">&gt;</span> add rate limiting to the gateway</div><div class="dim" style="margin-top:8px">- model: gpt-5.6-sol - working</div><div class="cp" style="margin-top:5px">&#9671; editing middleware/rate-limit.ts...</div></div></div>
+    <div class="win iterm"><div class="tbar"><i class="r"></i><i class="y"></i><i class="g"></i><span class="ti">iTerm - dev</span></div>
+      <div class="tabs"><div class="tab on"><span class="tdot" style="background:#D97757"></span>claude - writing-studio</div><div class="tab"><span class="tdot" style="background:#32D74B"></span>opencode - data-pipeline</div></div>
+      <div class="term-body"><div><span class="cc">&gt;</span> tidy up my writing-style config</div><div class="dim" style="margin-top:8px">Read writing-style.yml</div><div class="cc" style="margin-top:5px">Leavening... <span class="dim">(3s)</span></div></div></div>
+    <div class="win cursor"><div class="tbar"><i class="r"></i><i class="y"></i><i class="g"></i><span class="ti">Cursor - signalbox</span></div>
+      <div class="ide"><div class="ex"><div class="hd">EXPLORER</div><div class="f">README.md</div><div class="f on">auth.ts</div><div class="f">verify.ts</div></div>
+        <div class="main"><div class="etabs"><div class="etab on">auth.ts</div></div>
+          <div class="code"><div><span class="cm">// auth.ts</span></div><div><span class="kw">export async function</span> <span class="fn">login</span>(u, p) {</div><div>  <span class="kw">return</span> <span class="fn">issue</span>(<span class="kw">await</span> <span class="fn">verify</span>(u,p))</div><div>}</div></div></div></div>
+      <div class="sbar"><span>main</span><span>TypeScript</span></div></div>
+  </div>
+
+  <!-- SHOT 2: the shortcut -->
+  <div class="scene" id="kc"><div class="keycap">&#8963;&#8997;J</div></div>
+
+  <!-- SHOT 3+4: the board, selection moves to the one asking -->
+  <div class="scene" id="board">
+    <div class="scrim"></div>
+    <div class="panel">
+      <div class="head"><div class="mk"><svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg></div><div class="wm">signalbox</div><div class="se">Search sessions...</div><div class="jp">Jump &#8629;</div></div>
+      <div class="rows">
+        <div class="selpill"></div>
+        <div class="r"><span class="dot w"></span><div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div><div class="txt"><div class="t"><b>data-pipeline</b></div><div class="d">rebuild the columnar index</div></div><div class="age">4s</div></div>
+        <div class="r"><span class="dot a"></span><div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div><div class="txt"><div class="t"><b>writing-studio</b></div><div class="d" style="color:#dcbe80">Overwrite writing-style.yml? (Overwrite / Keep mine)</div></div><div class="age">9s</div></div>
+        <div class="r"><span class="dot w"></span><div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g fill="none" stroke="#B5B5BA" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M10 2.6 L16.4 6.3 L16.4 13.7 L10 17.4 L3.6 13.7 L3.6 6.3 Z"/><path d="M3.6 6.3 L10 10 L16.4 6.3"/><path d="M10 10 L10 17.4"/></g></svg></div><div class="txt"><div class="t"><b>auth.ts</b></div><div class="d">refactor the auth module to async/await</div></div><div class="age">15s</div></div>
+        <div class="r"><span class="dot w"></span><div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg></div><div class="txt"><div class="t"><b>api-gateway</b></div><div class="d">add rate limiting to the gateway</div></div><div class="age">31s</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHOT 5: jump landed in the pane; you answer there -->
+  <div class="scene" id="pane">
+    <div class="win iterm" style="transform:translate(-50%,-50%)">
+      <div class="tbar"><i class="r"></i><i class="y"></i><i class="g"></i><span class="ti">iTerm - dev - claude - writing-studio</span></div>
+      <div class="tabs"><div class="tab on"><span class="tdot" style="background:#D97757"></span>claude - writing-studio</div><div class="tab"><span class="tdot" style="background:#32D74B"></span>opencode - data-pipeline</div></div>
+      <div class="term-body" style="height:calc(100% - 32px - 30px);font-size:14px">
+        <div><span class="cc">&gt;</span> tidy up my writing-style config</div>
+        <div style="margin-top:12px">&#9744; <b>Config</b></div>
+        <div style="margin-top:7px">Overwrite writing-style.yml?</div>
+        <div style="border:1px solid #ffffff22;border-radius:6px;padding:9px 11px;margin-top:11px">
+          <div style="color:#FF9F0A">&gt; 1. Overwrite <span class="dim">- use the generated rules</span></div>
+          <div>&nbsp;&nbsp; 2. Keep mine <span class="dim">- leave my manual tone rules</span></div>
+        </div>
+        <div class="ans" style="margin-top:12px;color:#28c840">&#10003; you chose Overwrite - back to work</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHOT 6: menu bar + phone -->
+  <div class="scene" id="mp">
+    <div class="drop">
+      <div class="row"><span class="dot" style="background:#FF9F0A"></span><span class="t">writing-studio</span><span class="ag" style="margin-left:auto">claude - asking</span></div>
+      <div class="row"><span class="dot" style="border:2px solid #ffffff2e;border-top-color:#d3d3d8"></span><span class="t">data-pipeline</span><span class="ag" style="margin-left:auto">opencode - working</span></div>
+      <div class="row"><span class="dot" style="background:#0A84FF"></span><span class="t">release-notes</span><span class="ag" style="margin-left:auto">done</span></div>
+    </div>
+    <div class="phone"><div class="scr">
+      <div class="island"></div>
+      <div class="ph">signalbox</div><div class="pc">3 sessions - 2 machines</div>
+      <div class="card"><span class="md" style="background:#FF9F0A"></span><div class="mtx"><div class="mt">writing-studio</div><div class="mdesc" style="color:#dcbe80">Overwrite writing-style.yml?</div></div></div>
+      <div class="card"><span class="md" style="border:2px solid #ffffff2e;border-top-color:#d3d3d8"></span><div class="mtx"><div class="mt">data-pipeline</div><div class="mdesc">rebuild the columnar index</div></div></div>
+      <div class="card"><span class="md" style="background:#0A84FF"></span><div class="mtx"><div class="mt">release-notes</div><div class="mdesc">Draft ready - sixteen entries</div></div></div>
+    </div></div>
+  </div>
+
+  <!-- captions (dwmkerr voice) -->
+  <div class="cap" id="c1">Several agents run in separate windows, and you lose track of which one needs you.</div>
+  <div class="cap" id="c3">One board shows every session: working, done, or asking you a question.</div>
+  <div class="cap" id="c4">Arrow to the one asking. The board shows the actual question, not just "needs input".</div>
+  <div class="cap" id="c5">Enter jumps you to the pane, and you answer there. The board never answers for you.</div>
+  <div class="cap" id="c6">It runs in your menu bar, and on your phone (in testing).</div>
+
+</div>
+</body></html>

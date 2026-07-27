@@ -1,0 +1,297 @@
+<!doctype html>
+<!--
+  signalbox hero - "terminal-native". The jump board drawn as a TUI: monospace
+  throughout, a rounded box-drawing frame, braille spinners on the working rows,
+  agents coloured like ls output. One reactive moment on a 5s master loop: the
+  signalbox-hub row stops working and asks (Bash: git push...), the row flips to
+  amber, and the selection cursor lands on it. Braille spinners and the block
+  cursor run their own short loops; prefers-reduced-motion rests on the asked
+  frame. Every row is a real signalbox state - working, done, or a real ask -
+  taken from the jumplist spec. No invented command output.
+-->
+<html lang="en"><head><meta charset="utf-8">
+<title>signalbox - a terminal board for your agents</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='%23FF9F0A' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='2.4' fill='%23FF9F0A' stroke='none'/%3E%3Cpath d='M6.5 6.5 A 5 5 0 0 1 13.5 6.5'/%3E%3Cpath d='M6.5 13.5 A 5 5 0 0 0 13.5 13.5'/%3E%3Cpath d='M4.2 4.2 A 8 8 0 0 1 15.8 4.2' opacity='.55'/%3E%3Cpath d='M4.2 15.8 A 8 8 0 0 0 15.8 15.8' opacity='.55'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: dark;
+    --amber:#FF9F0A; --amber-lt:#FFC061; --blue:#0A84FF;
+    --frame:#50505b; --frame-dim:#3a3a42;
+    --dim:#63636a; --age:#9a9aa1; --sub:#7e7e85;
+    --name:#c9c9ce; --name-strong:#EDEDED;
+    --claude:#D97757; --codex:#10A37F; --opencode:#3FB950; --pi:#0A84FF; --github:#B5B5BA;
+    --mono:'SF Mono',ui-monospace,Menlo,'Cascadia Code',Consolas,monospace;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { background:#000; }
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+  .stage { position:relative; width:1280px; height:720px; overflow:hidden;
+           background:radial-gradient(120% 100% at 50% 12%, #202533 0%, #14161e 45%, #0b0c10 100%);
+           display:flex; align-items:center; justify-content:center; }
+
+  /* ---------- the terminal window: OS chrome, summoned over a near-black desktop ---------- */
+  .term { width:812px; border-radius:12px; overflow:hidden;
+          background:linear-gradient(#212228,#17181c); border:1px solid #ffffff26;
+          box-shadow:0 44px 100px rgba(0,0,0,.7), 0 8px 30px rgba(0,0,0,.55);
+          font-family:var(--mono); }
+  .titlebar { display:flex; align-items:center; height:34px; padding:0 14px;
+              border-bottom:1px solid #ffffff12; }
+  .lights { display:flex; gap:8px; }
+  .lights i { width:12px; height:12px; border-radius:50%; display:block; }
+  .titlebar .name { flex:1; text-align:center; color:#8b8b92; font-size:12.5px;
+                    display:flex; align-items:center; justify-content:center; gap:7px; letter-spacing:.2px; }
+  .titlebar .name svg { width:14px; height:14px; display:block; }
+  .titlebar .host { width:54px; text-align:right; color:#55555c; font-size:11px; }
+
+  .screen { padding:18px 20px 16px; font-size:13px; line-height:21px; color:var(--name); }
+
+  /* ---------- the TUI board: box-drawing frame + column-aligned rows ---------- */
+  .board { position:relative; }
+  .ln { display:flex; align-items:center; height:21px; white-space:nowrap; }
+  /* Frame glyphs render at font-size == line-height so the box-drawing chars
+     tile edge-to-edge (their em square fills the line box) - verticals join
+     into unbroken lines and the corners meet the rules, as in a real terminal. */
+  .br { flex:none; width:9px; text-align:center; color:var(--frame); font-size:21px; line-height:21px; }
+  .fill { flex:1; min-width:0; overflow:hidden; color:var(--frame); font-size:21px; line-height:21px; }
+  .fill::before { content:"────────────────────────────────────────────────────────────────────────────────────────"; }
+  .dash { font-size:21px; line-height:21px; }
+
+  /* title border: rounded corners, the mark's name notched in, shortcut on the right */
+  .ttl { color:var(--name-strong); font-weight:600; padding:0 2px; }
+  .kb { color:var(--amber); padding:0 2px; letter-spacing:.3px; }
+  .dash { color:var(--frame); }
+
+  /* search line */
+  .search { display:flex; align-items:center; flex:1; min-width:0; padding:0 6px; }
+  .search .mag { color:var(--dim); }
+  .search .ph { color:var(--dim); padding-left:8px; }
+  .search .jump { margin-left:auto; color:var(--age); }
+  .search .jump b { color:#c8c8ce; font-weight:400; }
+
+  /* column header */
+  .hdr .cell { color:var(--dim); font-size:10.5px; letter-spacing:1.2px; }
+
+  /* data rows share one column grid so the verticals stack into clean lines */
+  .cell { flex:none; }
+  .pad  { flex:none; width:6px; }
+  .st   { width:16px; text-align:center; }
+  .ag   { width:78px; padding-left:8px; overflow:hidden; }
+  .nm   { width:150px; padding-left:8px; overflow:hidden; text-overflow:ellipsis; }
+  .lt   { flex:1; min-width:0; padding-left:12px; overflow:hidden; text-overflow:ellipsis;
+          color:var(--sub); }
+  .age  { width:44px; padding:0 8px 0 12px; text-align:right; color:var(--age);
+          font-variant-numeric:tabular-nums; }
+
+  .ag.claude{color:var(--claude);} .ag.codex{color:var(--codex);}
+  .ag.opencode{color:var(--opencode);} .ag.pi{color:var(--pi);} .ag.github{color:var(--github);}
+  .nm.done{color:var(--name-strong); font-weight:600;}
+  .nm.work{color:var(--name);}
+  .dot{display:inline-block; width:8px; height:8px; border-radius:50%; vertical-align:1px;}
+  .dot.blue{background:var(--blue);} .dot.amber{background:var(--amber);}
+
+  /* braille spinner: a 10-frame stack clipped to one line, stepped */
+  .spin{display:inline-block; width:9px; height:21px; overflow:hidden; vertical-align:top; color:#d3d3d8;}
+  .spin .stk{animation:braille .9s steps(10) infinite;}
+  .spin .stk span{display:block; height:21px; text-align:center;}
+  @keyframes braille{ from{transform:translateY(0);} to{transform:translateY(-100%);} }
+
+  /* the rows region, with the moving selection cursor beneath the text */
+  .rows{ position:relative; }
+  .selbar{ position:absolute; left:9px; right:9px; top:0; height:21px; z-index:0;
+           background:#ffffff12; border-radius:5px; box-shadow:inset 2px 0 0 #d3d3d8;
+           animation:selmove 5s linear infinite; }
+  @keyframes selmove{
+    0%,36%   { top:0px;  box-shadow:inset 2px 0 0 #d3d3d8; background:#ffffff10; }
+    43%      { top:21px; box-shadow:inset 2px 0 0 var(--amber); background:#ffffff14; }
+    92%      { top:21px; box-shadow:inset 2px 0 0 var(--amber); background:#ffffff14; }
+    100%     { top:0px;  box-shadow:inset 2px 0 0 #d3d3d8; background:#ffffff10; }
+  }
+  .rows .ln{ position:relative; z-index:1; }
+
+  /* the flip row: working and asked layers stacked, cross-faded on the master loop */
+  .flip{ position:relative; height:21px; z-index:1; }
+  .flip .ln{ position:absolute; inset:0; }
+  .flip .work{ animation:workfade 5s linear infinite; }
+  .flip .ask { animation:askfade  5s linear infinite; }
+  @keyframes workfade{ 0%,36%{opacity:1;} 42%,92%{opacity:0;} 100%{opacity:1;} }
+  @keyframes askfade { 0%,36%{opacity:0;} 42%,92%{opacity:1;} 100%{opacity:0;} }
+  .flip .ask .nm{ color:var(--amber); font-weight:600; }
+  .flip .ask .lt{ color:var(--amber-lt); }
+
+  /* ---------- the install line, still inside the terminal ---------- */
+  .gap{ height:14px; }
+  .comment{ color:#6f8f79; }
+  .cmd{ display:flex; align-items:center; }
+  .cmd .p{ color:#5f6b62; padding-right:8px; }
+  .cmd .c{ color:var(--name-strong); }
+  .curblock{ display:inline-block; width:8px; height:15px; background:#EDEDED; margin-left:3px;
+             vertical-align:-2px; animation:blink 1.06s step-end infinite; }
+  @keyframes blink{ 0%{opacity:1;} 50%{opacity:0;} 100%{opacity:1;} }
+
+  @media (prefers-reduced-motion:reduce){
+    *{ animation:none !important; }
+    .spin .stk{ transform:translateY(0); }              /* rest on the first braille frame */
+    .selbar{ top:21px; box-shadow:inset 2px 0 0 var(--amber); background:#ffffff14; }
+    .flip .work{ opacity:0; } .flip .ask{ opacity:1; }  /* rest on the asked frame */
+    .curblock{ opacity:1; }
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="term">
+
+    <div class="titlebar">
+      <span class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span>
+      <span class="name">
+        <svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg>
+        signalbox &middot; agent board
+      </span>
+      <span class="host"></span>
+    </div>
+
+    <div class="screen">
+      <div class="board">
+
+        <!-- title border: name notched in, the summon shortcut on the right -->
+        <div class="ln">
+          <span class="br">&#9581;</span>
+          <span class="dash">&#9472;</span>
+          <span class="ttl">&#8202;signalbox&#8202;</span>
+          <span class="fill"></span>
+          <span class="kb">&#8202;&#8963;&#8997;J&#8202;</span>
+          <span class="dash">&#9472;</span>
+          <span class="br">&#9582;</span>
+        </div>
+
+        <!-- search line -->
+        <div class="ln">
+          <span class="br">&#9474;</span>
+          <span class="search">
+            <span class="mag">&#9906;</span><span class="ph">Search sessions&#8230;</span>
+            <span class="jump">jump <b>&#8629;</b></span>
+          </span>
+          <span class="br">&#9474;</span>
+        </div>
+
+        <!-- rule -->
+        <div class="ln"><span class="br">&#9500;</span><span class="fill"></span><span class="br">&#9508;</span></div>
+
+        <!-- column header -->
+        <div class="ln hdr">
+          <span class="br">&#9474;</span>
+          <span class="cell st"></span>
+          <span class="cell ag">AGENT</span>
+          <span class="cell nm">SESSION</span>
+          <span class="cell lt">LATEST</span>
+          <span class="cell age">AGE</span>
+          <span class="br">&#9474;</span>
+        </div>
+
+        <div class="rows">
+          <div class="selbar"></div>
+
+          <!-- row 1: done (blue reply) - selection rests here until the flip -->
+          <div class="ln">
+            <span class="br">&#9474;</span>
+            <span class="cell st"><span class="dot blue"></span></span>
+            <span class="cell ag claude">claude</span>
+            <span class="cell nm done">writing-studio-dashboard</span>
+            <span class="cell lt">Done - a per-post traffic panel with a 30-day sparkline, build green.</span>
+            <span class="cell age">2m</span>
+            <span class="br">&#9474;</span>
+          </div>
+
+          <!-- row 2: THE reactive moment - working flips to a real ask, selection lands -->
+          <div class="flip">
+            <div class="ln work">
+              <span class="br">&#9474;</span>
+              <span class="cell st"><span class="spin"><span class="stk"><span>&#10311;</span><span>&#10313;</span><span>&#10329;</span><span>&#10328;</span><span>&#10332;</span><span>&#10324;</span><span>&#10326;</span><span>&#10327;</span><span>&#10307;</span><span>&#10319;</span></span></span></span>
+              <span class="cell ag claude">claude</span>
+              <span class="cell nm work">signalbox-hub</span>
+              <span class="cell lt">push the branch and open the PR.</span>
+              <span class="cell age">58s</span>
+              <span class="br">&#9474;</span>
+            </div>
+            <div class="ln ask">
+              <span class="br">&#9474;</span>
+              <span class="cell st"><span class="dot amber"></span></span>
+              <span class="cell ag claude">claude</span>
+              <span class="cell nm">signalbox-hub</span>
+              <span class="cell lt">Bash: git push -u origin feat/attention-asks</span>
+              <span class="cell age">58s</span>
+              <span class="br">&#9474;</span>
+            </div>
+          </div>
+
+          <!-- row 3: working (codex) -->
+          <div class="ln">
+            <span class="br">&#9474;</span>
+            <span class="cell st"><span class="spin"><span class="stk" style="animation-delay:-.27s"><span>&#10311;</span><span>&#10313;</span><span>&#10329;</span><span>&#10328;</span><span>&#10332;</span><span>&#10324;</span><span>&#10326;</span><span>&#10327;</span><span>&#10307;</span><span>&#10319;</span></span></span></span>
+            <span class="cell ag codex">codex</span>
+            <span class="cell nm work">codex-mcp-server</span>
+            <span class="cell lt">wire the streaming endpoint into the MCP layer.</span>
+            <span class="cell age">22s</span>
+            <span class="br">&#9474;</span>
+          </div>
+
+          <!-- row 4: working (opencode) -->
+          <div class="ln">
+            <span class="br">&#9474;</span>
+            <span class="cell st"><span class="spin"><span class="stk" style="animation-delay:-.54s"><span>&#10311;</span><span>&#10313;</span><span>&#10329;</span><span>&#10328;</span><span>&#10332;</span><span>&#10324;</span><span>&#10326;</span><span>&#10327;</span><span>&#10307;</span><span>&#10319;</span></span></span></span>
+            <span class="cell ag opencode">opencode</span>
+            <span class="cell nm work">docs-site-astro</span>
+            <span class="cell lt">regenerate the search index after the content refactor.</span>
+            <span class="cell age">34s</span>
+            <span class="br">&#9474;</span>
+          </div>
+
+          <!-- row 5: done (pi) -->
+          <div class="ln">
+            <span class="br">&#9474;</span>
+            <span class="cell st"><span class="dot blue"></span></span>
+            <span class="cell ag pi">pi</span>
+            <span class="cell nm done">log-triage</span>
+            <span class="cell lt">Grouped 1,204 errors into 7 clusters - the top two are the same timeout.</span>
+            <span class="cell age">8m</span>
+            <span class="br">&#9474;</span>
+          </div>
+
+          <!-- row 6: done (github actions) -->
+          <div class="ln">
+            <span class="br">&#9474;</span>
+            <span class="cell st"><span class="dot blue"></span></span>
+            <span class="cell ag github">github</span>
+            <span class="cell nm done">claude-toolkit-deploy</span>
+            <span class="cell lt">Workflow run #9182 succeeded in 4m 12s - plugin published.</span>
+            <span class="cell age">21m</span>
+            <span class="br">&#9474;</span>
+          </div>
+        </div>
+
+        <!-- rule -->
+        <div class="ln"><span class="br">&#9500;</span><span class="fill"></span><span class="br">&#9508;</span></div>
+
+        <!-- footer keybar: teach the keys inline -->
+        <div class="ln">
+          <span class="br">&#9474;</span>
+          <span class="search" style="color:var(--dim); font-size:11.5px; letter-spacing:.2px;">
+            type to search &#183; &#8963;J/&#8963;K move &#183; &#8629; jump &#183; &#8963;&#8997;J open from anywhere
+          </span>
+          <span class="br">&#9474;</span>
+        </div>
+
+        <!-- bottom border -->
+        <div class="ln"><span class="br">&#9584;</span><span class="fill"></span><span class="br">&#9583;</span></div>
+      </div>
+
+      <!-- still inside the terminal: what it is, and how you get it -->
+      <div class="gap"></div>
+      <div class="comment"># One board for every agent, terminal, and job you run.</div>
+      <div class="cmd"><span class="p">$</span><span class="c">brew install dwmkerr/tools/signalbox</span><span class="curblock"></span></div>
+
+    </div>
+  </div>
+</div>
+</body></html>

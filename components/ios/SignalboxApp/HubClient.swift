@@ -1,5 +1,59 @@
 import Foundation
 import SwiftUI
+import CryptoKit
+import Security
+
+// CertPinner verifies a hub's self-signed TLS cert by pinning the SHA-256 of its
+// DER encoding - the fingerprint the pairing QR carried (#25). A self-signed cert
+// has no CA to chain to, so this pin IS the trust: match it or refuse. Without a
+// pin set, a server-trust challenge is refused outright, so the app never falls
+// back to unpinned TLS. Plain http (loopback dev, or a hand-entered hub) raises
+// no such challenge, so the delegate simply never fires for it.
+//
+// The fingerprint is read on URLSession's delegate queue, not the main actor, so
+// it is guarded by a lock and updated whenever the active hub changes.
+final class CertPinner: NSObject, URLSessionDelegate {
+    private let lock = NSLock()
+    private var pin: String?
+
+    init(fingerprint: String?) { pin = fingerprint?.lowercased() }
+
+    func setFingerprint(_ fingerprint: String?) {
+        lock.lock(); pin = fingerprint?.lowercased(); lock.unlock()
+    }
+
+    private var fingerprint: String? {
+        lock.lock(); defer { lock.unlock() }; return pin
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
+              let trust = challenge.protectionSpace.serverTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        guard let pin = fingerprint, !pin.isEmpty,
+              let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+              let leaf = chain.first else {
+            // A TLS server with no pin configured is exactly the MITM we refuse
+            // to trust: cancel rather than fall through to default validation,
+            // which would reject a self-signed cert anyway but less explicitly.
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+        let der = SecCertificateCopyData(leaf) as Data
+        let hex = SHA256.hash(data: der).map { String(format: "%02x", $0) }.joined()
+        if hex == pin {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        }
+    }
+}
 
 // What the board is showing, and how much to trust it. A remote hub needs the
 // network by contract, so a stale board that looks live is the one genuinely
@@ -35,6 +89,10 @@ struct HubConfig: Equatable {
     // reply on the hub and can forge events (see components/specs/ios.html).
     // Nil when the hub has no auth, which sends no Authorization header.
     var token: String?
+    // The SHA-256 pin for an https hub (#25); nil for a plain-http hub, which
+    // needs no pinning. Set from the pairing QR and carried into the URLSession's
+    // CertPinner so every request to this hub verifies the cert.
+    var fingerprint: String?
 
     // The name to show in the nav bar. Calling a hub "local" was a lie on a
     // phone: the hub is always another machine reached over the network, so the
@@ -69,18 +127,22 @@ final class HubClient: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var lastSeen: Date?
 
-    // The stream idles between events; the hub's 15s heartbeat keeps it under
-    // this. The macOS app solved this already - 90s is its verified value, and
-    // URLSession's 60s default would kill a quiet stream.
-    private let urlSession: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 90
-        config.waitsForConnectivity = false
-        return URLSession(configuration: config)
-    }()
+    // Pins the hub's self-signed cert on every request (#25). Its fingerprint
+    // tracks the active hub: set here from config, updated on reconfigure and
+    // pairing, cleared on disconnect.
+    private let pinner: CertPinner
+    private let urlSession: URLSession
 
     init(config: HubConfig) {
         self.config = config
+        self.pinner = CertPinner(fingerprint: config.fingerprint)
+        // The stream idles between events; the hub's 15s heartbeat keeps it under
+        // this. The macOS app solved this already - 90s is its verified value, and
+        // URLSession's 60s default would kill a quiet stream.
+        let sessionConfig = URLSessionConfiguration.default
+        sessionConfig.timeoutIntervalForRequest = 90
+        sessionConfig.waitsForConnectivity = false
+        self.urlSession = URLSession(configuration: sessionConfig, delegate: pinner, delegateQueue: nil)
     }
 
     func start() {
@@ -100,6 +162,9 @@ final class HubClient: ObservableObject {
         stop()
         config.url = URL(string: "http://127.0.0.1:8377")!
         config.token = nil
+        config.fingerprint = nil
+        pinner.setFingerprint(nil)
+        Keychain.delete(Keychain.hubFPAccount)
         sessions = []
         hosts = []
         lastSeq = 0
@@ -110,12 +175,21 @@ final class HubClient: ObservableObject {
     /// the old hub never looks like the new hub's answer. A changed token counts
     /// as a new hub too: a fresh token is exactly what turns a rejected hub live
     /// again without the url moving, and .rejected otherwise stops retrying.
-    func reconfigure(url: URL, token: String?) {
+    ///
+    /// fingerprint is the cert pin for an https hub, nil for plain http. It is
+    /// persisted here (not by the caller) so it always tracks the active url: a
+    /// scan sets it, a hand-entered http hub clears it, and a relaunch reads it
+    /// back alongside the url.
+    func reconfigure(url: URL, token: String?, fingerprint: String?) {
         let token = (token?.isEmpty ?? true) ? nil : token
-        guard url != config.url || token != config.token else { return }
+        let fingerprint = (fingerprint?.isEmpty ?? true) ? nil : fingerprint
+        guard url != config.url || token != config.token || fingerprint != config.fingerprint else { return }
         stop()
         config.url = url
         config.token = token
+        config.fingerprint = fingerprint
+        pinner.setFingerprint(fingerprint)
+        Keychain.set(fingerprint ?? "", account: Keychain.hubFPAccount)
         sessions = []
         hosts = []
         lastSeq = 0
@@ -133,19 +207,32 @@ final class HubClient: ObservableObject {
     /// came from outside the app. Shipping the real token to an attacker's URL
     /// is exactly the failure a pairing flow must not have, so the redeem POST
     /// carries no Authorization header at all - only the one-time code.
-    func pair(url: URL, code: String) async throws {
+    func pair(url: URL, code: String, fingerprint: String?) async throws {
         var request = URLRequest(url: url.appendingPathComponent("pair"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["code": code])
 
+        // The redeem rides the hub's own https, so it must be pinned to the new
+        // hub's fingerprint - which the app has not adopted yet. Use a throwaway
+        // session pinned to exactly that fingerprint rather than the live one,
+        // whose pin still belongs to the previous hub (or is nil).
+        let redeemSession = URLSession(
+            configuration: .ephemeral,
+            delegate: CertPinner(fingerprint: fingerprint),
+            delegateQueue: nil
+        )
+        defer { redeemSession.finishTasksAndInvalidate() }
+
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await urlSession.data(for: request)
+            (data, response) = try await redeemSession.data(for: request)
         } catch {
             // A transport failure here is almost always the phone and the
-            // computer being on different networks, so name the host.
+            // computer being on different networks, so name the host. A pin
+            // mismatch also lands here (the TLS handshake is cancelled), which is
+            // the same "could not reach it safely" story to a person.
             throw PairError.unreachable(url.host ?? "the hub")
         }
         guard let http = response as? HTTPURLResponse else { throw PairError.rejected }
@@ -159,7 +246,7 @@ final class HubClient: ObservableObject {
         }
         let token = decoded.token.isEmpty ? nil : decoded.token
         Keychain.set(decoded.token, account: Keychain.hubTokenAccount)
-        reconfigure(url: url, token: token)
+        reconfigure(url: url, token: token, fingerprint: fingerprint)
     }
 
     private func request(_ path: String, query: [URLQueryItem] = []) -> URLRequest? {

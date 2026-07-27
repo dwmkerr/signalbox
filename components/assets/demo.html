@@ -1,0 +1,140 @@
+<!doctype html>
+<!--
+  signalbox hero - the product IS the pitch. Press Ctrl-Opt-J, the jump box
+  appears with every session's live status (one is asking; the rest are
+  working); it holds. No desktop, no windows, no story - just the board.
+  One 4.5s master loop; every animated element is `animation: <kf> 4.5s ...`
+  with % stops, stepped by Playwright via Animation.currentTime (capture.js).
+  prefers-reduced-motion shows the board, held.
+-->
+<html><head><meta charset="utf-8"><title>signalbox - one board for every agent you run</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='%23FF9F0A' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='2.4' fill='%23FF9F0A' stroke='none'/%3E%3Cpath d='M6.5 6.5 A 5 5 0 0 1 13.5 6.5'/%3E%3Cpath d='M6.5 13.5 A 5 5 0 0 0 13.5 13.5'/%3E%3Cpath d='M4.2 4.2 A 8 8 0 0 1 15.8 4.2' opacity='.55'/%3E%3Cpath d='M4.2 15.8 A 8 8 0 0 0 15.8 15.8' opacity='.55'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { background:#000; }
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+  .stage { position:relative; width:1280px; height:720px; overflow:hidden;
+           background:radial-gradient(120% 100% at 50% 12%, #202533 0%, #14161e 45%, #0b0c10 100%);
+           display:flex; flex-direction:column; align-items:center; justify-content:center; gap:26px; }
+  .mono { font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* the shortcut, pressed once, then it hands off to the board */
+  .keycap { position:absolute; top:118px; left:50%; transform:translate(-50%,-50%) scale(.9);
+        background:linear-gradient(#33333a,#26262b); color:#fff; font-family:'SF Mono',ui-monospace,Menlo,monospace;
+        font-size:24px; font-weight:600; letter-spacing:.04em; padding:14px 24px; border-radius:13px;
+        border:1px solid #ffffff33; border-bottom-width:4px; border-bottom-color:#ffffff14;
+        box-shadow:0 14px 40px rgba(0,0,0,.7); opacity:0; animation:kc 4.5s ease-in-out infinite; }
+  @keyframes kc{0%{opacity:0;transform:translate(-50%,-50%) scale(.9)}4%{opacity:1;transform:translate(-50%,-50%) scale(1)}
+      9%{transform:translate(-50%,-50%) scale(1.06)}14%{opacity:1;transform:translate(-50%,-50%) scale(1)}
+      20%{opacity:0}96%{opacity:0}100%{opacity:0}}
+
+  /* the board - the hero. scales in, then holds for the whole loop */
+  .board { width:940px; opacity:0; transform:translateY(8px) scale(.975); transform-origin:50% 40%;
+        animation:brd 4.5s ease-out infinite; }
+  @keyframes brd{0%,14%{opacity:0;transform:translateY(8px) scale(.975)}
+      22%{opacity:1;transform:translateY(0) scale(1)}95%{opacity:1;transform:translateY(0) scale(1)}
+      99%{opacity:0}100%{opacity:0}}
+  .panel { background:linear-gradient(#212228,#17181c); border:1px solid #ffffff26; border-radius:18px;
+        box-shadow:0 44px 100px rgba(0,0,0,.7), 0 0 0 1px #00000070; overflow:hidden; }
+  .head { display:flex; align-items:center; gap:13px; padding:17px 22px; border-bottom:1px solid #ffffff14; }
+  .head .mk { width:23px; height:23px; }
+  .head .wm { color:#fff; font-size:16px; font-weight:600; }
+  .head .se { color:#63636a; font-size:14px; }
+  .head .jp { margin-left:auto; color:#9a9aa1; font-size:13px; }
+  .rows { padding:9px; position:relative; }
+  .r { position:relative; display:flex; align-items:center; gap:15px; padding:14px 18px; border-radius:11px; height:60px; }
+  .r .dot { display:block; width:12px; height:12px; border-radius:50%; flex-shrink:0; box-sizing:border-box; }
+  .r .dot.w { border:2px solid #ffffff2e; border-top-color:#d3d3d8; animation:ring 1s linear infinite; }
+  @keyframes ring { to { transform:rotate(360deg); } }
+  .r .dot.b { background:#0A84FF; } .r .dot.a { background:#FF9F0A; }
+  .r .gl { width:25px; display:flex; justify-content:center; flex-shrink:0; }
+  .r .t { color:#b9b9bf; font-size:15.5px; } .r .t b { color:#fff; font-weight:600; }
+  .r .d { color:#7e7e85; font-size:13px; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .r .age { margin-left:auto; color:#9a9aa1; font-size:13.5px; flex-shrink:0; }
+  .r .txt { min-width:0; }
+  /* a resting selection on the one that needs you */
+  .r.sel { background:#ffffff10; }
+  .r.sel::before { content:""; position:absolute; inset:0; border:1px solid #ffffff1e; border-radius:11px; }
+  .foot { display:flex; gap:18px; padding:12px 22px; border-top:1px solid #ffffff12; color:#63636a; font-size:12px;
+        font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .foot .sp { margin-left:auto; }
+  .foot kbd { color:#8a8a90; }
+
+  .tagline { text-align:center; opacity:0; animation:tag 4.5s ease-out infinite; }
+  @keyframes tag{0%,22%{opacity:0}30%{opacity:1}95%{opacity:1}99%{opacity:0}100%{opacity:0}}
+  .tagline .tl { color:#c3c3c9; font-size:17px; }
+  .tagline .tl b { color:#fff; font-weight:600; }
+  .tagline .in { margin-top:13px; display:inline-block; background:#16161a; border:1px solid #ffffff1c;
+        border-radius:10px; padding:11px 19px; color:#EDEDED; font-size:14.5px; }
+  .tagline .in .d { color:#75757c; }
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important}
+    .keycap{opacity:0!important} .board,.tagline{opacity:1!important;transform:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="keycap">⌃⌥J</div>
+
+  <div class="board">
+    <div class="panel">
+      <div class="head">
+        <div class="mk"><svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg></div>
+        <div class="wm">signalbox</div>
+        <div class="se">Search sessions…</div>
+        <div class="jp">Jump ⏎</div>
+      </div>
+      <div class="rows">
+
+        <!-- the one that needs you: a real question, selected -->
+        <div class="r sel">
+          <span class="dot a"></span>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+          <div class="txt"><div class="t"><b>writing-studio</b></div><div class="d" style="color:#dcbe80">Overwrite writing-style.yml? (Overwrite / Keep mine)</div></div>
+          <div class="age">9s</div>
+        </div>
+
+        <!-- finished -->
+        <div class="r">
+          <span class="dot b"></span>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <div class="txt"><div class="t"><b>release-notes</b></div><div class="d">Draft ready — three sections, sixteen entries.</div></div>
+          <div class="age">1m</div>
+        </div>
+
+        <!-- working -->
+        <div class="r">
+          <span class="dot w"></span>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+          <div class="txt"><div class="t"><b>api-gateway</b></div><div class="d">add rate limiting to the gateway</div></div>
+          <div class="age">4s</div>
+        </div>
+
+        <!-- working -->
+        <div class="r">
+          <span class="dot w"></span>
+          <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g fill="none" stroke="#B5B5BA" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M10 2.6 L16.4 6.3 L16.4 13.7 L10 17.4 L3.6 13.7 L3.6 6.3 Z"/><path d="M3.6 6.3 L10 10 L16.4 6.3"/><path d="M10 10 L10 17.4"/></g></svg></div>
+          <div class="txt"><div class="t"><b>auth.ts</b></div><div class="d">refactor the auth module to async/await</div></div>
+          <div class="age">15s</div>
+        </div>
+
+      </div>
+      <div class="foot mono">
+        <span>type to search</span><span><kbd>⌃J</kbd>/<kbd>⌃K</kbd> move</span><span><kbd>⏎</kbd> jump</span>
+        <span class="sp"><kbd>⌃⌥J</kbd> open from anywhere</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="tagline">
+    <div class="tl">One board for every agent, terminal, and job you run.</div>
+    <div class="in mono">brew install <span style="color:#EDEDED">dwmkerr/tools/signalbox</span></div>
+  </div>
+
+</div>
+</body></html>

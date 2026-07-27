@@ -111,9 +111,13 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
             ))
             return
         }
-        let port = hubURL.port ?? 8377
-        let lanURL = "http://\(ip):\(port)"
-        let deepLink = Self.pairDeepLink(url: lanURL, code: response.code)
+        // A fingerprint means the LAN listener is TLS: the phone dials https on
+        // the port the hub advertised and pins that cert. Without one the hub is
+        // plain http on the loopback port, as before (openssl-less fallback).
+        let scheme = response.fp != nil ? "https" : "http"
+        let port = response.fp != nil ? (response.port ?? ((hubURL.port ?? 8377) + 1)) : (hubURL.port ?? 8377)
+        let lanURL = "\(scheme)://\(ip):\(port)"
+        let deepLink = Self.pairDeepLink(url: lanURL, code: response.code, fingerprint: response.fp)
         guard let qr = Self.qrImage(from: deepLink, points: 240) else {
             render(.error("Could not render the pairing code."))
             return
@@ -255,15 +259,18 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
 
     // MARK: - Deep link, QR, LAN IP
 
-    // signalbox://pair?url=<percent-encoded http URL>&code=<code> per the iOS
-    // spec: `pair` rides in the host (a custom scheme has no authority of its
-    // own), the url is the hub to redeem against, the code is single-use.
-    private static func pairDeepLink(url: String, code: String) -> String {
+    // signalbox://pair?url=<percent-encoded url>&code=<code>[&fp=<hex>] per the
+    // iOS spec: `pair` rides in the host (a custom scheme has no authority of its
+    // own), the url is the hub to redeem against, the code is single-use, and fp
+    // (present for an https hub) is the cert pin the phone verifies (#25).
+    private static func pairDeepLink(url: String, code: String, fingerprint: String?) -> String {
         var unreserved = CharacterSet.alphanumerics
         unreserved.insert(charactersIn: "-._~")
         let encodedURL = url.addingPercentEncoding(withAllowedCharacters: unreserved) ?? url
         let encodedCode = code.addingPercentEncoding(withAllowedCharacters: unreserved) ?? code
-        return "signalbox://pair?url=\(encodedURL)&code=\(encodedCode)"
+        var link = "signalbox://pair?url=\(encodedURL)&code=\(encodedCode)"
+        if let fp = fingerprint, !fp.isEmpty { link += "&fp=\(fp)" }
+        return link
     }
 
     // Render the deep link as a QR. CIQRCodeGenerator emits one pixel per
@@ -481,11 +488,17 @@ struct PairNewResponse: Decodable {
     let code: String
     let expiresIn: Int?
     let bind: String?
+    // Present when the hub's LAN listener is TLS (#25): the cert pin and the port
+    // that listener is on. Their presence flips the QR to an https url on `port`.
+    let fp: String?
+    let port: Int?
 
     enum CodingKeys: String, CodingKey {
         case code
         case expiresIn = "expires_in"
         case bind
+        case fp
+        case port
     }
 }
 

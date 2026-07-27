@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  mapClaudeHook, stripHarness, claudeReply, lastAssistantText, sessionName,
+  mapClaudeHook, stripHarness, claudeReply, lastAssistantText, sessionName, formatAsk,
 } from "../src/claude";
 
 const fixture = join(import.meta.dir, "testdata", "transcript.jsonl");
@@ -25,6 +25,15 @@ describe("mapClaudeHook", () => {
     [{ hook_event_name: "Notification" }, { eventType: "attention", reason: "notification" }],
     [{ hook_event_name: "StopFailure", error_type: "max_turns" }, { eventType: "error", reason: "max_turns" }],
     [{ hook_event_name: "SessionEnd" }, { eventType: "ended", reason: "session_end" }],
+    // The permission dialog is up: attention with the rich reason.
+    [{ hook_event_name: "PermissionRequest", tool_name: "Bash" }, { eventType: "attention", reason: "permission_request" }],
+    // AskUserQuestion rides the permission system - PermissionRequest fires
+    // for it too, and must keep the "question" flavor.
+    [{ hook_event_name: "PermissionRequest", tool_name: "AskUserQuestion" }, { eventType: "attention", reason: "question" }],
+    // PreToolUse maps only for AskUserQuestion (matcher-scoped in settings);
+    // any other tool is ignored - it fires for every tool call.
+    [{ hook_event_name: "PreToolUse", tool_name: "AskUserQuestion" }, { eventType: "attention", reason: "question" }],
+    [{ hook_event_name: "PreToolUse", tool_name: "Bash" }, null],
     [{ hook_event_name: "PreToolUse" }, null],
   ];
   for (const [input, want] of cases) {
@@ -151,6 +160,59 @@ describe("claudeReply", () => {
   });
   test("no transcript path is empty", () => {
     expect(claudeReply({ hook_event_name: "Stop" })).toBe("");
+  });
+  test("PermissionRequest carries the actual ask, never the transcript", () => {
+    // Payload shape captured live from Claude Code v2.1.218 while the dialog
+    // was pending (scratch experiment, 2026-07-23).
+    const got = claudeReply({
+      hook_event_name: "PermissionRequest",
+      tool_name: "Bash",
+      tool_input: { command: "rm test-file.txt", description: "Delete test-file.txt" },
+      transcript_path: fixture,
+    });
+    expect(got).toBe("Bash: rm test-file.txt");
+  });
+  test("PreToolUse AskUserQuestion carries the question and options", () => {
+    const got = claudeReply({
+      hook_event_name: "PreToolUse",
+      tool_name: "AskUserQuestion",
+      tool_input: {
+        questions: [{
+          question: "Which animal do you prefer?",
+          header: "Animal",
+          options: [{ label: "Cat", description: "Prefer cats" }, { label: "Dog", description: "Prefer dogs" }],
+          multiSelect: false,
+        }],
+      },
+    });
+    expect(got).toBe("Which animal do you prefer? (Cat / Dog)");
+  });
+});
+
+describe("formatAsk", () => {
+  test("Write is summarized to its path - never content", () => {
+    const got = formatAsk("Write", { file_path: "/tmp/x/notes.md", content: "SECRET BODY" });
+    expect(got).toBe("Write: /tmp/x/notes.md");
+    expect(got.includes("SECRET")).toBe(false);
+  });
+  test("Bash shows the command over its description", () => {
+    expect(formatAsk("Bash", { command: "git push", description: "Push branch" })).toBe("Bash: git push");
+  });
+  test("a tool with no known target field shows the tool alone", () => {
+    expect(formatAsk("WebSearch", { max_results: 5 })).toBe("WebSearch");
+  });
+  test("multiple questions join with a separator", () => {
+    const got = formatAsk("AskUserQuestion", {
+      questions: [
+        { question: "Auth method?", options: [{ label: "JWT" }, { label: "Sessions" }] },
+        { question: "Deploy now?", options: [] },
+      ],
+    });
+    expect(got).toBe("Auth method? (JWT / Sessions) · Deploy now?");
+  });
+  test("malformed input degrades to empty, never throws", () => {
+    expect(formatAsk("AskUserQuestion", { questions: "nope" } as any)).toBe("");
+    expect(formatAsk("", {})).toBe("");
   });
 });
 

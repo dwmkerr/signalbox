@@ -1,0 +1,327 @@
+<!doctype html>
+<!--
+  signalbox hero - "Over Windows". The board is summoned Spotlight-style over a
+  real, running desktop: an iTerm window with Claude, a Ghostty window with
+  Codex, and a Cursor editor GUI. Those windows sit behind glass - frosted and
+  dimmed - so they read as actual apps you left running, not decoration. The
+  signalbox board floats crisp and in focus on top, one amber ask selected: a
+  file-overwrite question from the agent working in Cursor.
+
+  This is a static hero. The still captures the payoff - the board over the
+  desktop with one row that needs you - so it does not animate the reveal. Only
+  the working spinners turn (a small, honest continuous motion), and they rest
+  under prefers-reduced-motion.
+-->
+<html lang="en"><head><meta charset="utf-8">
+<title>signalbox - one board over every agent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='%23FF9F0A' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='2.4' fill='%23FF9F0A' stroke='none'/%3E%3Cpath d='M6.5 6.5 A 5 5 0 0 1 13.5 6.5'/%3E%3Cpath d='M6.5 13.5 A 5 5 0 0 0 13.5 13.5'/%3E%3Cpath d='M4.2 4.2 A 8 8 0 0 1 15.8 4.2' opacity='.55'/%3E%3Cpath d='M4.2 15.8 A 8 8 0 0 0 15.8 15.8' opacity='.55'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { background:#000; }
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh;
+         font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif; }
+  .stage { position:relative; width:1280px; height:720px; overflow:hidden;
+           background:radial-gradient(120% 100% at 50% 12%, #202533 0%, #14161e 45%, #0b0c10 100%); }
+  .mono { font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* ---------- BEHIND: the real running desktop, frosted + dimmed ---------- */
+  .desk { position:absolute; inset:0; z-index:1;
+          filter:blur(6.5px) brightness(.5) saturate(.88); will-change:filter; }
+  .win { position:absolute; border-radius:10px; overflow:hidden; border:1px solid #ffffff26;
+         box-shadow:0 34px 70px rgba(0,0,0,.6); background:#0d0d11; }
+  .win .bar { height:28px; display:flex; align-items:center; gap:9px; padding:0 12px;
+              font-size:11px; color:#9a9aa1; letter-spacing:.2px; }
+  .win .bar .lights { display:flex; gap:6px; }
+  .win .bar .lights i { width:11px; height:11px; border-radius:50%; display:block; }
+  .win .bar .ttl { flex:1; text-align:center; margin-right:46px; overflow:hidden; white-space:nowrap;
+                   text-overflow:ellipsis; }
+  .win .scr { padding:11px 14px; font-family:'SF Mono',ui-monospace,Menlo,monospace;
+              font-size:12px; line-height:1.72; color:#c3c3c8; }
+  .win .scr .pr { color:#5f6b62; } .win .scr .amb { color:#FF9F0A; }
+  .win .scr .grn { color:#32D74B; } .win .scr .blu { color:#5aa9ff; } .win .scr .dim { color:#6f6f77; }
+  .win .scr .org { color:#D97757; } .win .scr .tl { color:#10A37F; }
+  .win.iterm .bar { background:#26262b; } .win.ghostty .bar { background:#211d28; }
+
+  /* the Cursor editor GUI - the piece that says "these are real apps, not just terminals" */
+  .cursor { background:#1b1c20; }
+  .cursor .bar { background:#26272c; }
+  .cursor .tabs { display:flex; height:30px; background:#1e1f24; border-bottom:1px solid #000;
+                  font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px; }
+  .cursor .tabs .tab { display:flex; align-items:center; gap:7px; padding:0 15px; color:#75757c;
+                       border-right:1px solid #000; }
+  .cursor .tabs .tab.on { background:#1b1c20; color:#d7d7dc; box-shadow:inset 0 2px 0 #FF9F0A; }
+  .cursor .tabs .tab i { width:8px; height:8px; border-radius:50%; background:#FF9F0A; display:block; }
+  .cursor .work { display:flex; height:calc(100% - 58px); }
+  .cursor .rail { width:44px; background:#191a1e; border-right:1px solid #000;
+                  display:flex; flex-direction:column; align-items:center; gap:16px; padding-top:12px; }
+  .cursor .rail b { width:18px; height:18px; border-radius:4px; display:block; background:#2c2d33; }
+  .cursor .rail b.act { background:#3a3b42; box-shadow:inset 2px 0 0 #FF9F0A; }
+  .cursor .tree { width:150px; background:#1a1b1f; border-right:1px solid #000; padding:10px 12px;
+                  font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#8b8b92; line-height:2.05; }
+  .cursor .tree .f { color:#9aa4b0; } .cursor .tree .on { color:#f0d49a; } .cursor .tree .in { padding-left:12px; }
+  .cursor .code { flex:1; padding:12px 0 12px 8px; font-family:'SF Mono',ui-monospace,Menlo,monospace;
+                  font-size:12px; line-height:1.85; overflow:hidden; }
+  .cursor .code .ln { display:flex; gap:14px; white-space:pre; }
+  .cursor .code .ln .n { color:#4c4d54; width:18px; text-align:right; flex-shrink:0; }
+  .cursor .code .k { color:#5aa9ff; } .cursor .code .s { color:#8fd98f; } .cursor .code .c { color:#5f6068; }
+  .cursor .code .p { color:#c9a26a; }
+  .cursor .chat { width:224px; background:#17181c; border-left:1px solid #000; padding:12px 14px;
+                  font-family:-apple-system,sans-serif; font-size:11px; color:#a6a6ad; line-height:1.6; }
+  .cursor .chat .u { color:#7e7e85; } .cursor .chat .amb { color:#FF9F0A; margin-top:10px; display:block; }
+  .cursor .chat .opt { margin-top:9px; font-family:'SF Mono',ui-monospace,Menlo,monospace; color:#c9c9cf; }
+  .cursor .stat { height:22px; background:#0A84FF; display:flex; align-items:center; gap:16px; padding:0 12px;
+                  font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#e8f1ff; }
+
+  .tmuxbar { position:absolute; left:0; right:0; bottom:0; height:22px; background:#2f7d4f;
+             color:#dff5e6; font-size:11px; display:flex; align-items:center; gap:14px; padding:0 12px;
+             font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+
+  /* the dim + vignette that pushes the desktop out of attention and lifts the board */
+  .dim { position:absolute; inset:0; z-index:2; pointer-events:none;
+         background:radial-gradient(120% 105% at 50% 40%, rgba(6,7,10,.16) 0%, rgba(6,7,10,.58) 58%, rgba(3,4,7,.93) 100%);
+         opacity:.82; }
+
+  /* ---------- ON TOP: the crisp signalbox board ---------- */
+  .board { position:absolute; z-index:4; top:120px; left:50%; width:848px;
+           transform:translateX(-50%); }
+  .panel { background:linear-gradient(#212228,#17181c); border:1px solid #ffffff26; border-radius:16px;
+           box-shadow:0 44px 100px rgba(0,0,0,.7), 0 12px 44px rgba(0,0,0,.5), 0 0 0 1px #00000055;
+           overflow:hidden; }
+
+  .head { display:flex; align-items:center; gap:12px; height:48px; padding:0 20px;
+          border-bottom:1px solid #ffffff14; }
+  .head .mk svg { width:22px; height:22px; display:block; }
+  .head .wm { color:#fff; font-size:15px; font-weight:600; }
+  .head .search { flex:1; display:flex; align-items:center; margin:0 6px; min-width:0; }
+  .head .search .caret { width:1.5px; height:16px; background:#EDEDED; margin-right:6px; flex-shrink:0;
+                         animation:blink 1.06s step-end infinite; }
+  @keyframes blink { 0% { opacity:1 } 50% { opacity:0 } 100% { opacity:1 } }
+  .head .search .ph { color:#63636a; font-size:14px; white-space:nowrap; }
+  .head .jp { color:#9a9aa1; font-size:13px; flex-shrink:0; }
+  .head .jp kbd { color:#c8c8ce; }
+
+  .body { display:flex; }
+  .list { width:432px; height:318px; border-right:1px solid #ffffff14; padding:8px; overflow:hidden; }
+  .r { position:relative; display:flex; align-items:center; gap:13px; height:50px; padding:0 12px;
+       border-radius:10px; overflow:hidden; }
+  .r.sel { background:#2C2C31; }
+  .r.sel::after { content:""; position:absolute; inset:0; border:1px solid #ffffff1e; border-radius:10px; pointer-events:none; }
+  .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
+  .dot { width:9px; height:9px; border-radius:50%; box-sizing:border-box; }
+  .dot.a { background:#FF9F0A; box-shadow:0 0 0 4px #FF9F0A1f; }
+  .dot.b { background:#0A84FF; }
+  .spin { width:12px; height:12px; border-radius:50%; border:2px solid #ffffff2e; border-top-color:#d3d3d8;
+          animation:rotate .9s linear infinite; }
+  @keyframes rotate { to { transform:rotate(360deg) } }
+  .gl { width:22px; display:flex; justify-content:center; flex-shrink:0; }
+  .gl svg { display:block; }
+  .txt { flex:1; min-width:0; }
+  .txt .t { font-size:14.5px; color:#c3c3c9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .txt .t b { color:#fff; font-weight:600; }
+  .r.sel .txt .t, .r.sel .txt .t b { color:#fff; }
+  .txt .d { font-size:12px; color:#7e7e85; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .r.sel .txt .d { color:#d7bf88; }
+  .age { color:#9a9aa1; font-size:12.5px; flex-shrink:0; font-variant-numeric:tabular-nums; }
+
+  .preview { flex:1; background:#000; padding:18px 22px; }
+  .term { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:12px; line-height:1.75; color:#C8C8CC; }
+  .term .you { color:#98989D; white-space:pre-wrap; }
+  .term .you::before { content:"\276F "; color:#5A5A5F; }
+  .term .gap { height:13px; }
+  .term .resp { display:flex; gap:8px; }
+  .term .resp .b { color:#FF9F0A; } .term .resp .body-t { white-space:pre-wrap; color:#E4D6B4; }
+  .term .opts { margin-top:12px; display:flex; gap:10px; }
+  .term .opts .o { border:1px solid #ffffff26; border-radius:7px; padding:5px 13px; font-size:11.5px; color:#c8c8ce; }
+  .term .opts .o.on { border-color:#FF9F0A66; background:#FF9F0A14; color:#FF9F0A; }
+  .term .actline { margin-top:20px; font-size:11px; color:#6E6E73;
+                   font-family:-apple-system,sans-serif; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .term .actline kbd { color:#c8c8ce; }
+  .term .actline .need { color:#FF9F0A; font-weight:600; }
+  kbd { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:.92em; }
+
+  .foot { display:flex; align-items:center; height:36px; padding:0 20px; gap:16px;
+          border-top:1px solid #ffffff12; color:#63636a; font-size:11.5px;
+          font-family:'SF Mono',ui-monospace,Menlo,monospace; }
+  .foot .sep { color:#3a3a40; }
+  .foot kbd { color:#8a8a90; }
+
+  /* ---------- BELOW: brand line + brew, over the frosted desktop ---------- */
+  .brand { position:absolute; z-index:5; top:588px; left:0; right:0; text-align:center; }
+  .brand .tl { color:#c3c3c9; font-size:16.5px; } .brand .tl b { color:#fff; font-weight:600; }
+  .brand .in { margin-top:13px; display:inline-block; background:#141418; border:1px solid #ffffff1c;
+               border-radius:10px; padding:10px 18px; color:#EDEDED; font-size:14px;
+               box-shadow:0 10px 34px rgba(0,0,0,.45); }
+  .brand .in .d { color:#75757c; }
+
+  @media (prefers-reduced-motion:reduce) {
+    * { animation:none !important; }
+    .head .search .caret { opacity:1 !important; }
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- BEHIND: a real desktop left running - two agent terminals and a Cursor editor -->
+  <div class="desk">
+
+    <!-- iTerm running Claude, working -->
+    <div class="win iterm" style="top:26px; left:30px; width:520px; height:296px;">
+      <div class="bar"><span class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span><span class="ttl">claude - work-project - tmux work-project:1</span></div>
+      <div class="scr">
+        <div><span class="amb">&#10087;</span> Working&#8230; (15s) &#183; wiring the streaming endpoint into the hub</div>
+        <div><span class="grn">&#9679;</span> Read <span class="dim">src/index.ts</span> (214 lines)</div>
+        <div><span class="grn">&#9679;</span> Edited <span class="dim">src/hub/stream.ts</span>, <span class="dim">events.ts</span></div>
+        <div><span class="grn">&#9679;</span> Bash(<span class="dim">bun test</span>) &#8627; 128 passed</div>
+        <div class="org">&#9679;</div>
+        <div class="pr">&#10095; keep going, then run the reducer tests.</div>
+      </div>
+    </div>
+
+    <!-- Ghostty running Codex, a pending permission ask -->
+    <div class="win ghostty" style="top:20px; left:742px; width:504px; height:262px;">
+      <div class="bar"><span class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span><span class="ttl">codex - codex-mcp-server</span></div>
+      <div class="scr">
+        <div class="pr">&#10095; publish the mcp package once tests pass</div>
+        <div class="dim">&nbsp;&nbsp;proposed &#8594; src/mcp/stream.ts (+64 -8)</div>
+        <div><span class="tl">&#11044;</span> tests green &#183; 40 files &#183; 0 failed</div>
+        <div><span class="amb">&#9679;</span> Allow command: <span class="dim">npm publish --access</span></div>
+        <div>&nbsp;&nbsp;<span class="dim">public</span>?&nbsp;&nbsp;<span class="amb">[y/N]</span></div>
+      </div>
+    </div>
+
+    <!-- Cursor editor GUI - a real app window, mid agent-edit on writing-style.yml -->
+    <div class="win cursor" style="top:308px; left:150px; width:986px; height:388px;">
+      <div class="bar"><span class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></span><span class="ttl">writing-style.yml - signalbox - Cursor</span></div>
+      <div class="tabs">
+        <div class="tab on"><i></i>writing-style.yml</div>
+        <div class="tab">CONTRIBUTING.md</div>
+        <div class="tab">reducer.ts</div>
+      </div>
+      <div class="work">
+        <div class="rail"><b class="act"></b><b></b><b></b><b></b></div>
+        <div class="tree">
+          <div class="f">&#9662; signalbox</div>
+          <div class="in f">&#9656; components</div>
+          <div class="in f">&#9662; config</div>
+          <div class="in" style="padding-left:24px">tsconfig.json</div>
+          <div class="in on" style="padding-left:24px">writing-style.yml</div>
+          <div class="in" style="padding-left:12px">README.md</div>
+          <div class="in" style="padding-left:12px">Makefile</div>
+        </div>
+        <div class="code">
+          <div class="ln"><span class="n">1</span><span class="c"># shared writing style - keep in sync with the template</span></div>
+          <div class="ln"><span class="n">2</span><span class="k">voice</span>: <span class="s">engineer-to-engineer</span></div>
+          <div class="ln"><span class="n">3</span><span class="k">tone</span>: <span class="s">dry, understated, plain</span></div>
+          <div class="ln"><span class="n">4</span><span class="k">rules</span>:</div>
+          <div class="ln"><span class="n">5</span>  - <span class="s">use a plain hyphen, never an em-dash</span></div>
+          <div class="ln"><span class="n">6</span>  - <span class="s">active voice, complete sentences</span></div>
+          <div class="ln"><span class="n">7</span>  - <span class="s">no hype words</span></div>
+          <div class="ln"><span class="n">8</span><span class="k">headings</span>: <span class="p">sentence-case</span></div>
+          <div class="ln"><span class="n">9</span><span class="c"># pending: overwrite with shared template?</span></div>
+        </div>
+        <div class="chat">
+          <div class="u">apply the shared writing style to this repo.</div>
+          <span class="amb">&#9679; writing-style.yml already exists and differs from the shared template.</span>
+          <div class="opt">Overwrite&nbsp;&nbsp;/&nbsp;&nbsp;Keep mine</div>
+        </div>
+      </div>
+      <div class="stat"><span>main*</span><span>&#10005; 0</span><span>YAML</span><span style="margin-left:auto">Cursor</span></div>
+    </div>
+
+  </div>
+
+  <div class="dim"></div>
+
+  <!-- ON TOP: the crisp signalbox board, summoned over the desktop -->
+  <div class="board">
+    <div class="panel">
+      <div class="head">
+        <div class="mk"><svg viewBox="0 0 20 20"><g fill="none" stroke="#FF9F0A" stroke-width="1.8" stroke-linecap="round"><circle cx="10" cy="10" r="2.4" fill="#FF9F0A" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5"/><path d="M4.2 4.2 A 8 8 0 0 1 15.8 4.2" opacity=".55"/><path d="M4.2 15.8 A 8 8 0 0 0 15.8 15.8" opacity=".55"/></g></svg></div>
+        <div class="wm">signalbox</div>
+        <div class="search"><span class="caret"></span><span class="ph">Search sessions&#8230;</span></div>
+        <div class="jp">Jump <kbd>&#8629;</kbd></div>
+      </div>
+
+      <div class="body">
+        <div class="list">
+
+          <!-- cursor, ASKING - the file-overwrite question, selected. Ties to the Cursor window behind. -->
+          <div class="r sel">
+            <div class="mark"><div class="dot a"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g fill="none" stroke="#B5B5BA" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M10 2.6 L16.4 6.3 L16.4 13.7 L10 17.4 L3.6 13.7 L3.6 6.3 Z"/><path d="M3.6 6.3 L10 10 L16.4 6.3"/><path d="M10 10 L10 17.4"/></g></svg></div>
+            <div class="txt"><div class="t"><b>signalbox</b> <span style="color:#7e7e85;font-weight:400">cursor</span></div><div class="d">Overwrite writing-style.yml? (Overwrite / Keep mine)</div></div>
+            <div class="age">8s</div>
+          </div>
+
+          <!-- claude, working -->
+          <div class="r">
+            <div class="mark"><div class="spin"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+            <div class="txt"><div class="t">work-project</div><div class="d">wiring the streaming endpoint into the hub.</div></div>
+            <div class="age">15s</div>
+          </div>
+
+          <!-- codex, ASKING - the pending tool call, verbatim -->
+          <div class="r">
+            <div class="mark"><div class="dot a"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg></div>
+            <div class="txt"><div class="t"><b>codex-mcp-server</b></div><div class="d">Allow command: npm publish --access public?</div></div>
+            <div class="age">41s</div>
+          </div>
+
+          <!-- opencode, working -->
+          <div class="r">
+            <div class="mark"><div class="spin"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#B5B5BA" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#32D74B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#B5B5BA" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+            <div class="txt"><div class="t">docs-site-astro</div><div class="d">regenerate the search index after the refactor.</div></div>
+            <div class="age">1m</div>
+          </div>
+
+          <!-- pi, done (unread reply) -->
+          <div class="r">
+            <div class="mark"><div class="dot b"></div></div>
+            <div class="gl"><span style="font-family:ui-monospace,'SF Mono',Menlo,monospace;color:#0A84FF;font-size:15px;line-height:1">&#960;</span></div>
+            <div class="txt"><div class="t"><b>log-triage</b></div><div class="d">Grouped 1,204 errors into 7 clusters - the top two are the same timeout.</div></div>
+            <div class="age">4m</div>
+          </div>
+
+          <!-- claude, done (unread reply) -->
+          <div class="r">
+            <div class="mark"><div class="dot b"></div></div>
+            <div class="gl"><svg width="20" height="20" viewBox="0 0 20 20"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></div>
+            <div class="txt"><div class="t"><b>release-notes</b></div><div class="d">Drafted the v0.4 notes. Ready for your review.</div></div>
+            <div class="age">12m</div>
+          </div>
+
+        </div>
+
+        <!-- full-black preview quoting the selected ask, verbatim -->
+        <div class="preview">
+          <div class="term">
+            <div class="you">apply the shared writing style to this repo.</div>
+            <div class="gap"></div>
+            <div class="resp"><span class="b">&#9679;</span><span class="body-t">Overwrite writing-style.yml? It exists and differs from the shared template. (Overwrite / Keep mine)</span></div>
+            <div class="actline"><kbd>&#8629;</kbd> Jump to Cursor to answer <span class="sep">&#183;</span> <span class="need">needs your input</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="foot">
+        <span>type to search</span><span class="sep">&#183;</span>
+        <span><kbd>&#8963;J</kbd>/<kbd>&#8963;K</kbd> move</span><span class="sep">&#183;</span>
+        <span><kbd>&#8629;</kbd> jump</span><span class="sep">&#183;</span>
+        <span><kbd>&#8963;&#8997;J</kbd> open from anywhere</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- BELOW: brand line + brew, over the frosted desktop -->
+  <div class="brand">
+    <div class="tl">One board for every agent, terminal, and job you run.</div>
+    <div class="in mono">brew install <span style="color:#EDEDED">dwmkerr/tools/signalbox</span> <span class="d">&#183; &#8963;&#8997;J</span></div>
+  </div>
+
+</div>
+</body></html>

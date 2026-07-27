@@ -366,3 +366,43 @@ describe("tags", () => {
     expect(s.list().length).toBe(0);
   });
 });
+
+describe("ask no-clobber", () => {
+  // One blocked dialog can reach the hub twice: a rich attention
+  // (permission_request/question, reply = the actual ask) and a bare
+  // notification. The rich ask must survive either arrival order.
+  test("a bare attention duplicate keeps the enriched reply and reason", () => {
+    const s = new Store();
+    s.apply({ ...mkReason("a", ev.Attention, "permission_request", t(1), 1), reply: "Bash: git push" });
+    s.apply({ ...mkReason("a", ev.Attention, "notification", t(2), 2), reply: "Claude needs your permission" });
+    const row = s.list()[0];
+    expect(row.reply).toBe("Bash: git push");
+    expect(row.reason).toBe("permission_request");
+  });
+
+  test("rich after bare replaces it", () => {
+    const s = new Store();
+    s.apply({ ...mkReason("a", ev.Attention, "notification", t(1), 1), reply: "Claude needs your permission" });
+    s.apply({ ...mkReason("a", ev.Attention, "question", t(2), 2), reply: "Which colour? (Red / Blue)" });
+    const row = s.list()[0];
+    expect(row.reply).toBe("Which colour? (Red / Blue)");
+    expect(row.reason).toBe("question");
+  });
+
+  test("a rich question is not clobbered by a bare twin either", () => {
+    const s = new Store();
+    s.apply({ ...mkReason("a", ev.Attention, "question", t(1), 1), reply: "Which colour? (Red / Blue)" });
+    s.apply(mkReason("a", ev.Attention, "notification", t(2), 2));
+    expect(s.list()[0].reply).toBe("Which colour? (Red / Blue)");
+  });
+
+  test("a non-attention event ends the ask - a later bare attention stands alone", () => {
+    const s = new Store();
+    s.apply({ ...mkReason("a", ev.Attention, "permission_request", t(1), 1), reply: "Bash: git push" });
+    s.apply(mk("a", ev.Busy, t(2), 2));
+    s.apply({ ...mkReason("a", ev.Attention, "notification", t(3), 3), reply: "Claude needs your permission" });
+    const row = s.list()[0];
+    expect(row.reason).toBe("notification");
+    expect(row.reply).toBe("Claude needs your permission");
+  });
+});

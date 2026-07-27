@@ -317,6 +317,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let prev = sessions[key]
             let date = EventDate.parse(event.ts) ?? Date()
             let engaged = engagedDate(for: event, date: date, prev: prev)
+            // An enriched ask is not clobbered by its bare twin: one blocked
+            // dialog reaches the SSE stream twice (a permission_request/question
+            // with the real ask in reply, plus a bare permission notification).
+            // Mirror the hub reducer (state.ts) so the raw SSE path keeps the
+            // rich reply that /state already merges - without this the bare
+            // notification, arriving second, overwrites it here. Only the reply
+            // is preserved; the new event still drives status, ts and ordering.
+            let richAsk: (String?) -> Bool = { $0 == "permission_request" || $0 == "question" }
+            let keepRichAsk = prev?.event.event == "attention" && richAsk(prev?.event.reason)
+                && event.event == "attention" && !richAsk(event.reason)
+            let mergedReply = keepRichAsk ? prev?.reply : firstNonEmpty(event.reply, prev?.reply)
             // Any agent event resets acked and hidden unless the payload says
             // otherwise - this is what resurfaces hidden rows and re-arms
             // notifications for previously acked ones.
@@ -327,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 acked: event.acked ?? false,
                 hidden: event.hidden ?? false,
                 detail: firstNonEmpty(event.prompt, prev?.detail),
-                reply: firstNonEmpty(event.reply, prev?.reply),
+                reply: mergedReply,
                 origin: event.origin ?? prev?.origin,
                 // SSE broadcasts raw agent events (pre-merge), which never
                 // carry a label - keep the one we know.
@@ -807,11 +818,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         settingsItem.target = self
         menu.addItem(settingsItem)
+        menu.addItem(.separator())
+        // The version, disabled so it reads as a quiet label not a command - a
+        // discreet "which build am I on" for support and dogfooding. In a
+        // released build this is the stamped version; a dev build shows the
+        // Info.plist placeholder (the release pipeline stamps, dev does not).
+        let versionItem = NSMenuItem(title: "Signalbox \(Self.appVersionString())", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
         menu.addItem(NSMenuItem(
             title: "Quit Signalbox",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         ))
+    }
+
+    // "<short> (<build>)" from the bundle, e.g. "0.1.3 (42)".
+    static func appVersionString() -> String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        return "\(short) (\(build))"
     }
 
     // A small phone glyph on the Connect Phone item. Template-rendered so it
