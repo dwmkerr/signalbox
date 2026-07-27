@@ -101,7 +101,9 @@ struct ConnectionBar: View {
         switch connection {
         case .live: return Theme.green
         case .connecting: return Theme.amber
-        case .offline: return Theme.faint
+        // Amber, not faint grey: offline is a state to notice and act on, and a
+        // grey dot read as just another quiet detail (the banner backs this up).
+        case .offline: return Theme.amber
         case .rejected: return Theme.red
         }
     }
