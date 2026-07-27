@@ -47,7 +47,15 @@ export class Hub {
     // the phone learns which interface to reach. This is not the loopback vs
     // LAN policy decision (that is isLoopbackAddress on the peer at mint time);
     // it is only what a mint advertises.
-    private bind: string = "127.0.0.1"
+    private bind: string = "127.0.0.1",
+    // SHA-256 fingerprint of the LAN listener's self-signed cert, or empty when
+    // the LAN path is plain http. Advertised in the mint so the phone can pin
+    // the cert and dial https; empty means the QR stays http (see specs/ios).
+    private tlsFingerprint: string = "",
+    // The port the TLS LAN listener is on - distinct from the loopback http
+    // port, because two Bun listeners cannot share one port. Advertised in the
+    // mint so the phone dials the https port, not the local http one.
+    private tlsPort: number = 0
   ) {
     mkdirSync(stateDir, { recursive: true });
     this.logPath = join(stateDir, "events.jsonl");
@@ -347,7 +355,16 @@ export class Hub {
     // any prior code, so only the most recently shown QR is ever live.
     const code = base64url(crypto.getRandomValues(new Uint8Array(16)));
     this.pairing = { code, expiresAt: Date.now() + 180_000, redeemed: false };
-    return Response.json({ code, expires_in: 180, bind: this.bind });
+    // fp+port are present only when the LAN listener is TLS: they tell the
+    // pairing UI (CLI and macOS app) to render an https QR on the TLS port,
+    // carrying the pin. Omitted when empty so an older/plain-http hub's response
+    // shape (and the phone dialling the loopback-derived port) is unchanged.
+    return Response.json({
+      code,
+      expires_in: 180,
+      bind: this.bind,
+      ...(this.tlsFingerprint ? { fp: this.tlsFingerprint, port: this.tlsPort } : {}),
+    });
   }
 
   // handlePairStatus reports the pairing slot for the CLI's poll loop. Loopback
@@ -504,12 +521,21 @@ function base64url(bytes: Uint8Array): string {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-// listen starts the hub's HTTP server. hostname defaults to loopback; pass a
-// wider bind (e.g. 0.0.0.0) only alongside a token - runHub enforces that.
-export function listen(hub: Hub, port: number, hostname: string = "127.0.0.1"): Bun.Server<undefined> {
+// listen starts one of the hub's servers. hostname defaults to loopback; pass a
+// wider bind (e.g. a LAN IP) only alongside a token - runHub enforces that. When
+// tls is given the listener serves https with that self-signed cert; the hub
+// runs a plain-http loopback listener and a TLS LAN listener side by side, so
+// local clients are never asked to trust the cert (see runHub, specs/ios).
+export function listen(
+  hub: Hub,
+  port: number,
+  hostname: string = "127.0.0.1",
+  tls?: { cert: string; key: string }
+): Bun.Server<undefined> {
   const server = Bun.serve({
     hostname,
     port,
+    ...(tls ? { tls } : {}),
     // Route dispatch happens in hub.handle so tests can drive it without a
     // socket; unknown paths 404 here.
     fetch: (req, srv) => hub.handle(req, srv) ?? jsonError(404, "not found"),

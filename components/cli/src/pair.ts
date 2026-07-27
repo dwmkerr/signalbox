@@ -40,6 +40,11 @@ interface MintResponse {
   code: string;
   expires_in: number;
   bind: string;
+  // Present when the hub's LAN listener is TLS (#25): the SHA-256 pin the phone
+  // uses to verify the self-signed cert, and the port that listener is on. Their
+  // presence flips the QR to https on that port.
+  fp?: string;
+  port?: number;
 }
 
 // concreteHost is true when addr is a real dialable IP: not a wildcard bind
@@ -92,13 +97,16 @@ export async function runPair(args: string[]): Promise<void> {
   if (!host) host = lanIPv4() ?? "";
   if (!host) throw new Error("could not determine a LAN IP to advertise; pass --host <ip>");
 
-  // The phone dials the hub's port; the mint response has no port, so take it
-  // from the URL we minted against (loopback and LAN share the one bound port).
-  const port = new URL(base).port || "8377";
-  const target = `http://${host}:${port}`;
+  // A fingerprint means the LAN listener is TLS, so the phone dials https on the
+  // TLS port the mint advertised and pins that cert. Without one the hub is plain
+  // http (openssl-less fallback), on the loopback-derived port as before.
+  const scheme = mint.fp ? "https" : "http";
+  const port = mint.fp && mint.port ? String(mint.port) : new URL(base).port || "8377";
+  const target = `${scheme}://${host}:${port}`;
   // Deep-link contract (specs/ios): the url value is percent-encoded, the
-  // base64url code rides raw.
-  const link = `signalbox://pair?url=${encodeURIComponent(target)}&code=${mint.code}`;
+  // base64url code rides raw, and fp (hex, url-safe) rides raw when present.
+  const fpParam = mint.fp ? `&fp=${mint.fp}` : "";
+  const link = `signalbox://pair?url=${encodeURIComponent(target)}&code=${mint.code}${fpParam}`;
 
   const art = await qr.toString(link, { type: "terminal", small: true });
   process.stdout.write(art + "\n");

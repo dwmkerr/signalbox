@@ -11,6 +11,10 @@ import Security
 enum Keychain {
     static let service = "com.dwmkerr.signalbox.ios"
     static let hubTokenAccount = "hub-token"
+    // The hub's cert pin (#25). Not secret - it is a public-key hash - but it
+    // shares the token's lifecycle exactly (set at pairing, cleared on
+    // disconnect), so it rides alongside rather than in a second store.
+    static let hubFPAccount = "hub-fp"
 
     static func get(_ account: String) -> String? {
         let query: [String: Any] = [

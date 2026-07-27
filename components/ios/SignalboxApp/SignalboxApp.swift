@@ -27,7 +27,10 @@ struct SignalboxApp: App {
         // is actually configured, so a fresh device never hammers loopback.
         url: URL(string: UserDefaults.standard.string(forKey: "hubURL")
             ?? SignalboxApp.defaultHubURL) ?? URL(string: "http://127.0.0.1:8377")!,
-        token: Keychain.get(Keychain.hubTokenAccount)
+        token: Keychain.get(Keychain.hubTokenAccount),
+        // The cert pin for a paired https hub, read back so a relaunch keeps
+        // verifying it; nil for a plain-http or fresh hub (#25).
+        fingerprint: Keychain.get(Keychain.hubFPAccount)
     ))
     // Sessions is home - the board. Settings is one tap away. SIGNALBOX_TAB is a
     // test hook (like SIGNALBOX_URL) so e2e can launch straight into a tab.
@@ -42,6 +45,12 @@ struct SignalboxApp: App {
         // Env-only, so it is inert in a shipped build where nothing sets it.
         if let seed = ProcessInfo.processInfo.environment["SIGNALBOX_SEED_TOKEN"], !seed.isEmpty {
             Keychain.set(seed, account: Keychain.hubTokenAccount)
+        }
+        // Test hook: seed the cert pin so e2e can point SIGNALBOX_URL at an https
+        // hub and exercise the pinned path (#25). Env-only, inert in a shipped
+        // build. Paired with SIGNALBOX_URL=https://... in the same launch.
+        if let fp = ProcessInfo.processInfo.environment["SIGNALBOX_FP"], !fp.isEmpty {
+            Keychain.set(fp, account: Keychain.hubFPAccount)
         }
     }
 
@@ -122,7 +131,7 @@ struct SignalboxApp: App {
     private func performPair(_ link: PairLink) {
         Task { @MainActor in
             do {
-                try await hub.pair(url: link.url, code: link.code)
+                try await hub.pair(url: link.url, code: link.code, fingerprint: link.fingerprint)
                 // The Keychain and HubClient already hold the new token; mirror
                 // the url into the persisted setting so Settings shows it and a
                 // relaunch keeps it, then land the user on their board, not on

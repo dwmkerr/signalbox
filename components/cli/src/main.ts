@@ -8,9 +8,10 @@ import * as ev from "./event";
 import type { Event, Origin, Proc } from "./event";
 import { Client, fetchState, hubURL, stateDir, logTo, DefaultURL } from "./client";
 import { Hub, listen, validateBindConfig, isLoopbackAddress } from "./hub";
+import { ensureCert, type HubTLS } from "./tls";
 import * as tmux from "./tmux";
 import { jump } from "./jump";
-import { runPair } from "./pair";
+import { runPair, lanIPv4 } from "./pair";
 import { captureProc, captureAgentProc } from "./proc";
 import { mapClaudeHook, claudeReply, sessionName, type ClaudeHook } from "./claude";
 import { mapCursorHook, cursorReply, cursorWorkspace, cursorBundle, editorTerminalOrigin, hostPrefixedAgent, type CursorHook } from "./cursor";
@@ -84,6 +85,7 @@ usage: signalbox <command> [flags]
   session unpin <key>        remove the pin
   session rename <key> [t…]  set your own name for a session (empty clears)
   session remove <key>       take a session off the board now
+  session clear              take every session off the board (start fresh)
   session tag <key> <tag>    add a discreet tag to a session (e.g. work)
   session untag <key> <tag>  remove a tag
   session list               alias for state
@@ -331,6 +333,22 @@ async function runRemove(args: string[]): Promise<void> {
   await deliver(ev.newEnded(args[0], "removed"));
 }
 
+// runClear takes every session off the board at once. Each gets the same
+// "removed" ended event `session remove` sends, so this is the reducer's normal
+// path and not a log wipe: connected surfaces empty live, and a hub restart
+// replays to the same empty board. A "start fresh", and the fastest way to reach
+// the phone's empty/offline states for testing.
+async function runClear(): Promise<void> {
+  const { doc } = await fetchState(hubURL(), 2000);
+  const keys = doc.sessions.map((s) => s.session_key);
+  if (keys.length === 0) {
+    console.log("no sessions to clear");
+    return;
+  }
+  for (const key of keys) await deliver(ev.newEnded(key, "removed"));
+  console.log(`cleared ${keys.length} session${keys.length === 1 ? "" : "s"}`);
+}
+
 // Presence hook for tmux pane-focus-in: any flagged session that originated
 // at the focused pane is marked seen. Fires nothing when nothing is flagged,
 // so focus churn cannot spam the event log.
@@ -562,20 +580,59 @@ function runHub(args: string[]): void {
   // wildcard bind must never slip through.
   const bindErr = validateBindConfig(bind, token);
   if (bindErr) fatal(bindErr);
-  const hub = new Hub(stateDir(), version, token, bind);
+
+  // TLS for the LAN path (#25). When devices are allowed - a non-loopback bind
+  // with a token - the phone's connection is pinned https, not plain http. Local
+  // clients keep http on loopback, so nothing local has to trust the self-signed
+  // cert. The TLS listener is on its own port (port+1): two Bun listeners cannot
+  // share a port, and keeping http loopback exactly where it was leaves every
+  // local client untouched. If openssl is missing the cert cannot be made: fall
+  // back to the old http-on-bind path so pairing still works, unencrypted, and
+  // say so. The LAN IP is only for the cert's SAN and the log; the TLS listener
+  // itself binds every interface, so a DHCP address change needs no restart.
+  const tlsPort = port + 1;
+  let tls: HubTLS | null = null;
+  if (!isLoopbackAddress(bind)) {
+    const lanIP = bind === "0.0.0.0" || bind === "::" ? (lanIPv4() ?? "") : bind;
+    tls = ensureCert(stateDir(), lanIP ? [lanIP] : []);
+    if (!tls)
+      console.error(
+        "signalbox: could not create a TLS cert (is openssl installed?); the LAN listener will be plain http"
+      );
+  }
+
+  const hub = new Hub(
+    stateDir(),
+    version,
+    token,
+    bind,
+    tls?.fingerprint ?? "",
+    tls ? tlsPort : 0
+  );
   const expire = expireAgeMs();
   hub.startExpiry(10 * 60 * 1000, expire);
   // Much shorter than expiry: a dead process shows as an eternal spinner
   // until the sweep catches it.
   hub.startLiveness(30 * 1000);
-  listen(hub, port, bind);
+
+  // Loopback http always: the menu bar app, CLI, and adapters speak to this and
+  // are entirely unchanged by the LAN TLS work.
+  listen(hub, port, "127.0.0.1");
   console.error(
-    `signalbox hub ${version} listening on http://${bind}:${port} (state: ${stateDir()}, expire: ${expire / 3600000}h)`
+    `signalbox hub ${version} listening on http://127.0.0.1:${port} (state: ${stateDir()}, expire: ${expire / 3600000}h)`
   );
   if (!isLoopbackAddress(bind)) {
-    console.error(
-      `signalbox: bound to ${bind}; non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN (loopback clients need no token)`
-    );
+    if (tls) {
+      listen(hub, tlsPort, "0.0.0.0", { cert: tls.cert, key: tls.key });
+      console.error(
+        `signalbox: LAN listener https://0.0.0.0:${tlsPort} (pinned self-signed, fp ${tls.fingerprint.slice(0, 16)}...); non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN`
+      );
+    } else {
+      listen(hub, port, bind);
+      console.error(
+        `signalbox: bound to http://${bind}:${port}; non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN (loopback clients need no token)`
+      );
+    }
   }
 }
 
@@ -766,7 +823,7 @@ function fatal(err: unknown): never {
 // switch below dispatches.
 function normalize(rawCmd: string | undefined, rawArgs: string[]): { cmd: string | undefined; args: string[] } {
   const groups: Record<string, Record<string, string>> = {
-    session: { ack: "ack", hide: "hide", show: "show", pin: "pin", unpin: "unpin", rename: "label", remove: "remove", list: "state", tag: "tag", untag: "untag" },
+    session: { ack: "ack", hide: "hide", show: "show", pin: "pin", unpin: "unpin", rename: "label", remove: "remove", clear: "clear", list: "state", tag: "tag", untag: "untag" },
     tmux: { status: "tmux-status", "seen-pane": "seen-pane" },
     hook: { claude: "claude-hook", cursor: "cursor-hook", codex: "codex-hook" },
   };
@@ -817,6 +874,9 @@ switch (cmd) {
     break;
   case "remove":
     await runHookSafe(() => runRemove(args));
+    break;
+  case "clear":
+    await runClear().catch(fatal);
     break;
   case "claude-hook":
     await runHookSafe(() => runClaudeHook());

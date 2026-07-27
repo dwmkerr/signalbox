@@ -561,12 +561,21 @@ and token fields stay for when there is no QR.</p>
   dropping Sessions back to the Not connected state.</li>
 </ul>
 <p>The link is the contract; the QR carries it:</p>
-<pre>signalbox://pair?url=&lt;percent-encoded "http://LAN-IP:PORT"&gt;&amp;code=&lt;base64url-code&gt;</pre>
+<pre>signalbox://pair?url=&lt;percent-encoded "https://LAN-IP:PORT"&gt;&amp;code=&lt;base64url-code&gt;&amp;fp=&lt;cert-pin&gt;</pre>
 <p><code>pair</code> rides in the URL host (a custom scheme has no path authority). <code>url</code> is
 the hub to redeem against; <code>code</code> is a one-time pairing code. The phone POSTs
 <code>{ "code": &lt;code&gt; }</code> to <code>&lt;url&gt;/pair</code> and gets back
 <code>{ "token": &lt;string&gt; }</code>; any 4xx means the code is bad, expired, or spent. The token
 goes to the Keychain and the app reconnects.</p>
+<p><b>Pinned TLS (#25).</b> When devices are allowed the hub serves the phone over <code>https</code> with a
+persisted self-signed cert; the LAN's plaintext gap - a same-network attacker reading prompts/replies or
+forging events - is otherwise the one real exposure. <code>fp</code> is the SHA-256 of the cert's DER, which
+the app pins in a <code>URLSession</code> server-trust delegate (compared against
+<code>SecCertificateCopyData</code>'s hash) on every request: any other cert is refused, so a self-signed cert
+with no CA still gives MITM-proof transport. <code>fp</code> is required on an <code>https</code> url and
+absent on <code>http</code> (an <code>openssl</code>-less hub, or a hand-entered address); it lives in the
+Keychain beside the token, set at pairing and cleared on disconnect. The redeem POST rides the same pinned
+https, so it is verified before the token is ever handed over.</p>
 <p>Two security invariants:</p>
 <ul>
   <li><b>The redeem POST carries no <code>Authorization</code> header.</b> The URL arrives from outside
