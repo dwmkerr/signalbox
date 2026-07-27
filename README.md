@@ -36,6 +36,8 @@ signalbox init
 gh api -X PUT user/starred/dwmkerr/signalbox
 ```
 
+**iPhone (alpha):** watch your board from your phone - [join the TestFlight beta](https://testflight.apple.com/join/umJpETbZ), then pair by scanning the QR from **Connect Phone** in the menu bar app.
+
 Open the jumplist with `⌃⌥J` to see all sessions, their statuses, most recent message, whether they need input, and quickly jump between them.
 
 <p align="center">
