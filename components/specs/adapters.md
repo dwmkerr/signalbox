@@ -107,7 +107,7 @@ signalbox init --agent cursor
 
 - `session_key = cursor:<conversation_id>`.
 - Title and `cwd`: `workspace_roots[0]` (basename is the title).
-- `reply`: best-effort from `transcript_path` on stop/subagentStop, **transcript format unverified** - returns empty (and the previous reply carries) if it does not match the assumed JSONL shape.
+- `prompt` and `reply` come from `transcript_path` on stop/subagentStop (Cursor has no prompt-submit hook, so neither is in the payload). Verified shape: `~/.cursor/projects/<ws>/agent-transcripts/<id>/<id>.jsonl`, one JSON object per line, `{role:"user"|"assistant", message:{content:[{type:"text", text}]}}` - role at the top level. `reply` = last assistant text; `prompt` = last user text, unwrapped from its `<user_query>...</user_query>` tag (a `<timestamp>` tag precedes it). Returns empty (previous value carries) on any mismatch.
 - `proc` and `SIGNALBOX_RAW` behave as for Claude (shell-wrapper walk to the agent process; raw-payload diagnostic).
 - Jump-back raises the **Cursor window** for the workspace (bundle id `com.todesktop.230313mzl4w4u92`, plus an Accessibility `AXRaise` on the window whose title contains the project folder). **Window-level only** - Cursor's editor/terminal tabs are not externally addressable, so a specific Composer tab cannot be targeted.
 - **Cursor Hooks are beta**: event names, payload fields (`status`, `transcript_path`, `workspace_roots`) and the permission-signal behaviour should be confirmed against a live Cursor; the mapping degrades safely if they shift.

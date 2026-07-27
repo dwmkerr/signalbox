@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mapCursorHook, cursorReply, cursorWorkspace, cursorBundle, vscodeBundle, editorTerminalOrigin, editorHost, hostPrefixedAgent } from "../src/cursor";
+import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle, vscodeBundle, editorTerminalOrigin, editorHost, hostPrefixedAgent } from "../src/cursor";
 import { agentFamily } from "../src/event";
 
 describe("mapCursorHook", () => {
@@ -130,5 +130,62 @@ describe("cursorReply", () => {
   });
   test("no transcript path is empty", () => {
     expect(cursorReply({ hook_event_name: "stop" })).toBe("");
+  });
+
+  // The real Cursor shape (verified from ~/.cursor/projects/.../agent-transcripts):
+  // role at the top level, text in content blocks - the shape lastAssistantText
+  // previously skipped, leaving Cursor replies empty.
+  test("reads Cursor's real transcript shape (top-level role, content blocks)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sb-cursor-"));
+    const p = join(dir, "t.jsonl");
+    writeFileSync(
+      p,
+      [
+        JSON.stringify({ role: "user", message: { content: [{ type: "text", text: "<user_query>\nhi\n</user_query>" }] } }),
+        JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: "Wired the tests into CI." }] } }),
+        JSON.stringify({ status: "completed", type: "turn_ended" }),
+      ].join("\n")
+    );
+    expect(cursorReply({ hook_event_name: "stop", transcript_path: p })).toBe("Wired the tests into CI.");
+  });
+});
+
+describe("cursorPrompt", () => {
+  const cursorTranscript = (userText: string, asstText = "ok") =>
+    [
+      JSON.stringify({ role: "user", message: { content: [{ type: "text", text: userText }] } }),
+      JSON.stringify({ role: "assistant", message: { content: [{ type: "text", text: asstText }] } }),
+    ].join("\n");
+
+  test("unwraps <user_query> and strips the <timestamp> harness", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sb-cursor-"));
+    const p = join(dir, "t.jsonl");
+    writeFileSync(
+      p,
+      cursorTranscript("<timestamp>Monday, Jul 13, 2026, 9:22 AM</timestamp>\n<user_query>\nadd a pin toggle to the jumplist\n</user_query>")
+    );
+    expect(cursorPrompt({ hook_event_name: "stop", transcript_path: p })).toBe("add a pin toggle to the jumplist");
+  });
+
+  test("subagentStop reads the prompt too", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sb-cursor-"));
+    const p = join(dir, "t.jsonl");
+    writeFileSync(p, cursorTranscript("<user_query>\nfix the flaky test\n</user_query>"));
+    expect(cursorPrompt({ hook_event_name: "subagentStop", transcript_path: p })).toBe("fix the flaky test");
+  });
+
+  test("falls back to raw text when there is no <user_query> wrapper", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sb-cursor-"));
+    const p = join(dir, "t.jsonl");
+    writeFileSync(p, cursorTranscript("just the plain prompt"));
+    expect(cursorPrompt({ hook_event_name: "stop", transcript_path: p })).toBe("just the plain prompt");
+  });
+
+  test("permission events do not read a prompt (transcript incomplete)", () => {
+    expect(cursorPrompt({ hook_event_name: "beforeShellExecution", transcript_path: "/x.jsonl" })).toBe("");
+  });
+
+  test("no transcript path is empty", () => {
+    expect(cursorPrompt({ hook_event_name: "stop" })).toBe("");
   });
 });

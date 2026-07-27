@@ -4,8 +4,8 @@
 // format in particular is unverified - flagged inline so it can be checked
 // empirically. Unknown fields are ignored so payload growth is harmless.
 
-import { cropReply, Busy, Done, Attention, Error as ErrorType, Ended, type Origin } from "./event";
-import { stripHarness, lastAssistantText, type Mapped } from "./claude";
+import { cropReply, cropPrompt, Busy, Done, Attention, Error as ErrorType, Ended, type Origin } from "./event";
+import { stripHarness, lastAssistantText, lastUserText, type Mapped } from "./claude";
 
 // Cursor's stable macOS bundle id (Cursor ships as a ToDesktop build). Captured
 // into the origin so jump raises the right app; confirmed via
@@ -109,14 +109,32 @@ export function cursorWorkspace(h: CursorHook): string {
   return h.workspace_roots?.[0] ?? "";
 }
 
-// cursorReply best-effort extracts the agent's last message for hooks that mark
-// it as having finished speaking (stop / subagentStop). Cursor's transcript
-// format is UNVERIFIED (Hooks are beta); this assumes the same JSONL shape as
-// Claude's transcript and returns "" on any mismatch - the reducer's carry then
-// keeps the previous reply, so a wrong guess degrades quietly rather than
-// showing garbage. Verify the transcript shape empirically and adjust.
+// cursorReply extracts the agent's last message for hooks that mark it as
+// having finished speaking (stop / subagentStop). Verified against Cursor 1.7's
+// agent-transcripts JSONL (~/.cursor/projects/<ws>/agent-transcripts/<id>/<id>.jsonl):
+// {role:"assistant", message:{content:[{type:"text", text:"..."}]}} - role at
+// the top level, text in content blocks (lastAssistantText matches both that
+// and Claude's shape). Returns "" on any mismatch, so the reducer's carry keeps
+// the previous reply rather than showing garbage.
 export function cursorReply(h: CursorHook): string {
   const speaking = h.hook_event_name === "stop" || h.hook_event_name === "subagentStop";
   if (!speaking || !h.transcript_path) return "";
   return cropReply(stripHarness(lastAssistantText(h.transcript_path)));
+}
+
+// Cursor wraps the user's real message in <user_query>...</user_query>, preceded
+// by a <timestamp> tag. Pull the query out; fall back to the raw text if the
+// wrapper is absent.
+const userQuery = /<user_query>([\s\S]*?)<\/user_query>/;
+
+// cursorPrompt recovers the latest user request from the transcript. Cursor has
+// no prompt-submit hook, so the prompt is not in any payload - only the
+// transcript carries it, and only turn-boundary events (stop / subagentStop)
+// see a complete one. Fail-safe empty on any mismatch, exactly like cursorReply.
+export function cursorPrompt(h: CursorHook): string {
+  const speaking = h.hook_event_name === "stop" || h.hook_event_name === "subagentStop";
+  if (!speaking || !h.transcript_path) return "";
+  const raw = lastUserText(h.transcript_path);
+  const m = raw.match(userQuery);
+  return cropPrompt(stripHarness(m ? m[1] : raw));
 }

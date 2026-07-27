@@ -217,6 +217,23 @@ function fileSize(path: string): number {
 // displayable text (tool_use-only turns) are skipped backwards. Empty on
 // any failure - reply capture must never break the hook path.
 export function lastAssistantText(path: string): string {
+  return lastRoleText(path, "assistant");
+}
+
+// lastUserText is lastAssistantText for the most recent user message - the
+// latest thing the human asked. Used by the Cursor adapter, whose only
+// content-bearing hook (stop) has no prompt field, so the prompt is recovered
+// from the transcript.
+export function lastUserText(path: string): string {
+  return lastRoleText(path, "user");
+}
+
+// lastRoleText walks the transcript tail backwards for the newest message of a
+// role, returning its displayed text. Role can sit in three places across the
+// agents whose transcripts we read: Claude uses entry.type or
+// entry.message.role; Cursor keeps it at the top level (entry.role). Matching
+// all three lets one reader serve both without a per-agent branch.
+function lastRoleText(path: string, role: string): string {
   const size = fileSize(path);
   if (size < 0) return "";
   const truncated = size > transcriptTailBytes;
@@ -235,7 +252,7 @@ export function lastAssistantText(path: string): string {
     } catch {
       continue;
     }
-    if (entry?.type !== "assistant" && entry?.message?.role !== "assistant") continue;
+    if (entry?.type !== role && entry?.message?.role !== role && entry?.role !== role) continue;
     const text = contentText(entry?.message?.content);
     if (text) return text;
   }
