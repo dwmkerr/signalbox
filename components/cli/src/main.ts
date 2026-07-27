@@ -27,6 +27,9 @@ import {
 } from "./display";
 
 // A plain const stamped by release-please; the compiled binary carries it.
+// This is the whole product's version - the macOS and iOS apps build from it
+// too (see .github/workflows) - and release-please only watches components/cli,
+// so an app/iOS-only release is cut with a `Release-As:` commit under this path.
 const version = "0.1.3"; // x-release-please-version
 
 // The short help: what a person types. Plumbing (hooks, tmux glue, drain)
