@@ -132,6 +132,13 @@ final class HubClient: ObservableObject {
     // pairing, cleared on disconnect.
     private let pinner: CertPinner
     private let urlSession: URLSession
+    // A short-timeout session for the one-shot /state probe and the pairing
+    // redeem. A reachable hub answers these in well under a second, so a tight
+    // deadline turns an unreachable hub (a phone on a network that cannot see
+    // the hub) into a fast, surfaced failure instead of a 60-90s hang with no
+    // feedback. The long-lived stream deliberately does NOT use this - a quiet
+    // but live stream must not be killed for being idle.
+    private let probeSession: URLSession
 
     init(config: HubConfig) {
         self.config = config
@@ -143,6 +150,10 @@ final class HubClient: ObservableObject {
         sessionConfig.timeoutIntervalForRequest = 90
         sessionConfig.waitsForConnectivity = false
         self.urlSession = URLSession(configuration: sessionConfig, delegate: pinner, delegateQueue: nil)
+        let probeConfig = URLSessionConfiguration.ephemeral
+        probeConfig.timeoutIntervalForRequest = 10
+        probeConfig.waitsForConnectivity = false
+        self.probeSession = URLSession(configuration: probeConfig, delegate: pinner, delegateQueue: nil)
     }
 
     func start() {
@@ -217,8 +228,14 @@ final class HubClient: ObservableObject {
         // hub's fingerprint - which the app has not adopted yet. Use a throwaway
         // session pinned to exactly that fingerprint rather than the live one,
         // whose pin still belongs to the previous hub (or is nil).
+        // Short timeout: a reachable hub redeems instantly, so a phone that
+        // cannot see the hub fails fast into the pairing error rather than
+        // leaving the "Pairing..." spinner up for a minute.
+        let redeemConfig = URLSessionConfiguration.ephemeral
+        redeemConfig.timeoutIntervalForRequest = 10
+        redeemConfig.waitsForConnectivity = false
         let redeemSession = URLSession(
-            configuration: .ephemeral,
+            configuration: redeemConfig,
             delegate: CertPinner(fingerprint: fingerprint),
             delegateQueue: nil
         )
@@ -293,7 +310,10 @@ final class HubClient: ObservableObject {
 
     func resyncState() async throws {
         guard let request = request("state") else { throw URLError(.badURL) }
-        let (data, response) = try await urlSession.data(for: request)
+        // Probe on the short-timeout session so an unreachable hub fails in ~10s
+        // and the offline state (with its message) comes back promptly, instead
+        // of the reconnect appearing to do nothing for a minute.
+        let (data, response) = try await probeSession.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         if http.statusCode == 401 || http.statusCode == 403 {
             connection = .rejected

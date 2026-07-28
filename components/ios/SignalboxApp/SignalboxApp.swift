@@ -38,6 +38,10 @@ struct SignalboxApp: App {
     // The pairing alert doubles as the confirmation gate and the error surface,
     // so a link never pairs without a tap and a failure has somewhere to land.
     @State private var pairAlert: PairAlert?
+    // Non-nil while a pairing redeem is in flight, so the tap that starts it
+    // shows immediate progress instead of dead air until the hub answers (or the
+    // short redeem timeout fires and the failure alert takes over).
+    @State private var pairingHost: String?
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -64,6 +68,8 @@ struct SignalboxApp: App {
             }
             .tint(Theme.blue)
             .preferredColorScheme(.dark)
+            .overlay { if let host = pairingHost { PairingHUD(host: host) } }
+            .animation(.easeInOut(duration: 0.15), value: pairingHost)
             // On the TabView root, not inside a tab: a tab's content is built
             // lazily, so a modifier on an unvisited tab may never install. The
             // deep link can arrive before the Settings tab has been drawn.
@@ -129,7 +135,11 @@ struct SignalboxApp: App {
     }
 
     private func performPair(_ link: PairLink) {
+        pairingHost = link.url.host ?? "the hub"
         Task { @MainActor in
+            // Clear the spinner on every path - success, a named PairError, or an
+            // unexpected throw - so the HUD never outlives the redeem.
+            defer { pairingHost = nil }
             do {
                 try await hub.pair(url: link.url, code: link.code, fingerprint: link.fingerprint)
                 // The Keychain and HubClient already hold the new token; mirror
@@ -169,6 +179,25 @@ struct SignalboxApp: App {
             message += " This replaces your current pairing with \(currentHost)."
         }
         return message
+    }
+}
+
+// A modal progress HUD while a pairing redeem is in flight. The dimmed backdrop
+// also blocks interaction, so the confirm-then-wait window cannot be re-driven.
+private struct PairingHUD: View {
+    let host: String
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4).ignoresSafeArea()
+            VStack(spacing: 12) {
+                ProgressView().controlSize(.large).tint(.white)
+                Text("Pairing with \(host)…")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+            .padding(24)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        }
     }
 }
 
