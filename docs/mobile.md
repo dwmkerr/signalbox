@@ -78,6 +78,26 @@ right of Sessions. The token never appears on screen or in the QR; the phone
 redeems the code for it. Pairing details are in
 [specs/cli.md](../components/specs/cli.md).
 
+## Corporate networks
+
+Pairing and the live board are a **direct connection from the phone to the hub
+over the LAN** - there is no relay. Many corporate and guest networks (including
+most hotel Wi-Fi) enable **client isolation**, which blocks device-to-device
+traffic: the phone cannot reach the Mac's LAN address, so the scan or Reconnect
+fails. The app says so - *"Can't reach hub at <host>..."* - rather than failing
+silently.
+
+Two ways around it:
+
+- **Mobile hotspot** - put the Mac and the phone on the same phone hotspot.
+  There is no isolation on a hotspot, so pairing works immediately. Good for a
+  quick test.
+- **Remote hub** - run the hub on a machine both devices can reach (a VPS, a
+  home server, or any host with a routable address), bind it wide
+  (`signalbox hub --bind 0.0.0.0`), and point the phone at it with
+  `SIGNALBOX_URL` or by scanning that hub's QR. This is the durable answer when
+  the office network will not carry device-to-device traffic.
+
 ### Dev and test hooks
 
 Debug builds read a few environment variables (inert in shipped builds):
