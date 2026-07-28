@@ -4,11 +4,24 @@
 # - a main push bumps only the BUILD number, never the version; a real version
 # change happens when release-please lands one.
 #
-# Auth is an App Store Connect API key (three secrets: ASC_KEY_ID,
-# ASC_ISSUER_ID, ASC_KEY_P8 base64) - no certificates live in CI. The
-# distribution certificate is cloud-managed in Apple's account, and
-# -allowProvisioningUpdates with the key fetches it headless; that is the
-# whole reason this can run on a runner at all.
+# Signing: a stored Apple Distribution certificate + an App Store provisioning
+# profile, imported into a throwaway keychain and used with MANUAL signing.
+# This is deliberate: a GitHub-hosted runner has an empty keychain, so the old
+# "-allowProvisioningUpdates fetches a cloud-managed cert headless" approach
+# did not reuse anything - automatic signing minted a NEW development
+# certificate every run and hit Apple's per-account cert cap. Manual signing
+# against a cert whose private key we actually ship reuses one identity forever.
+#
+# Required repository secrets:
+#   IOS_DIST_CERT_P12 - base64 of the "Apple Distribution" identity exported
+#     as .p12 WITH its private key (Keychain Access > export both the cert and
+#     its key, then `base64 -i dist.p12`).
+#   IOS_DIST_CERT_PASSWORD - the .p12's password.
+#   IOS_PROVISION_PROFILE - base64 of the App Store provisioning profile for
+#     com.dwmkerr.signalbox.ios (developer.apple.com > Profiles > download the
+#     .mobileprovision, then `base64 -i profile.mobileprovision`).
+#   ASC_KEY_ID / ASC_ISSUER_ID / ASC_KEY_P8 - App Store Connect API key (p8
+#     base64). Used ONLY to authenticate the upload, never for provisioning.
 #
 # Public repo: standard GitHub-hosted macOS runners are free.
 name: testflight
@@ -38,11 +51,43 @@ jobs:
           mkdir -p ~/asc
           echo "$ASC_KEY_P8" | base64 -d > ~/asc/key.p8
 
+      - name: Set up signing (cert + profile, manual)
+        env:
+          IOS_DIST_CERT_P12: ${{ secrets.IOS_DIST_CERT_P12 }}
+          IOS_DIST_CERT_PASSWORD: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+          IOS_PROVISION_PROFILE: ${{ secrets.IOS_PROVISION_PROFILE }}
+        run: |
+          # Import the distribution cert into a throwaway keychain (mirrors the
+          # macOS app job). The private key rides in the .p12, so codesign can
+          # sign non-interactively and no new cert is ever requested.
+          keychain_pw="$(uuidgen)"
+          security create-keychain -p "$keychain_pw" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$keychain_pw" build.keychain
+          security set-keychain-settings -lut 1800 build.keychain
+          echo "$IOS_DIST_CERT_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k build.keychain \
+            -P "$IOS_DIST_CERT_PASSWORD" -T /usr/bin/codesign
+          rm cert.p12
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_pw" build.keychain
+
+          # Install the App Store profile and read its Name/UUID/bundle id back
+          # from the profile itself, so nothing here has to be kept in sync with
+          # a hardcoded name.
+          echo "$IOS_PROVISION_PROFILE" | base64 --decode > profile.mobileprovision
+          plist="$(security cms -D -i profile.mobileprovision)"
+          name="$(/usr/libexec/PlistBuddy -c 'Print :Name' /dev/stdin <<<"$plist")"
+          uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<<"$plist")"
+          appid="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' /dev/stdin <<<"$plist")"
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp profile.mobileprovision "$HOME/Library/MobileDevice/Provisioning Profiles/$uuid.mobileprovision"
+          rm profile.mobileprovision
+          echo "PROFILE_NAME=$name" >> "$GITHUB_ENV"
+          echo "BUNDLE_ID=${appid#*.}" >> "$GITHUB_ENV"
+
       - name: Archive
         working-directory: components/ios
-        env:
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
           # The product version rides the release-please line; the build
           # number is the run number offset past the hand-cut builds (1-4
@@ -54,10 +99,9 @@ jobs:
             -project Signalbox.xcodeproj -scheme Signalbox -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath build/Signalbox.xcarchive \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/asc/key.p8 \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
             DEVELOPMENT_TEAM=5TTNE9J58F \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD"
@@ -68,18 +112,37 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
-          # The committed ExportOptions defaults to "export" so a local run can
-          # never upload by accident; CI flips it deliberately.
-          sed 's|<string>export</string>|<string>upload</string>|' \
-            ExportOptions.plist > /tmp/ExportUpload.plist
+          # Build the upload options fresh (the committed ExportOptions.plist is
+          # the local "export to disk" default; CI uploads with manual signing).
+          # The API key here authenticates the upload only - no provisioning
+          # updates, so no certificate can be minted.
+          cat > /tmp/ExportUpload.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>5TTNE9J58F</string>
+            <key>uploadSymbols</key><true/>
+            <key>signingStyle</key><string>manual</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key><string>${PROFILE_NAME}</string>
+            </dict>
+          </dict>
+          </plist>
+          PLIST
           xcodebuild -exportArchive \
             -archivePath build/Signalbox.xcarchive \
             -exportOptionsPlist /tmp/ExportUpload.plist \
-            -allowProvisioningUpdates \
             -authenticationKeyPath ~/asc/key.p8 \
             -authenticationKeyID "$ASC_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
-      - name: Scrub the key
+      - name: Scrub secrets
         if: always()
-        run: rm -f ~/asc/key.p8
+        run: |
+          rm -f ~/asc/key.p8 /tmp/ExportUpload.plist
+          security delete-keychain build.keychain 2>/dev/null || true
