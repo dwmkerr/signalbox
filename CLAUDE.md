@@ -148,6 +148,19 @@ output, and take screenshots along the way. This is the way to verify an adapter
 against a real agent (e.g. confirm a Codex turn fires the hooks and the board
 updates), rather than only feeding canned hook payloads to `signalbox hook`.
 
+### TestFlight iOS signing
+
+`testflight.yml` signs with a STORED Apple Distribution cert + App Store profile
+(secrets `IOS_DIST_CERT_P12`, `IOS_DIST_CERT_PASSWORD`, `IOS_PROVISION_PROFILE`)
+and MANUAL signing. Never `-allowProvisioningUpdates`: an ephemeral runner has
+an empty keychain, so automatic signing mints a fresh cert every run and hits
+Apple's per-account cert cap.
+
+Building the `.p12`: use macOS's LibreSSL (`/usr/bin/openssl pkcs12 -export
+...`), never conda/Homebrew OpenSSL 3 - an OpenSSL 3 p12 fails macOS `security
+import` with "MAC verification failed (wrong password?)" even when the password
+is correct. Verify with `security import` locally before setting the secret.
+
 ## Conventions
 
 - Push to GitHub at the end of the day only - commit locally as you go, one

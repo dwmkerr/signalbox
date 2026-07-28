@@ -388,7 +388,9 @@ the quiet moon: <i>No sessions. Fire an agent and it appears here.</i></p>
 a memory and says so: <i>Can't reach hub at &lt;host&gt;. Some corporate networks will block device to device
 connections. Deploy a remote hub, or connect via a mobile hotspot (see docs).</i> The message names the
 likely cause because the failure is otherwise silent - a phone reaches the hub over the LAN, and a
-corporate/guest network that isolates devices drops the connection with nothing to show. The way back is
+corporate/guest network that isolates devices drops the connection with nothing to show. The <b>same
+message</b> appears on the top banner when the board still has cached cards (not only on the empty-board
+screen), so tapping <b>Reconnect</b> against an unreachable hub always explains itself. The way back is
 <b>Reconnect</b> (retry now, skipping the backoff), <b>Scan a New Hub</b>, and a
 destructive <b>Disconnect</b> behind the same confirm as Settings. A <b>rejected token</b> is its own line -
 a retry cannot fix it, so it leads with <b>Scan to Re-pair</b>. This is the state a relaunch lands on when
@@ -431,6 +433,14 @@ hub name is always visible, so you can tell a stale board from a live one.</p>
   <tr><td><span style="color:#6E6E73">&#9679;</span> Offline</td><td><code>Offline &middot; last seen 4m ago</code></td><td>Unreachable. The board is a memory and says so.</td></tr>
   <tr><td><span class="red">&#9679;</span> Rejected</td><td><code>Hub rejected this token</code></td><td>401. Send them to hub settings, do not silently retry.</td></tr>
 </table>
+<p><b>Fail fast, and show the attempt.</b> The one-shot <code>/state</code> probe and the pairing redeem
+run on a short-timeout session (~10s), separate from the long-lived stream (which keeps its ~90s idle
+timeout so a quiet live stream is not killed). A phone that cannot see the hub - a corporate/guest network
+that isolates devices - therefore fails in seconds, not the 60-90s a default timeout would hang for. While
+an attempt is in flight the app always shows it: pairing puts up a <b>Pairing with &lt;host&gt;&hellip;</b>
+progress HUD, and a Reconnect from the offline banner shows a <b>Reconnecting&hellip;</b> spinner banner
+(only when recovering from offline, so a plain foreground connect does not flash it). Never a tap that
+looks like it did nothing.</p>
 <p>Reconnect with <code>?since=N</code> carrying the highest <code>seq</code> seen, so the hub replays
 the gap. That is the primitive a phone needs across a tunnel, a lift, or a suspended app. Do not poll
 <code>/state</code> in a loop instead.</p>

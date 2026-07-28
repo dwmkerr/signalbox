@@ -18,6 +18,11 @@ struct SessionsView: View {
     @State private var pressed: String?
     @State private var query = ""
     @State private var confirmDisconnect = false
+    // True only while recovering from offline: a tapped Reconnect goes
+    // offline -> connecting, and we surface a "Reconnecting..." banner for that
+    // window. A plain foreground connect (which also passes through .connecting)
+    // is left alone so the banner does not flash on every return to the app.
+    @State private var reconnecting = false
     // The Hidden section starts collapsed and the user opens it. A search
     // overrides this to auto-reveal matches (see hiddenSectionExpanded).
     @State private var hiddenExpanded = false
@@ -131,6 +136,12 @@ struct SessionsView: View {
                 Text("This removes the hub. Scan or enter it again to reconnect.")
             }
             .overlay(alignment: .bottom) { JumpToast(feedback: hub.jumpFeedback) }
+            // Track only the offline -> connecting edge so "Reconnecting..." shows
+            // for a real reconnect, not for the connecting blip on foreground.
+            .onChange(of: hub.connection) { old, new in
+                if case .offline = old, case .connecting = new { reconnecting = true }
+                else if case .connecting = new {} else { reconnecting = false }
+            }
         }
     }
 
@@ -153,6 +164,14 @@ struct SessionsView: View {
         } else {
             notConnectedState
         }
+    }
+
+    // The unreachable message, shared by the full-screen offline state and the
+    // compact banner so the two never drift (the banner used to say only "Can't
+    // reach host", with none of the corporate-network cause). Markdown link;
+    // tint at the call site colors it.
+    private func unreachableMessage(_ host: String) -> Text {
+        Text("Can't reach hub at \(host). Some corporate networks will block device to device connections. Deploy a remote hub, or connect via a mobile hotspot ([see docs](https://github.com/dwmkerr/signalbox/blob/main/docs/mobile.md#corporate-networks)).")
     }
 
     // Paired, but the hub is not answering right now. Rejected is split out: a
@@ -185,8 +204,7 @@ struct SessionsView: View {
                 // that isolates devices makes this fail with nothing to show, so
                 // name the likely cause and the two ways out. The docs link is the
                 // repo page (Pages publishes only hero + specs, not docs/*.md).
-                Text("Can't reach hub at \(host). Some corporate networks will block device to device connections. Deploy a remote hub, or connect via a mobile hotspot ([see docs](https://github.com/dwmkerr/signalbox/blob/main/docs/mobile.md#corporate-networks)).")
-                    .tint(Theme.blue)
+                unreachableMessage(host).tint(Theme.blue)
             } actions: {
                 // hub.start() cancels the backoff wait and retries now, rather
                 // than leaving the user to wait out the loop's own timer.
@@ -251,38 +269,51 @@ struct SessionsView: View {
     // choose its connected face.
     private var isConfigured: Bool { !hubURL.isEmpty }
 
-    private enum OfflineBanner { case offline, rejected }
+    private enum OfflineBanner { case offline, rejected, connecting }
 
     // The banner shows only when the board has cards to sit above: an empty board
-    // gets the full offlineState screen instead. Connecting is transient, so it
-    // stays with the quiet connection dot rather than flashing a banner.
+    // gets the full offlineState screen instead. Connecting shows only mid-
+    // reconnect (see `reconnecting`), so a tapped Reconnect gives feedback while
+    // a plain foreground connect stays with the quiet connection dot.
     private var offlineBannerKind: OfflineBanner? {
         guard isConfigured, !hub.sessions.isEmpty else { return nil }
         switch hub.connection {
         case .offline: return .offline
         case .rejected: return .rejected
-        default: return nil
+        case .connecting: return reconnecting ? .connecting : nil
+        case .live: return nil
         }
     }
 
     private func offlineBanner(_ kind: OfflineBanner) -> some View {
         let host = hub.config.url.host ?? "the hub"
         return HStack(spacing: 10) {
-            Image(systemName: kind == .rejected ? "lock.trianglebadge.exclamationmark" : "antenna.radiowaves.left.and.right.slash")
-                .font(.system(size: 16))
-                .foregroundStyle(Theme.amber)
+            // A spinner while reconnecting, otherwise the state icon.
+            Group {
+                if kind == .connecting {
+                    ProgressView().controlSize(.small).tint(Theme.amber)
+                } else {
+                    Image(systemName: kind == .rejected ? "lock.trianglebadge.exclamationmark" : "antenna.radiowaves.left.and.right.slash")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Theme.amber)
+                }
+            }
+            .frame(width: 20)
             VStack(alignment: .leading, spacing: 1) {
-                Text(kind == .rejected ? "Hub rejected this device" : "Hub offline")
+                Text(bannerTitle(kind))
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.text)
-                Text(kind == .rejected ? "The token is no longer good - re-pair." : "Can't reach \(host). This is the last board we saw.")
+                bannerSubtitle(kind, host)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.dim)
-                    .lineLimit(1)
+                    .tint(Theme.blue)
+                    .lineLimit(kind == .offline ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 6)
             // Reconnect retries now (skipping the backoff wait); rejected cannot
-            // be fixed by a retry, so it leads with re-pairing in the menu.
+            // be fixed by a retry, so it leads with re-pairing in the menu;
+            // connecting is already trying, so it offers no action.
             if kind == .offline {
                 Button { hub.start() } label: {
                     Text("Reconnect")
@@ -291,24 +322,42 @@ struct SessionsView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Menu {
-                Button { showPairSheet = true } label: {
-                    Label(kind == .rejected ? "Scan to Re-pair" : "Scan a New Hub", systemImage: "qrcode.viewfinder")
+            if kind != .connecting {
+                Menu {
+                    Button { showPairSheet = true } label: {
+                        Label(kind == .rejected ? "Scan to Re-pair" : "Scan a New Hub", systemImage: "qrcode.viewfinder")
+                    }
+                    Button(role: .destructive) { confirmDisconnect = true } label: {
+                        Label("Disconnect", systemImage: "wifi.slash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 17))
+                        .foregroundStyle(Theme.dim)
+                        .frame(width: 30, height: 30)
                 }
-                Button(role: .destructive) { confirmDisconnect = true } label: {
-                    Label("Disconnect", systemImage: "wifi.slash")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 17))
-                    .foregroundStyle(Theme.dim)
-                    .frame(width: 30, height: 30)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(Theme.amber.opacity(0.14))
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.amber.opacity(0.3)).frame(height: 0.5) }
+    }
+
+    private func bannerTitle(_ kind: OfflineBanner) -> String {
+        switch kind {
+        case .connecting: return "Reconnecting..."
+        case .offline: return "Hub offline"
+        case .rejected: return "Hub rejected this device"
+        }
+    }
+
+    private func bannerSubtitle(_ kind: OfflineBanner, _ host: String) -> Text {
+        switch kind {
+        case .connecting: return Text("Reaching \(host).")
+        case .offline: return unreachableMessage(host)
+        case .rejected: return Text("The token is no longer good - re-pair.")
+        }
     }
 
     // A board card. `dimmed` draws a hidden row: faded, an eye-slash where its
