@@ -388,7 +388,9 @@ the quiet moon: <i>No sessions. Fire an agent and it appears here.</i></p>
 a memory and says so: <i>Can't reach hub at &lt;host&gt;. Some corporate networks will block device to device
 connections. Deploy a remote hub, or connect via a mobile hotspot (see docs).</i> The message names the
 likely cause because the failure is otherwise silent - a phone reaches the hub over the LAN, and a
-corporate/guest network that isolates devices drops the connection with nothing to show. The way back is
+corporate/guest network that isolates devices drops the connection with nothing to show. The <b>same
+message</b> appears on the top banner when the board still has cached cards (not only on the empty-board
+screen), so tapping <b>Reconnect</b> against an unreachable hub always explains itself. The way back is
 <b>Reconnect</b> (retry now, skipping the backoff), <b>Scan a New Hub</b>, and a
 destructive <b>Disconnect</b> behind the same confirm as Settings. A <b>rejected token</b> is its own line -
 a retry cannot fix it, so it leads with <b>Scan to Re-pair</b>. This is the state a relaunch lands on when

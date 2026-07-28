@@ -155,6 +155,14 @@ struct SessionsView: View {
         }
     }
 
+    // The unreachable message, shared by the full-screen offline state and the
+    // compact banner so the two never drift (the banner used to say only "Can't
+    // reach host", with none of the corporate-network cause). Markdown link;
+    // tint at the call site colors it.
+    private func unreachableMessage(_ host: String) -> Text {
+        Text("Can't reach hub at \(host). Some corporate networks will block device to device connections. Deploy a remote hub, or connect via a mobile hotspot ([see docs](https://github.com/dwmkerr/signalbox/blob/main/docs/mobile.md#corporate-networks)).")
+    }
+
     // Paired, but the hub is not answering right now. Rejected is split out: a
     // retry with the same token just fails again, so it leads with re-pairing
     // rather than a Reconnect that cannot succeed.
@@ -185,8 +193,7 @@ struct SessionsView: View {
                 // that isolates devices makes this fail with nothing to show, so
                 // name the likely cause and the two ways out. The docs link is the
                 // repo page (Pages publishes only hero + specs, not docs/*.md).
-                Text("Can't reach hub at \(host). Some corporate networks will block device to device connections. Deploy a remote hub, or connect via a mobile hotspot ([see docs](https://github.com/dwmkerr/signalbox/blob/main/docs/mobile.md#corporate-networks)).")
-                    .tint(Theme.blue)
+                unreachableMessage(host).tint(Theme.blue)
             } actions: {
                 // hub.start() cancels the backoff wait and retries now, rather
                 // than leaving the user to wait out the loop's own timer.
@@ -275,10 +282,12 @@ struct SessionsView: View {
                 Text(kind == .rejected ? "Hub rejected this device" : "Hub offline")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.text)
-                Text(kind == .rejected ? "The token is no longer good - re-pair." : "Can't reach \(host). This is the last board we saw.")
+                (kind == .rejected ? Text("The token is no longer good - re-pair.") : unreachableMessage(host))
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.dim)
-                    .lineLimit(1)
+                    .tint(Theme.blue)
+                    .lineLimit(kind == .rejected ? 1 : nil)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 6)
             // Reconnect retries now (skipping the backoff wait); rejected cannot
