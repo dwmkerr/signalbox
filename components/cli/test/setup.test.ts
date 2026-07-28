@@ -6,7 +6,7 @@ import { join } from "node:path";
 // scanClaudeHooks is not exported; exercise the observable behaviour instead
 // by driving runSetup with a fake HOME and capturing stdout. Lighter: just
 // assert the classification via a settings fixture through the public runSetup
-// output. We check the three cases: ours, wrapper (other), empty.
+// output. We check the three cases: ours, unrelated hook (other), empty.
 
 function runInstallInHome(settings: object | null, args: string[]): { out: string; home: string } {
   const home = mkdtempSync(join(tmpdir(), "sbhome-"));
@@ -43,10 +43,25 @@ describe("install claude-hook detection", () => {
     expect(out).not.toContain("merge the JSON block");
   });
 
-  test("a wrapper script reads as present, never asks to merge", () => {
-    const out = runInstall(hookBlock("~/.claude/hooks/agent-notify.sh"), ["--agent", "claude"]);
-    expect(out).toContain("hooks present via a wrapper");
-    expect(out).not.toContain("merge the JSON block");
+  test("an unrelated hook gets signalbox appended alongside, untouched", () => {
+    // A hook the user set up before signalbox is not assumed to be a wrapper;
+    // signalbox is appended alongside it (arrays compose, no double-fire).
+    const { out, home } = runInstallInHome(hookBlock("~/.claude/hooks/agent-notify.sh"), ["--agent", "claude"]);
+    expect(out).toContain("✔ Claude Code");
+    expect(out).toContain("(backup: ");
+    const s = readSettings(home);
+    for (const ev of ["Notification", "Stop", "UserPromptSubmit", "SessionStart", "SessionEnd"]) {
+      const cmds = s.hooks[ev].flatMap((e: any) => e.hooks.map((h: any) => h.command));
+      expect(cmds).toEqual(["~/.claude/hooks/agent-notify.sh", "signalbox hook claude"]);
+    }
+  });
+
+  test("a signalbox-ish script name is not the marker - entry still appended", () => {
+    // Presence is read from the literal command, never guessed from a name.
+    const { home } = runInstallInHome(hookBlock("~/.claude/hooks/signalbox-dispatch.sh"), ["--agent", "claude"]);
+    const s = readSettings(home);
+    const cmds = s.hooks.Stop.flatMap((e: any) => e.hooks.map((h: any) => h.command));
+    expect(cmds).toEqual(["~/.claude/hooks/signalbox-dispatch.sh", "signalbox hook claude"]);
   });
 
   test("no hooks merges them in, with a backup", () => {
@@ -102,12 +117,12 @@ describe("install claude-hook detection", () => {
     expect(s.hooks.PermissionRequest.length).toBe(1);
   });
 
-  test("a wrapper setup is not given direct ask hooks (cannot verify, may double-fire)", () => {
-    const { out, home } = runInstallInHome(hookBlock("~/.claude/hooks/agent-notify.sh"), ["--agent", "claude"]);
-    expect(out).toContain("hooks present via a wrapper");
+  test("an unrelated hook still gets the ask hooks wired alongside", () => {
+    // The ask hooks compose too - no wrapper assumption blocks them.
+    const { home } = runInstallInHome(hookBlock("~/.claude/hooks/agent-notify.sh"), ["--agent", "claude"]);
     const s = readSettings(home);
-    expect(s.hooks.PermissionRequest).toBeUndefined();
-    expect(s.hooks.PreToolUse).toBeUndefined();
+    expect(s.hooks.PermissionRequest?.[0]?.hooks?.[0]?.command).toBe("signalbox hook claude");
+    expect(s.hooks.PreToolUse?.some((e: any) => e.matcher === "AskUserQuestion")).toBe(true);
   });
 });
 
