@@ -69,7 +69,7 @@ signalbox init --agent claude
 - Hooks run under a transient shell (`sh -c`, or a dispatcher script), so the hook's parent is walked past shell wrappers (bounded) to the agent process, captured as `proc` for the liveness sweep.
 - `SIGNALBOX_RAW` (diagnostic, off by default): attaches the untouched hook payload to the event as `raw`, so it can be inspected in the hub's own event log (`state --json` / events.jsonl). Stripped by the redacted profile; never sent in normal operation. Applies to `hook cursor` too.
 
-## Cursor (`signalbox hook cursor`, stdin JSON) - (available, still in testing)
+## Cursor (`signalbox hook cursor`, stdin JSON)
 
 Cursor's own agent (Composer / Agent), via [Cursor 1.7 Hooks](https://cursor.com/docs/hooks) (beta). Agents you run in Cursor's *integrated terminal* (claude, opencode, pi) already fire their own hooks - this adapter is for Cursor's built-in agent.
 

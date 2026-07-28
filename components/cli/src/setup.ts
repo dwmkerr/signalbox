@@ -780,7 +780,7 @@ function compDefs(s: Setup): CompDef[] {
       info: "Fires events as Claude Code works - asks, finishes, errors - so its sessions show and update on your board.",
       done: "Claude Code hooks active", miss: "hooks not set up, Claude events won't fire",
       step: (x) => x.stepClaudeHooks(), unstep: (x) => x.unstepClaudeHooks() },
-    { id: "cursor", flag: "--agent cursor", category: "Integrations", label: "Cursor (testing)",
+    { id: "cursor", flag: "--agent cursor", category: "Integrations", label: "Cursor",
       info: "Fires events as Cursor's own agent works - asks, finishes, errors - so its sessions show and update on your board. Uses Cursor 1.7 Hooks (beta).",
       done: "Cursor hooks active", miss: "hooks not set up, Cursor events won't fire",
       step: (x) => x.stepCursorHooks(), unstep: (x) => x.unstepCursorHooks() },
