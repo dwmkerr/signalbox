@@ -30,7 +30,7 @@ Install:
 signalbox init --agent claude
 ```
 
-`init` merges the JSON block into `~/.claude/settings.json` with consent (timestamped backup, atomic parse-validated write; declining prints the block to apply by hand). Detection is forgiving: an event whose hook routes through a wrapper script counts as present - merging there would double-fire every hook, so wrapper-routed events are never touched. `--remove` reverses the edit, removing only the literal signalbox commands.
+`init` merges the JSON block into `~/.claude/settings.json` with consent (timestamped backup, atomic parse-validated write; declining prints the block to apply by hand). Presence is read from the literal `signalbox hook claude` command, never guessed from a script name: an event that lacks it gets signalbox appended alongside whatever is already there. Hook arrays compose - every entry in an event fires - so an existing hook is never assumed to be signalbox and never rewritten, and appending alongside it cannot double-fire signalbox. `--remove` reverses the edit, removing only the literal signalbox commands.
 
 ```json
 {
@@ -79,7 +79,7 @@ Install:
 signalbox init --agent cursor
 ```
 
-`init` merges the block into `~/.cursor/hooks.json` with consent (backup + atomic write, like Claude's; wrapper-routed hooks count as present and are never touched). The block, to apply by hand if you decline:
+`init` merges the block into `~/.cursor/hooks.json` with consent (backup + atomic write, like Claude's; presence is the literal `signalbox hook cursor` command, and signalbox is appended alongside any existing hooks, never assuming they are ours). The block, to apply by hand if you decline:
 
 ```json
 {
