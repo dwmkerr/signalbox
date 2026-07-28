@@ -32,6 +32,16 @@ const statusDone = "✓"; // already in place, nothing touched
 const statusInstalled = "installed"; // applied this run
 const statusNeeds = "✗"; // needs user action (or was declined)
 
+// The literal command signalbox writes into each agent's hooks - and the only
+// marker of "already wired". Presence is read from this exact command in the
+// config, never guessed from a script's name: hook arrays compose, so an
+// unrelated hook the user set up before signalbox is left in place and a
+// signalbox entry is appended alongside it (it cannot double-fire). We make no
+// assumption that some other hook is a signalbox wrapper.
+const claudeHookCmd = "signalbox hook claude";
+const cursorHookCmd = "signalbox hook cursor";
+const codexHookCmd = "signalbox hook codex";
+
 // The exact merge block for ~/.claude/settings.json - embedded so install
 // can print it even outside a repo checkout.
 const claudeHooksBlock = `{
@@ -221,21 +231,6 @@ class Setup {
     } catch (err) {
       return { status: statusNeeds, name, detail: `cannot read ${settingsPath}: ${err}` };
     }
-    // The classic events are wrapper-routed: every one has some hook, none the
-    // literal signalbox command (a dotfiles dispatcher that calls signalbox).
-    // We cannot verify what a script does and merging would double-fire, so
-    // report present-but-unverified and never write - including the additive
-    // ask hooks, which could double-fire whatever the wrapper already does.
-    const classicWrapper = scan.empty.length === 0 && scan.ours.length !== claudeHookEvents.length;
-    if (classicWrapper) {
-      return {
-        status: statusDone,
-        name,
-        detail: `${settingsPath} (hooks present via a wrapper - ensure it calls 'signalbox hook claude')`,
-      };
-    }
-    // The additive ask-enrichment hooks (only trusted when the classic setup
-    // is signalbox's own, which the wrapper guard above has ensured).
     const permPresent = this.readSettingsSafe(settingsPath, (s) => signalboxHookOnEvent(s, "PermissionRequest"));
     const askPresent = this.readSettingsSafe(settingsPath, askQuestionPresent);
     // Every classic event calls signalbox directly and both ask hooks are
@@ -243,8 +238,14 @@ class Setup {
     if (scan.ours.length === claudeHookEvents.length && permPresent && askPresent) {
       return { status: statusDone, name, detail: settingsPath };
     }
+    // Any event without the literal signalbox command needs it - whether it has
+    // no hook (empty) or an unrelated one the user set up first (other). Arrays
+    // compose, so signalbox is appended alongside and cannot double-fire; we
+    // never assume an existing hook is a signalbox wrapper. missingEvents drives
+    // the write; missing is the display list (adds the two ask hooks if absent).
+    const missingEvents = [...scan.empty, ...scan.other];
     const missing = [
-      ...scan.empty,
+      ...missingEvents,
       ...(permPresent ? [] : ["PermissionRequest"]),
       ...(askPresent ? [] : ["PreToolUse[AskUserQuestion]"]),
     ];
@@ -257,13 +258,13 @@ class Setup {
       };
     }
     try {
-      // Only the classic events with no hook at all are touched (scan.empty) -
-      // anything the user routes elsewhere is left as it was. The additive ask
-      // hooks are appended only when absent; the AskUserQuestion entry sits
-      // alongside any PreToolUse matchers the user already has.
+      // Appends a signalbox entry to each event missing one (no hook, or only
+      // unrelated hooks - both compose safely alongside). The user's own entries
+      // are left exactly as they were. The two ask hooks are appended only when
+      // absent; the AskUserQuestion entry sits alongside any PreToolUse matcher.
       const backup = mergeJSONFile(settingsPath, (settings) => {
         settings.hooks ??= {};
-        for (const ev of scan.empty) {
+        for (const ev of missingEvents) {
           settings.hooks[ev] ??= [];
           settings.hooks[ev].push({ hooks: [{ type: "command", command: "signalbox hook claude" }] });
         }
@@ -304,29 +305,24 @@ class Setup {
     if (scan.ours.length === cursorHookEvents.length) {
       return { status: statusDone, name, detail: hooksPath };
     }
-    // Every event already routes somewhere but not through the literal
-    // signalbox command - assume a wrapper and report present-but-unverified,
-    // never missing (merging would double-fire the hooks).
-    if (scan.empty.length === 0) {
-      return {
-        status: statusDone,
-        name,
-        detail: `${hooksPath} (hooks present via a wrapper - ensure it calls 'signalbox hook cursor')`,
-      };
-    }
+    // Any event without the literal signalbox command needs it - no hook, or an
+    // unrelated one the user set up first. Arrays compose, so signalbox is
+    // appended alongside and cannot double-fire; we never assume an existing
+    // hook is a signalbox wrapper.
+    const missing = [...scan.empty, ...scan.other];
     if (!this.confirm(`merge the signalbox hooks into ${hooksPath} (backup taken)`)) {
       return {
         status: statusNeeds,
         name,
         detail: `merge the JSON block below into ${hooksPath}`,
-        after: `Cursor hooks - merge this into ${hooksPath} (missing: ${scan.empty.join(", ")}):\n${cursorHooksBlock}`,
+        after: `Cursor hooks - merge this into ${hooksPath} (missing: ${missing.join(", ")}):\n${cursorHooksBlock}`,
       };
     }
     try {
       const backup = mergeJSONFile(hooksPath, (cfg) => {
         cfg.version ??= 1;
         cfg.hooks ??= {};
-        for (const ev of scan.empty) {
+        for (const ev of missing) {
           cfg.hooks[ev] ??= [];
           cfg.hooks[ev].push({ command: "signalbox hook cursor" });
         }
@@ -337,7 +333,7 @@ class Setup {
         status: statusNeeds,
         name,
         detail: `could not merge (${err}) - apply the block below by hand`,
-        after: `Cursor hooks - merge this into ${hooksPath} (missing: ${scan.empty.join(", ")}):\n${cursorHooksBlock}`,
+        after: `Cursor hooks - merge this into ${hooksPath} (missing: ${missing.join(", ")}):\n${cursorHooksBlock}`,
       };
     }
   }
@@ -384,21 +380,17 @@ class Setup {
     if (scan.ours.length === codexHookEvents.length) {
       return { status: statusDone, name, detail: hooksPath };
     }
-    // Every event routes somewhere but not through the literal signalbox command
-    // (a wrapper, e.g. koi) - report present-but-unverified, never missing, since
-    // printing the block would double-fire the hooks.
-    if (scan.empty.length === 0) {
-      return {
-        status: statusDone,
-        name,
-        detail: `${hooksPath} (hooks present via a wrapper - ensure it calls 'signalbox hook codex')`,
-      };
-    }
+    // Any event without the literal signalbox command needs it - no hook, or an
+    // unrelated one the user set up first. Arrays compose, so signalbox is
+    // appended alongside and cannot double-fire; we never assume an existing
+    // hook is a signalbox wrapper. (Codex hooks are printed to merge, not
+    // auto-written.)
+    const missing = [...scan.empty, ...scan.other];
     return {
       status: statusNeeds,
       name,
       detail: `merge the JSON block below into ${hooksPath}`,
-      after: `Codex hooks - merge this into ${hooksPath} (needs [features] hooks = true in ~/.codex/config.toml; missing: ${scan.empty.join(", ")}):\n${codexHooksBlock}`,
+      after: `Codex hooks - merge this into ${hooksPath} (needs [features] hooks = true in ~/.codex/config.toml; missing: ${missing.join(", ")}):\n${codexHooksBlock}`,
     };
   }
 
@@ -633,7 +625,7 @@ function signalboxHookOnEvent(settings: any, ev: string): boolean {
   const entries = settings?.hooks?.[ev];
   if (!Array.isArray(entries)) return false;
   return entries.some((e: any) =>
-    (e?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes("signalbox"))
+    (e?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes(claudeHookCmd))
   );
 }
 
@@ -647,21 +639,21 @@ function askQuestionPresent(settings: any): boolean {
   return entries.some(
     (e: any) =>
       e?.matcher === "AskUserQuestion" &&
-      (e?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes("signalbox"))
+      (e?.hooks ?? []).some((h: any) => typeof h?.command === "string" && h.command.includes(claudeHookCmd))
   );
 }
 
 interface HookScan {
-  ours: string[]; // events whose hook calls signalbox directly
-  other: string[]; // events with some hook, but not the signalbox command
-  empty: string[]; // events with no hook at all
+  ours: string[]; // events whose hook runs the literal signalbox command
+  other: string[]; // events with only unrelated hooks - still need signalbox appended
+  empty: string[]; // events with no hook at all - still need signalbox
 }
 
-// scanClaudeHooks classifies each hook event. Parsed leniently so user
-// settings with matchers still read fine. "ours" recognises both the literal
-// `signalbox claude-hook` and any command that mentions signalbox, so a
-// dispatcher named e.g. signalbox-hook.sh still counts; a generic wrapper
-// (agent-notify.sh) lands in "other", which the caller treats as present.
+// scanClaudeHooks classifies each hook event. Parsed leniently so user settings
+// with matchers still read fine. "ours" is the literal `signalbox hook claude`
+// command only - a script merely named signalbox-ish does not count (presence is
+// read from the command, never guessed). Anything else lands in "other" or
+// "empty"; both get a signalbox entry appended alongside (arrays compose).
 function scanClaudeHooks(settingsPath: string): HookScan {
   let settings: any = {};
   try {
@@ -678,7 +670,7 @@ function scanClaudeHooks(settingsPath: string): HookScan {
           (c: unknown): c is string => typeof c === "string"
         )
       : [];
-    if (commands.some((c) => c.includes("signalbox"))) scan.ours.push(evName);
+    if (commands.some((c) => c.includes(claudeHookCmd))) scan.ours.push(evName);
     else if (commands.length > 0) scan.other.push(evName);
     else scan.empty.push(evName);
   }
@@ -706,7 +698,7 @@ function scanCodexHooks(hooksPath: string): HookScan {
           (c: unknown): c is string => typeof c === "string"
         )
       : [];
-    if (commands.some((c) => c.includes("signalbox"))) scan.ours.push(evName);
+    if (commands.some((c) => c.includes(codexHookCmd))) scan.ours.push(evName);
     else if (commands.length > 0) scan.other.push(evName);
     else scan.empty.push(evName);
   }
@@ -738,7 +730,7 @@ function scanCursorHooks(hooksPath: string): CursorHookScan {
     const commands: string[] = Array.isArray(entries)
       ? entries.map((e: any) => e?.command).filter((c: unknown): c is string => typeof c === "string")
       : [];
-    if (commands.some((c) => c.includes("signalbox"))) scan.ours.push(evName);
+    if (commands.some((c) => c.includes(cursorHookCmd))) scan.ours.push(evName);
     else if (commands.length > 0) scan.other.push(evName);
     else scan.empty.push(evName);
   }
@@ -780,7 +772,7 @@ function compDefs(s: Setup): CompDef[] {
       info: "Fires events as Claude Code works - asks, finishes, errors - so its sessions show and update on your board.",
       done: "Claude Code hooks active", miss: "hooks not set up, Claude events won't fire",
       step: (x) => x.stepClaudeHooks(), unstep: (x) => x.unstepClaudeHooks() },
-    { id: "cursor", flag: "--agent cursor", category: "Integrations", label: "Cursor (testing)",
+    { id: "cursor", flag: "--agent cursor", category: "Integrations", label: "Cursor",
       info: "Fires events as Cursor's own agent works - asks, finishes, errors - so its sessions show and update on your board. Uses Cursor 1.7 Hooks (beta).",
       done: "Cursor hooks active", miss: "hooks not set up, Cursor events won't fire",
       step: (x) => x.stepCursorHooks(), unstep: (x) => x.unstepCursorHooks() },

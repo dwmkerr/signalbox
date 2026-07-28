@@ -15,7 +15,7 @@ block (backup taken, `--reverse` removes only signalbox's own lines).
 | Agent | How it's wired | Status |
 |---|---|---|
 | **Claude Code** | Hooks in `~/.claude/settings.json` that fire as Claude works. | Stable |
-| **Cursor** | Cursor's own agent, via Cursor 1.7 Hooks (`~/.cursor/hooks.json`). | Available, still in testing |
+| **Cursor** | Cursor's own agent, via Cursor 1.7 Hooks (`~/.cursor/hooks.json`). | Available |
 | **Codex** | Hooks in `~/.codex/hooks.json` (needs `[features] hooks = true`) that fire as Codex works, asks and needs approval. | Available, still in testing |
 | **VS Code** | Agents in the integrated terminal are auto-detected (`TERM_PROGRAM`); jump raises the VS Code window (window-level, not tab). No setup. | Available, still in testing |
 | **OpenCode** | A plugin in `~/.config/opencode/plugin`. | Stable |

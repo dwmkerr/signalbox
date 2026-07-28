@@ -30,7 +30,7 @@ Install:
 signalbox init --agent claude
 ```
 
-`init` merges the JSON block into `~/.claude/settings.json` with consent (timestamped backup, atomic parse-validated write; declining prints the block to apply by hand). Detection is forgiving: an event whose hook routes through a wrapper script counts as present - merging there would double-fire every hook, so wrapper-routed events are never touched. `--remove` reverses the edit, removing only the literal signalbox commands.
+`init` merges the JSON block into `~/.claude/settings.json` with consent (timestamped backup, atomic parse-validated write; declining prints the block to apply by hand). Presence is read from the literal `signalbox hook claude` command, never guessed from a script name: an event that lacks it gets signalbox appended alongside whatever is already there. Hook arrays compose - every entry in an event fires - so an existing hook is never assumed to be signalbox and never rewritten, and appending alongside it cannot double-fire signalbox. `--remove` reverses the edit, removing only the literal signalbox commands.
 
 ```json
 {
@@ -69,7 +69,7 @@ signalbox init --agent claude
 - Hooks run under a transient shell (`sh -c`, or a dispatcher script), so the hook's parent is walked past shell wrappers (bounded) to the agent process, captured as `proc` for the liveness sweep.
 - `SIGNALBOX_RAW` (diagnostic, off by default): attaches the untouched hook payload to the event as `raw`, so it can be inspected in the hub's own event log (`state --json` / events.jsonl). Stripped by the redacted profile; never sent in normal operation. Applies to `hook cursor` too.
 
-## Cursor (`signalbox hook cursor`, stdin JSON) - (available, still in testing)
+## Cursor (`signalbox hook cursor`, stdin JSON)
 
 Cursor's own agent (Composer / Agent), via [Cursor 1.7 Hooks](https://cursor.com/docs/hooks) (beta). Agents you run in Cursor's *integrated terminal* (claude, opencode, pi) already fire their own hooks - this adapter is for Cursor's built-in agent.
 
@@ -79,7 +79,7 @@ Install:
 signalbox init --agent cursor
 ```
 
-`init` merges the block into `~/.cursor/hooks.json` with consent (backup + atomic write, like Claude's; wrapper-routed hooks count as present and are never touched). The block, to apply by hand if you decline:
+`init` merges the block into `~/.cursor/hooks.json` with consent (backup + atomic write, like Claude's; presence is the literal `signalbox hook cursor` command, and signalbox is appended alongside any existing hooks, never assuming they are ours). The block, to apply by hand if you decline:
 
 ```json
 {
@@ -107,7 +107,7 @@ signalbox init --agent cursor
 
 - `session_key = cursor:<conversation_id>`.
 - Title and `cwd`: `workspace_roots[0]` (basename is the title).
-- `reply`: best-effort from `transcript_path` on stop/subagentStop, **transcript format unverified** - returns empty (and the previous reply carries) if it does not match the assumed JSONL shape.
+- `prompt` and `reply` come from `transcript_path` on stop/subagentStop (Cursor has no prompt-submit hook, so neither is in the payload). Verified shape: `~/.cursor/projects/<ws>/agent-transcripts/<id>/<id>.jsonl`, one JSON object per line, `{role:"user"|"assistant", message:{content:[{type:"text", text}]}}` - role at the top level. `reply` = last assistant text; `prompt` = last user text, unwrapped from its `<user_query>...</user_query>` tag (a `<timestamp>` tag precedes it). Returns empty (previous value carries) on any mismatch.
 - `proc` and `SIGNALBOX_RAW` behave as for Claude (shell-wrapper walk to the agent process; raw-payload diagnostic).
 - Jump-back raises the **Cursor window** for the workspace (bundle id `com.todesktop.230313mzl4w4u92`, plus an Accessibility `AXRaise` on the window whose title contains the project folder). **Window-level only** - Cursor's editor/terminal tabs are not externally addressable, so a specific Composer tab cannot be targeted.
 - **Cursor Hooks are beta**: event names, payload fields (`status`, `transcript_path`, `workspace_roots`) and the permission-signal behaviour should be confirmed against a live Cursor; the mapping degrades safely if they shift.

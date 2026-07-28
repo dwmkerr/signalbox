@@ -14,7 +14,7 @@ import { jump } from "./jump";
 import { runPair, lanIPv4 } from "./pair";
 import { captureProc, captureAgentProc } from "./proc";
 import { mapClaudeHook, claudeReply, sessionName, type ClaudeHook } from "./claude";
-import { mapCursorHook, cursorReply, cursorWorkspace, cursorBundle, editorTerminalOrigin, hostPrefixedAgent, type CursorHook } from "./cursor";
+import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle, editorTerminalOrigin, hostPrefixedAgent, type CursorHook } from "./cursor";
 import { mapCodexHook, codexReply, codexSessionName, type CodexHook } from "./codex";
 import {
   loadSettings, saveSettings, settingsPath, normalizeBindInput, lanHint,
@@ -470,7 +470,9 @@ async function runCursorHook(): Promise<void> {
     eventType: mapped.eventType,
     reason: mapped.reason,
     title,
-    prompt: mapped.detail,
+    // Cursor has no prompt-submit hook; on a turn boundary the transcript
+    // carries the latest user request, so recover it there (else "").
+    prompt: cursorPrompt(payload) || mapped.detail,
     reply: cursorReply(payload),
     sessionKey: key,
     origin,

@@ -64,7 +64,7 @@ to turn that component off:
 
 ```bash
 signalbox init --agent claude          # just wire Claude Code
-signalbox init --agent cursor          # wire Cursor's own agent (available, still in testing)
+signalbox init --agent cursor          # wire Cursor's own agent
 signalbox init --agent codex           # wire Codex (needs [features] hooks = true)
 signalbox init --agent claude --agent pi   # wire two agents
 signalbox init --app                   # open the menu bar app (it runs the hub)
@@ -268,7 +268,7 @@ The `0.0.0.0` wildcard is preferred over a single pinned interface IP because th
 ## hook and plumbing
 
 - `signalbox hook claude` - reads a Claude Code hook payload on stdin and fires the mapped event ([agent integrations](adapters.md)).
-- `signalbox hook cursor` - reads a Cursor hook payload on stdin and fires the mapped event ([agent integrations](adapters.md)). Available, still in testing (Cursor Hooks are beta).
+- `signalbox hook cursor` - reads a Cursor hook payload on stdin and fires the mapped event ([agent integrations](adapters.md)). Available (Cursor Hooks are beta upstream).
 - `signalbox hook codex` - reads a Codex hook payload on stdin and fires the mapped event ([agent integrations](adapters.md)). Needs `[features] hooks = true` in `~/.codex/config.toml`.
 - `signalbox tmux seen-pane --socket S --pane P` - for tmux's `pane-focus-in` hook: looking at a pane clears its flag, exactly like jumping to it.
 - `signalbox drain` - flush the offline spool. Every event-sending command drains opportunistically before posting, so this is rarely needed by hand.
