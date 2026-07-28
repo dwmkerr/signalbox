@@ -181,7 +181,12 @@ struct SessionsView: View {
             ContentUnavailableView {
                 Label("Hub offline", systemImage: "antenna.radiowaves.left.and.right.slash")
             } description: {
-                Text("Can't reach \(host). The board is the last thing it told us.")
+                // A phone reaches the hub over the LAN; a corporate/guest network
+                // that isolates devices makes this fail with nothing to show, so
+                // name the likely cause and the two ways out. The docs link is the
+                // repo page (Pages publishes only hero + specs, not docs/*.md).
+                Text("Can't reach hub at \(host). Some corporate networks will block device to device connections. Deploy a remote hub, or connect via a mobile hotspot ([see docs](https://github.com/dwmkerr/signalbox/blob/main/docs/mobile.md#corporate-networks)).")
+                    .tint(Theme.blue)
             } actions: {
                 // hub.start() cancels the backoff wait and retries now, rather
                 // than leaving the user to wait out the loop's own timer.
