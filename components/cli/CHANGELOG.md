@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/dwmkerr/signalbox/compare/v0.1.4...v0.1.5) (2026-07-28)
+
+
+### Features
+
+* Cursor prompt + reply previews (transcript parse) + hero 'Get the app' ([#36](https://github.com/dwmkerr/signalbox/issues/36)) ([ebcb5e3](https://github.com/dwmkerr/signalbox/commit/ebcb5e312cdd55b405516ed5e16ed0304065a84a))
+
 ## [0.1.4](https://github.com/dwmkerr/signalbox/compare/v0.1.3...v0.1.4) (2026-07-27)
 
 
