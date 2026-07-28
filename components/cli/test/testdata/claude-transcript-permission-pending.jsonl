@@ -1,0 +1,27 @@
+{"type": "last-prompt"}
+{"type": "mode"}
+{"type": "permission-mode"}
+{"type": "file-history-snapshot"}
+{"type": "file-history-snapshot"}
+{"type": "attachment"}
+{"type": "user", "session_id": "s1", "message": {"role": "user", "content": "prompt text"}}
+{"type": "attachment"}
+{"type": "attachment"}
+{"type": "attachment"}
+{"type": "attachment"}
+{"type": "last-prompt"}
+{"type": "mode"}
+{"type": "permission-mode"}
+{"type": "ai-title"}
+{"type": "assistant", "session_id": "s1", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01KW7NFMfAmR9aLErfdytnp8", "name": "AskUserQuestion", "input": {"questions": [{"question": "Which colour do you prefer?", "header": "Colour", "options": [{"label": "Red", "description": "Prefer red"}, {"label": "Blue", "description": "Prefer blue"}, {"label": "Green", "description": "Prefer green"}], "multiSelect": false}]}}]}}
+{"type": "user", "session_id": "s1", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01KW7NFMfAmR9aLErfdytnp8", "content": "result"}]}}
+{"type": "attachment"}
+{"type": "assistant", "session_id": "s1", "message": {"role": "assistant", "content": [{"type": "text", "text": "assistant text"}]}}
+{"type": "system"}
+{"type": "system"}
+{"type": "file-history-snapshot"}
+{"type": "user", "session_id": "s1", "message": {"role": "user", "content": "prompt text"}}
+{"type": "attachment"}
+{"type": "attachment"}
+{"type": "attachment"}
+{"type": "assistant", "session_id": "s1", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01H17bTPuFVjwDKC9k7Sgwig", "name": "Bash", "input": {"command": "touch test-file.txt", "description": "Create empty test-file.txt"}}]}}
