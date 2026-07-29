@@ -78,6 +78,7 @@ https://github.com/user-attachments/assets/2f45c187-e90a-4151-bc40-19ddfa48d89a
 - `⌃⌥J` opens the jumplist: see sessions and their status, jump to sessions, search sessions, rename sessions, hide sessions
 - Menu bar session list for quick access
 - [Integrations](docs/integrations.md) for Cursor, Claude Code, Codex, OpenCode, pi and VS Code
+- A [remote hub](docs/remote-hub.md) for hotel and corporate wifi, where the phone cannot reach your laptop
 - A native [tmux jump list](docs/tmux.md) (`<Leader>J`)
 - Events can be sent via the `signalbox fire` command allowing you to build your own integrations or workflows
 - Easily develop by iterating on the [specs](components/specs/) then letting your coding agent update them

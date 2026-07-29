@@ -64,9 +64,14 @@ usage: signalbox <command> [flags]
                (the menu bar app runs one for you; use this headless or in dev)
                --bind wide (e.g. 0.0.0.0) needs SIGNALBOX_TOKEN; non-loopback
                clients must then send Authorization: Bearer <token>
+               --remote (or SIGNALBOX_REMOTE=1): container/PaaS mode - plain
+               http behind platform TLS, SIGNALBOX_TOKEN required, EVERY
+               request authenticated except GET /healthz and POST /pair
   pair         show a QR a phone scans to pair: it carries this hub's LAN URL
                and a one-time code the phone trades for the token [--host <ip>]
                (run on the hub machine; needs --bind wide + SIGNALBOX_TOKEN)
+               --url <https://hub> pairs against a remote hub instead: mints
+               there with SIGNALBOX_TOKEN, QR carries that URL (no pin)
   config       persist how the hub binds so it needs no flags to let other
                devices connect:
                config get                       show the effective hub config
@@ -109,6 +114,7 @@ env: SIGNALBOX_URL (default ${DefaultURL})
      SIGNALBOX_EXPIRE (hub: end sessions with no agent event for this long, default 24h)
      SIGNALBOX_BIND (hub: bind address, default 127.0.0.1; --bind wins)
      SIGNALBOX_TOKEN (bearer token; required to bind non-loopback, sent by clients)
+     SIGNALBOX_REMOTE (hub: 1/true = remote mode, same as --remote)
 `;
 }
 
@@ -549,22 +555,36 @@ function expireAgeMs(): number {
 }
 
 function runHub(args: string[]): void {
-  const { flags } = parseFlags(args);
+  const { flags } = parseFlags(args, ["remote"]);
   const port = parseInt(flags["port"] ?? "8377", 10);
   const settings = loadSettings();
+  // Remote mode: this hub runs on a routable host behind a platform proxy that
+  // terminates TLS (Fly, a container). One deliberate switch flips the whole
+  // posture - wide bind, mandatory token, no self-signed TLS, no loopback auth
+  // exemption - so there is no combination of knobs that is half-safe.
+  const remoteEnv = (process.env.SIGNALBOX_REMOTE ?? "").toLowerCase();
+  const remote = flags["remote"] === "true" || remoteEnv === "1" || remoteEnv === "true";
   // Bind resolution order: --bind flag, then SIGNALBOX_BIND, then the persisted
   // config.hub.bind, then loopback. The persisted value is what lets the
   // app-spawned hub (which passes no --bind) come up reachable by other devices
   // with zero flags. The same normalizer runs whichever source wins, so a
   // friendly word ("any", "loopback") works identically from the flag, the env,
   // or the file, and the result is always the literal address we bind.
-  const bindInput = flags["bind"] || process.env.SIGNALBOX_BIND || settings.hub.bind || "127.0.0.1";
+  // Remote mode skips the persisted setting and defaults wide: a container has
+  // no settings file, and a loopback default would make it unreachable.
+  const bindInput =
+    flags["bind"] || process.env.SIGNALBOX_BIND || (remote ? "0.0.0.0" : settings.hub.bind || "127.0.0.1");
   const norm = normalizeBindInput(bindInput);
   if (norm.error) fatal(norm.error);
   const bind = norm.value!;
-  // Token: env wins over the persisted config token. The token is the only way
-  // a non-loopback client authenticates.
-  let token = process.env.SIGNALBOX_TOKEN || settings.hub.token || "";
+  let token = remote
+    ? process.env.SIGNALBOX_TOKEN ?? ""
+    : process.env.SIGNALBOX_TOKEN || settings.hub.token || "";
+  // An ephemeral container has no settings file, and silently using a local
+  // token would make the same remote command behave differently across hosts.
+  if (remote && !token) {
+    fatal("remote mode requires SIGNALBOX_TOKEN (set it as a secret in your deploy platform)");
+  }
   // A non-loopback bind with no token would be refused below. Rather than fail,
   // mint a stable token and persist it, so a bind other devices can reach plus a
   // bare `signalbox hub` Just Works and stays reachable across restarts on one
@@ -597,7 +617,9 @@ function runHub(args: string[]): void {
   // itself binds every interface, so a DHCP address change needs no restart.
   const tlsPort = port + 1;
   let tls: HubTLS | null = null;
-  if (!isLoopbackAddress(bind)) {
+  // Remote mode never mints a cert: the platform terminates real TLS in front
+  // of the hub, so a self-signed listener would be a second, worse door.
+  if (!remote && !isLoopbackAddress(bind)) {
     const lanIP = bind === "0.0.0.0" || bind === "::" ? (lanIPv4() ?? "") : bind;
     tls = ensureCert(stateDir(), lanIP ? [lanIP] : []);
     if (!tls)
@@ -612,13 +634,28 @@ function runHub(args: string[]): void {
     token,
     bind,
     tls?.fingerprint ?? "",
-    tls ? tlsPort : 0
+    tls ? tlsPort : 0,
+    remote
   );
   const expire = expireAgeMs();
   hub.startExpiry(10 * 60 * 1000, expire);
   // Much shorter than expiry: a dead process shows as an eternal spinner
   // until the sweep catches it.
   hub.startLiveness(30 * 1000);
+
+  // PID 1 has no default SIGTERM disposition, so close the append fd before the platform stops the container.
+  process.on("SIGTERM", () => { hub.close(); process.exit(0); });
+
+  if (remote) {
+    // One plain-http listener on the wide bind; it covers loopback too, and
+    // even a loopback peer must present the bearer (the proxy may connect
+    // from a loopback-looking sidecar address, so peer address proves nothing).
+    listen(hub, port, bind);
+    console.error(
+      `signalbox hub ${version} (remote mode) listening on http://${bind}:${port} - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: ${stateDir()}, expire: ${expire / 3600000}h)`
+    );
+    return;
+  }
 
   // Loopback http always: the menu bar app, CLI, and adapters speak to this and
   // are entirely unchanged by the LAN TLS work.

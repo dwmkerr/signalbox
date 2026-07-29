@@ -575,7 +575,8 @@ and token fields stay for when there is no QR.</p>
   dropping Sessions back to the Not connected state.</li>
 </ul>
 <p>The link is the contract; the QR carries it:</p>
-<pre>signalbox://pair?url=&lt;percent-encoded "https://LAN-IP:PORT"&gt;&amp;code=&lt;base64url-code&gt;&amp;fp=&lt;cert-pin&gt;</pre>
+<pre>Pinned LAN: signalbox://pair?url=&lt;percent-encoded "https://LAN-IP:PORT"&gt;&amp;code=&lt;base64url-code&gt;&amp;fp=&lt;cert-pin&gt;
+Remote:     signalbox://pair?url=&lt;percent-encoded "https://hub.example.com"&gt;&amp;code=&lt;base64url-code&gt;</pre>
 <p><code>pair</code> rides in the URL host (a custom scheme has no path authority). <code>url</code> is
 the hub to redeem against; <code>code</code> is a one-time pairing code. The phone POSTs
 <code>{ "code": &lt;code&gt; }</code> to <code>&lt;url&gt;/pair</code> and gets back
@@ -586,10 +587,18 @@ persisted self-signed cert; the LAN's plaintext gap - a same-network attacker re
 forging events - is otherwise the one real exposure. <code>fp</code> is the SHA-256 of the cert's DER, which
 the app pins in a <code>URLSession</code> server-trust delegate (compared against
 <code>SecCertificateCopyData</code>'s hash) on every request: any other cert is refused, so a self-signed cert
-with no CA still gives MITM-proof transport. <code>fp</code> is required on an <code>https</code> url and
-absent on <code>http</code> (an <code>openssl</code>-less hub, or a hand-entered address); it lives in the
-Keychain beside the token, set at pairing and cleared on disconnect. The redeem POST rides the same pinned
-https, so it is verified before the token is ever handed over.</p>
+with no CA still gives MITM-proof transport. <code>fp</code> is present for a LAN hub's self-signed
+certificate and absent for a remote hub behind platform TLS. An <code>https</code> link with no
+<code>fp</code> is valid and uses system CA validation. An <code>https</code> link with a malformed
+<code>fp</code> is rejected outright: a corrupted or crafted pin must never silently downgrade to system
+trust. The server-trust delegate therefore has three branches: no pin uses default handling and system
+CAs; a set, matching pin accepts the certificate; a set pin that does not match, or a missing certificate
+chain, cancels the challenge. A self-signed LAN certificate still fails system validation when no pin is
+present, so nothing unverifiable is ever trusted. A pin lives in the Keychain beside the token when one is
+set and is cleared on disconnect. The redeem POST rides the same verified <code>https</code> connection, so
+the token is never handed over before the server is trusted.</p>
+<p>A hub typed into Settings carries no pin. A hand-entered <code>https://</code> address connects under
+system trust, while a hand-entered <code>http://</code> address stays plain HTTP.</p>
 <p>Two security invariants:</p>
 <ul>
   <li><b>The redeem POST carries no <code>Authorization</code> header.</b> The URL arrives from outside

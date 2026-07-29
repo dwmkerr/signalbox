@@ -1,7 +1,8 @@
-// signalbox pair: mint a short-lived code on the loopback hub, render it as a
-// QR the phone scans, and wait for the phone to redeem it. Only the code - never
-// the token - crosses the screen; redeeming it over loopback trades it for the
-// bearer token, which the phone then stores. See specs/events.md#pairing.
+// signalbox pair: mint a short-lived code on the hub (loopback by default,
+// --url for a remote hub with the bearer attached), render it as a QR the
+// phone scans, and wait for the phone to redeem it. Only the code - never the
+// token - crosses the screen; redeeming it trades it for the bearer token,
+// which the phone then stores. See specs/events.md#pairing.
 
 import { networkInterfaces } from "node:os";
 import qr from "qrcode";
@@ -61,20 +62,70 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-export async function runPair(args: string[]): Promise<void> {
+export function pairTarget(mint: MintResponse, host: string, url: string, defaultPort: string): string {
+  // A pin is usable only with its TLS port, so an incomplete TLS mint must not
+  // manufacture an endpoint that the phone cannot verify.
+  if (mint.fp && mint.port) return `https://${host}:${mint.port}`;
+  if (url) return url;
+  return `http://${host}:${defaultPort}`;
+}
+
+export function pairHost(mint: MintResponse, host: string, url: string): string {
+  if (host) return host;
+  // A complete pin selects the LAN path, so its advertised bind must win over
+  // the otherwise preferred public URL host.
+  if (!(mint.fp && mint.port) && url) return new URL(url).hostname;
+  if (concreteHost(mint.bind)) return mint.bind;
+  return lanIPv4() ?? "";
+}
+
+const pairURLError = "pair --url needs an https URL, e.g. --url https://my-hub.fly.dev";
+
+export function parsePairArgs(args: string[]): { host: string; url: string } {
   let hostFlag = "";
+  let urlFlag = "";
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--host") hostFlag = args[++i] ?? "";
+    if (args[i] === "--url") {
+      const value = args[++i] ?? "";
+      let parsed: URL;
+      try {
+        parsed = new URL(value);
+      } catch {
+        throw new Error(pairURLError);
+      }
+      if (
+        parsed.protocol !== "https:"
+        || parsed.username
+        || parsed.password
+        || parsed.pathname !== "/"
+        || parsed.search
+        || parsed.hash
+      ) {
+        throw new Error(pairURLError);
+      }
+      urlFlag = value;
+    }
   }
-  const base = hubURL();
+  return { host: hostFlag, url: urlFlag };
+}
 
-  // Mint on the loopback hub. /pair/new is loopback-only, so this runs on the
-  // hub machine; a 403/409 carries the hub's own guidance, printed verbatim.
+export async function runPair(args: string[]): Promise<void> {
+  const { host: hostFlag, url: urlFlag } = parsePairArgs(args);
+  const base = urlFlag || hubURL();
+  // A remote mint is not loopback, so the hub only honours it with a valid
+  // bearer; fail here with a plain instruction instead of relaying its 401.
+  const token = process.env.SIGNALBOX_TOKEN ?? "";
+  if (urlFlag && !token) {
+    throw new Error("pairing against --url needs SIGNALBOX_TOKEN set (the remote hub requires a bearer to mint)");
+  }
+  const auth: Record<string, string> = urlFlag ? { Authorization: `Bearer ${token}` } : {};
+
   let mint: MintResponse;
   try {
-    const res = await fetch(`${base}/pair/new`, {
+    const res = await fetch(new URL("/pair/new", base), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...auth },
       body: "{}",
     });
     const text = await res.text();
@@ -90,22 +141,15 @@ export async function runPair(args: string[]): Promise<void> {
     throw new Error(`could not mint a pairing code: ${err instanceof Error ? err.message : err}`);
   }
 
-  // The host to advertise: --host wins, else the hub's bind when concrete, else
-  // this machine's LAN IPv4.
-  let host = hostFlag;
-  if (!host && concreteHost(mint.bind)) host = mint.bind;
-  if (!host) host = lanIPv4() ?? "";
+  // A remote QR should name the public host that accepted the mint; a local
+  // bind is meaningful only for LAN pairing.
+  const host = pairHost(mint, hostFlag, urlFlag);
   if (!host) throw new Error("could not determine a LAN IP to advertise; pass --host <ip>");
 
-  // A fingerprint means the LAN listener is TLS, so the phone dials https on the
-  // TLS port the mint advertised and pins that cert. Without one the hub is plain
-  // http (openssl-less fallback), on the loopback-derived port as before.
-  const scheme = mint.fp ? "https" : "http";
-  const port = mint.fp && mint.port ? String(mint.port) : new URL(base).port || "8377";
-  const target = `${scheme}://${host}:${port}`;
-  // Deep-link contract (specs/ios): the url value is percent-encoded, the
-  // base64url code rides raw, and fp (hex, url-safe) rides raw when present.
-  const fpParam = mint.fp ? `&fp=${mint.fp}` : "";
+  const target = pairTarget(mint, host, urlFlag, new URL(base).port || "8377");
+  // Encoding only the target keeps the base64url code and hex pin stable for
+  // the iOS deep-link parser.
+  const fpParam = mint.fp && mint.port ? `&fp=${mint.fp}` : "";
   const link = `signalbox://pair?url=${encodeURIComponent(target)}&code=${mint.code}${fpParam}`;
 
   const art = await qr.toString(link, { type: "terminal", small: true });
@@ -115,12 +159,11 @@ export async function runPair(args: string[]): Promise<void> {
   console.log(`code: ${mint.code}`);
   console.log(`expires in ${mint.expires_in}s`);
 
-  // Poll the loopback status until the phone redeems or the code lapses.
   const deadline = Date.now() + mint.expires_in * 1000;
   for (;;) {
     let status = "none";
     try {
-      const res = await fetch(`${base}/pair/status`);
+      const res = await fetch(new URL("/pair/status", base), { headers: auth });
       if (res.ok) status = ((await res.json()) as { status?: string }).status ?? "none";
     } catch {
       // A transient hub blip must not abort the wait; poll again.

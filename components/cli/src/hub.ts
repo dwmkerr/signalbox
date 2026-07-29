@@ -55,7 +55,13 @@ export class Hub {
     // The port the TLS LAN listener is on - distinct from the loopback http
     // port, because two Bun listeners cannot share one port. Advertised in the
     // mint so the phone dials the https port, not the local http one.
-    private tlsPort: number = 0
+    private tlsPort: number = 0,
+    // Remote mode (hub --remote): the hub sits behind a platform proxy that
+    // terminates TLS (e.g. Fly). The peer address the server reports is then
+    // the proxy's, which may look like loopback - so the loopback auth
+    // exemption is never granted and EVERY request needs the bearer, except
+    // /healthz and /pair which are unauthenticated by design.
+    private remote: boolean = false
   ) {
     mkdirSync(stateDir, { recursive: true });
     this.logPath = join(stateDir, "events.jsonl");
@@ -183,9 +189,11 @@ export class Hub {
     // token. It must therefore be miserly (one uniform 401 for every failure).
     if (req.method === "POST" && url.pathname === "/pair") return this.handlePair(req);
     // Auth is decided by the connection's real origin, never the Host header
-    // (which the client controls). requestIP is the peer's address.
+    // (which the client controls). requestIP is the peer's address. In remote
+    // mode the peer address is the platform proxy's and proves nothing about
+    // the client, so the loopback exemption is never granted there.
     const remoteIP = server.requestIP(req)?.address;
-    if (isLoopbackAddress(remoteIP)) {
+    if (!this.remote && isLoopbackAddress(remoteIP)) {
       // Loopback peer: exactly the v0 contract. The loopback-literal Host check
       // is DNS-rebinding defence (a hostile page can point a name it controls
       // at 127.0.0.1 and read /state same-origin); no token is required, so a
@@ -209,13 +217,13 @@ export class Hub {
     if (req.method === "GET" && url.pathname === "/stream") {
       return this.handleStream(req, url, server);
     }
-    // /pair/new and /pair/status mint and inspect the loopback-only pairing
-    // slot. They sit below the auth gate, so a bearer-holding LAN peer has
-    // already passed it - the explicit loopback guard inside each handler is
-    // what still blocks that peer. Minting or inspecting from another machine
-    // makes no sense (the code encodes THIS hub) and would hand the token out.
-    if (req.method === "POST" && url.pathname === "/pair/new") return this.handlePairNew(req, server);
-    if (req.method === "GET" && url.pathname === "/pair/status") return this.handlePairStatus(req, server);
+    // /pair/new and /pair/status sit below the auth gate: a loopback peer (the
+    // v0 contract) or any valid bearer holder may mint and inspect a pairing.
+    // Gating mint behind loopback bought nothing against a token holder - they
+    // can already read every prompt and forge events - and it blocked the
+    // legitimate remote-admin flow (`pair --url` against a remote hub).
+    if (req.method === "POST" && url.pathname === "/pair/new") return this.handlePairNew(req);
+    if (req.method === "GET" && url.pathname === "/pair/status") return this.handlePairStatus();
     return undefined;
   }
 
@@ -331,13 +339,9 @@ export class Hub {
   }
 
   // handlePairNew mints a fresh code into the single pairing slot, replacing any
-  // prior one. Loopback-only even with a valid bearer (see the guard).
-  private async handlePairNew(req: Request, server: Bun.Server<undefined>): Promise<Response> {
-    // Explicit and required even though this route is past the auth gate: a
-    // bearer-holding LAN peer must still be refused. Only the hub machine mints.
-    if (!isLoopbackAddress(server.requestIP(req)?.address)) {
-      return jsonError(403, "pairing codes can only be minted from the hub machine");
-    }
+  // prior one. Reachable by a loopback peer or any valid bearer holder - the
+  // auth gate in handle() has already decided that, so no peer check here.
+  private async handlePairNew(req: Request): Promise<Response> {
     const contentType = (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     if (contentType !== "application/json") {
       return jsonError(415, "Content-Type must be application/json");
@@ -345,9 +349,10 @@ export class Hub {
     if (!this.token) {
       return jsonError(409, "no token configured: start the hub with SIGNALBOX_TOKEN and --bind to pair devices");
     }
-    // 0.0.0.0 and :: are wildcards, NOT loopback, so they pass here. A loopback
-    // bind means no phone could reach the hub even holding the token, so a code
-    // would be useless - refuse rather than mint one that cannot be redeemed.
+    // 0.0.0.0 and :: are wildcards, NOT loopback, so they pass here (a remote
+    // hub binds wide and passes too). A loopback bind means no phone could
+    // reach the hub even holding the token, so a code would be useless -
+    // refuse rather than mint one that cannot be redeemed.
     if (isLoopbackAddress(this.bind)) {
       return jsonError(409, "hub is bound to 127.0.0.1; restart with --bind 0.0.0.0 (or a LAN IP) and SIGNALBOX_TOKEN set");
     }
@@ -367,14 +372,11 @@ export class Hub {
     });
   }
 
-  // handlePairStatus reports the pairing slot for the CLI's poll loop. Loopback
-  // -only for the same reason as /pair/new: it is past the auth gate, so the
-  // explicit guard is what blocks a token-holding peer. A redeemed code reads
-  // "redeemed" even once expired, so the poll sees the redemption it waited for.
-  private handlePairStatus(req: Request, server: Bun.Server<undefined>): Response {
-    if (!isLoopbackAddress(server.requestIP(req)?.address)) {
-      return jsonError(403, "pairing status is only visible from the hub machine");
-    }
+  // handlePairStatus reports the pairing slot for the CLI's poll loop; same
+  // audience as /pair/new (loopback or bearer, decided at the auth gate). A
+  // redeemed code reads "redeemed" even once expired, so the poll sees the
+  // redemption it waited for.
+  private handlePairStatus(): Response {
     const p = this.pairing;
     let status: "pending" | "redeemed" | "none";
     if (p && p.redeemed) status = "redeemed";

@@ -4,13 +4,13 @@ import Foundation
 // signalbox:// URL. The shape is fixed by the wire contract shared with the
 // CLI half:
 //
-//   signalbox://pair?url=<percent-encoded "https://LAN-IP:PORT">&code=<base64url>&fp=<hex>
+//   signalbox://pair?url=<percent-encoded http(s) URL>&code=<base64url>[&fp=<hex>]
 //
 // "pair" is the URL host, not a path - a custom-scheme URL has no authority of
 // its own, so the verb rides in host. The embedded url is where the phone then
-// POSTs the code to redeem a token. `fp` is the SHA-256 of the hub's self-signed
-// cert (DER), present on an https url so the phone can pin it (#25); an http url
-// (the openssl-less fallback, or a hand-entered hub) carries none.
+// POSTs the code to redeem a token. `fp` is the SHA-256 of a LAN hub's
+// self-signed cert (DER), while an https platform URL without `fp` uses system
+// trust. An http url ignores `fp` because there is no TLS certificate to pin.
 //
 // This is a pure value type on purpose: onOpenURL is triggerable by any webpage
 // or iMessage link, so every field is validated here before anything reaches
@@ -19,7 +19,8 @@ import Foundation
 struct PairLink: Equatable {
     let url: URL
     let code: String
-    // The cert pin for an https hub, lowercase hex; nil for a plain-http hub.
+    // The cert pin for a pinned (LAN self-signed) https hub, lowercase hex.
+    // nil for plain http, and for a remote https hub verified by system CAs.
     let fingerprint: String?
 
     init?(_ deepLink: URL) {
@@ -33,11 +34,12 @@ struct PairLink: Equatable {
         var embedded: String?
         var codeValue: String?
         var fpValue: String?
+        var fpPresent = false
         for item in items {
             switch item.name {
             case "url": embedded = item.value
             case "code": codeValue = item.value
-            case "fp": fpValue = item.value
+            case "fp": fpPresent = true; fpValue = item.value
             default: break
             }
         }
@@ -52,13 +54,14 @@ struct PairLink: Equatable {
               target.host?.isEmpty == false else { return nil }
         guard let codeValue, !codeValue.isEmpty else { return nil }
 
-        // An https hub MUST carry a valid pin: connecting to a self-signed cert
-        // without one cannot be verified, so a pin-less https link is refused
-        // rather than trusted blindly. A pin is a 64-char SHA-256 hex string.
+        // An https link either carries a valid pin (a LAN hub's self-signed
+        // cert, verified by the pin) or no fp at all (a remote hub behind real
+        // platform TLS, verified by system CAs - see CertPinner). A malformed
+        // pin is still refused because falling back to system trust would
+        // quietly drop the pin the hub asked for.
         let fp = fpValue.map { $0.lowercased() }
-        let validFP = fp.map { Self.isSHA256Hex($0) } ?? false
-        if scheme == "https" {
-            guard validFP else { return nil }
+        if scheme == "https", fpPresent {
+            guard let fp, Self.isSHA256Hex(fp) else { return nil }
         }
 
         self.url = target
@@ -68,7 +71,9 @@ struct PairLink: Equatable {
     }
 
     private static func isSHA256Hex(_ s: String) -> Bool {
-        s.count == 64 && s.allSatisfy { $0.isHexDigit && (!$0.isLetter || $0.isLowercase) }
+        s.utf8.count == 64 && s.utf8.allSatisfy {
+            ($0 >= 48 && $0 <= 57) || ($0 >= 97 && $0 <= 102)
+        }
     }
 }
 
@@ -110,10 +115,15 @@ extension PairLink {
             "signalbox://pair?url=http%3A%2F%2F192.168.1.20%3A8377&code=abc&fp=\(hex64)",
             host: "192.168.1.20", code: "abc", fp: nil, "http url ignores fp"
         )
-        // https without a pin, or with a malformed one, cannot be verified: reject.
-        expectNil("signalbox://pair?url=https%3A%2F%2F192.168.1.20%3A8378&code=abc", "https without pin")
+        // https with NO pin is the remote-hub case: system CA trust, fp nil.
+        expectValid(
+            "signalbox://pair?url=https%3A%2F%2Fmy-hub.fly.dev&code=abc",
+            host: "my-hub.fly.dev", code: "abc", fp: nil, "https remote url without pin"
+        )
+        // A malformed pin is a corrupted or crafted link, never a fallback: reject.
         expectNil("signalbox://pair?url=https%3A%2F%2F192.168.1.20%3A8378&code=abc&fp=xyz", "https bad pin")
-        expectNil("signalbox://pair?url=https%3A%2F%2F192.168.1.20%3A8378&code=abc&fp=ABCDEF", "https short/upper pin")
+        expectNil("signalbox://pair?url=https%3A%2F%2F192.168.1.20%3A8378&code=abc&fp=ABCDEF", "https short pin")
+        expectNil("signalbox://pair?url=https%3A%2F%2F192.168.1.20%3A8378&code=abc&fp=", "https empty pin")
         // Wrong verb, hostile embedded schemes, and empty code all reject.
         expectNil("signalbox://open?url=http%3A%2F%2F127.0.0.1%3A8377&code=abc", "host != pair")
         expectNil("signalbox://pair?url=file%3A%2F%2F%2Fetc%2Fpasswd&code=abc", "file: embedded url")

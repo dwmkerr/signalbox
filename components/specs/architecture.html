@@ -307,6 +307,49 @@ events are delayed rather than lost, and the hook path never blocks a calling ag
 read while offline. This is a documented contract. Local-first stays available to anyone who does not
 opt in.</p>
 
+<h2 id="remote-hub">Remote hub: self-deployed <span class="chip built">built</span></h2>
+<p>This is the same binary on a routable host: run <code>signalbox hub --remote</code> and point every
+client at it. It is self-deploy only. Signalbox does not run a hosted multi-tenant service.</p>
+
+<h3>One switch, four inseparable effects</h3>
+<p><code>--remote</code>, or <code>SIGNALBOX_REMOTE=1</code> / <code>true</code>, is one security mode.
+It does all four of these together:</p>
+<ul>
+  <li>The default bind becomes <code>0.0.0.0</code>.</li>
+  <li><code>SIGNALBOX_TOKEN</code> must come from the environment. A missing or empty token is fatal at boot;
+  the hub never generates one on an ephemeral container filesystem.</li>
+  <li>The self-signed TLS listener is disabled. The deployment platform terminates TLS.</li>
+  <li>The loopback auth exemption disappears. Every request needs the bearer except the two routes
+  named below.</li>
+</ul>
+
+<h3>Peer addresses prove nothing</h3>
+<p>There is no trust-proxy knob. Behind a proxy the peer address belongs to the proxy, not the client,
+so it cannot establish trust. Forwarded headers do not fix that unless every hop is trusted, because a
+client can forge them. Remote mode instead stops believing peer addresses at all.</p>
+<p>Only <code>GET /healthz</code> and <code>POST /pair</code> remain unauthenticated. The first exists
+for platform health checks. The second accepts a one-time pairing code, and that code is the
+credential.</p>
+
+<h3>Deployment shape</h3>
+<p>The Dockerfile, its per-Dockerfile ignore file, and the Fly template live under
+<code>components/deploy/</code>. The repository root is the Docker build context because the image compiles
+the CLI source, but the Dockerfile copies only the CLI files needed to build. The image runs remote mode,
+keeps state on a mounted <code>/data</code> volume, and is deployed as one instance because the hub is the
+single source of truth. Image publishing is a standalone workflow that a release calls directly and a
+human can dispatch with a version.</p>
+
+<h3>Pair against the public URL</h3>
+<p>Minting a pairing code needs the bearer from <code>SIGNALBOX_TOKEN</code>. The QR carries the remote
+hub's HTTPS URL with no certificate pin, and the phone validates its certificate against system CAs.
+Redeeming the code at <code>POST /pair</code> remains unauthenticated because the code itself authorizes
+that one exchange.</p>
+
+<h3>Direct clients for now</h3>
+<p>This phase has no forwarder. Adapters point at the remote hub directly and carry the token in their
+environment. <a href="#local-proxy">Accepted: a local proxy</a> closes that gap in Phase 2 by keeping
+the credential in one local process without adding a second store.</p>
+
 <h2 id="risk">Security tiers <span class="chip proposed">proposed</span></h2>
 
 <div class="banner">
@@ -329,7 +372,7 @@ opt in.</p>
       tailnet - it needs an HTTPS origin and outbound reach to the push service, not inbound.</td></tr>
   <tr><td><b>Public + token</b><br><span style="color:#6E6E73">Fly.io, a VPS</span></td>
       <td>One shared bearer token. TLS from the platform.</td>
-      <td>Small. The work described above.</td></tr>
+      <td>Small. Built; see <a href="#remote-hub">the remote hub tier above</a>.</td></tr>
   <tr><td><b>Public + identity</b><br><span style="color:#6E6E73">GitHub device flow</span></td>
       <td>A GitHub identity checked against an allowlist. No shared secret on the hub.</td>
       <td>Real, and additive. See below.</td></tr>
@@ -404,7 +447,7 @@ distributed system for a list of terminal sessions.</p>
 <p>If shared state ever needs to survive a partition, the reducer becomes a real CRDT first, as its own
 piece of work.</p>
 
-<h2>Accepted: a local proxy <span class="chip proposed">proposed</span></h2>
+<h2 id="local-proxy">Accepted: a local proxy <span class="chip proposed">proposed</span></h2>
 <p>The safe version of the same instinct. A local <code>signalbox hub --upstream &lt;url&gt;</code>
 keeps <b>no state of its own</b>: it forwards POSTs upstream with the token attached and relays the
 upstream stream back down. Every other client on the machine keeps talking to loopback, unchanged and

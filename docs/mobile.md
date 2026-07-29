@@ -92,11 +92,10 @@ Two ways around it:
 - **Mobile hotspot** - put the Mac and the phone on the same phone hotspot.
   There is no isolation on a hotspot, so pairing works immediately. Good for a
   quick test.
-- **Remote hub** - run the hub on a machine both devices can reach (a VPS, a
-  home server, or any host with a routable address), bind it wide
-  (`signalbox hub --bind 0.0.0.0`), and point the phone at it with
-  `SIGNALBOX_URL` or by scanning that hub's QR. This is the durable answer when
-  the office network will not carry device-to-device traffic.
+- **Remote hub** - run `signalbox hub --remote` on a routable host and point
+  the phone and your machines at it. Follow the [remote hub guide](remote-hub.md)
+  to deploy it safely. This is the durable answer when the office network will
+  not carry device-to-device traffic.
 
 ### Dev and test hooks
 

@@ -53,6 +53,20 @@ jobs:
           fi
           ./bin/signalbox version
 
+  # Build the remote-hub image on every PR (no push): deploy.yml is the only
+  # other thing that builds it, so a broken Dockerfile would otherwise
+  # surface at release time.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: components/deploy/Dockerfile
+          push: false
+
   guard-paths:
     runs-on: ubuntu-latest
     steps:

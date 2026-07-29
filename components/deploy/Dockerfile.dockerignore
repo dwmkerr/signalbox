@@ -1,0 +1,10 @@
+# Explicit Dockerfile COPY paths preserve correctness even when this hygiene file is ignored.
+.git
+**/node_modules
+components/cli/bin
+components/ios
+components/app
+components/assets
+docs
+scratch
+**/.DS_Store

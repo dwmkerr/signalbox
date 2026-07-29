@@ -210,32 +210,42 @@ headless machines, CI, or development.
 ```bash
 signalbox hub --port 8377                 # loopback only (default)
 SIGNALBOX_TOKEN=... signalbox hub --bind 0.0.0.0   # serve other machines
+SIGNALBOX_TOKEN=... signalbox hub --remote   # container/PaaS: platform TLS in front
 ```
 
 ```text
 signalbox hub 0.1.0 listening on http://127.0.0.1:8377 (state: /Users/you/.local/state/signalbox, expire: 24h)
 ```
 
-Binds `127.0.0.1` by default. `--bind <host>` (or `SIGNALBOX_BIND`; the flag wins) widens that. Loopback peers still need no token, but every non-loopback client must then send `Authorization: Bearer $SIGNALBOX_TOKEN`. The hub refuses to start bound to a non-loopback address with no `SIGNALBOX_TOKEN` set. Binding, auth, and `/healthz`'s exemption are specified in the [data model](events.md#binding-and-auth).
+Binds `127.0.0.1` by default. `--bind <host>` (or `SIGNALBOX_BIND`; the flag wins) widens that. Outside remote mode, loopback peers still need no token, but every non-loopback client must send `Authorization: Bearer $SIGNALBOX_TOKEN`. The hub never serves a non-loopback bind without a configured token. Binding, auth, and the unauthenticated exemptions are specified in the [data model](events.md#binding-and-auth).
 
-With no `--bind` and no `SIGNALBOX_BIND`, the hub falls back to the persisted `hub.bind` (see [config](#config)). So `signalbox config set hub.bind any` makes a bare `signalbox hub` come up reachable by other devices with a token, no flags or env needed. This also covers the hub the menu bar app spawns, which passes no flags. The resolution order is `--bind` flag, then `SIGNALBOX_BIND`, then `hub.bind`, then loopback; the token is `SIGNALBOX_TOKEN`, then `hub.token`. When the resolved bind is non-loopback and no token is set either way, the hub **generates a token, saves it to `hub.token`, and prints `signalbox: generated a hub token and saved it to <path>`** on stderr, so it stays reachable on a stable auto-token across restarts.
+Outside remote mode, with no `--bind` and no `SIGNALBOX_BIND`, the hub falls back to the persisted `hub.bind` (see [config](#config)). So `signalbox config set hub.bind any` makes a bare `signalbox hub` come up reachable by other devices with a token, no flags or env needed. This also covers the hub the menu bar app spawns, which passes no flags. The resolution order is `--bind` flag, then `SIGNALBOX_BIND`, then `hub.bind`, then loopback; the token is `SIGNALBOX_TOKEN`, then `hub.token`. When the resolved bind is non-loopback and no token is set either way, the hub **generates a token, saves it to `hub.token`, and prints `signalbox: generated a hub token and saved it to <path>`** on stderr, so it stays reachable on a stable auto-token across restarts.
+
+`signalbox hub --remote` is one switch with four inseparable effects: the default bind is `0.0.0.0`; `SIGNALBOX_TOKEN` is mandatory and is read from the environment only, never from the persisted `hub.token`; no self-signed TLS listener is created because the platform terminates TLS; and there is no loopback auth exemption at all because, behind a proxy, the peer address is the proxy's and proves nothing about the client. The hub refuses to start when the environment token is missing or empty and never generates one: an ephemeral container filesystem would lose it on redeploy and strand every paired phone. `SIGNALBOX_REMOTE=1` or `SIGNALBOX_REMOTE=true` is equivalent to `--remote`. `GET /healthz` and `POST /pair` remain the only unauthenticated routes.
+
+```text
+signalbox hub 0.1.0 (remote mode) listening on http://0.0.0.0:8377 - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: /Users/you/.local/state/signalbox, expire: 24h)
+```
 
 The hub keeps the state of every session, streams changes to the surfaces, and runs two sweeps: expiry (no agent event for `SIGNALBOX_EXPIRE`, default 24h, ends the session) and liveness (an agent process that died without an exit event is ended within about 30 seconds). Endpoints and rules are in the [data model](events.md).
 
 ## pair
 
-Pair a phone with the hub without ever putting the token on screen. Run it on the hub machine: it mints a one-time code and prints a QR that encodes this hub's LAN URL, the code, and (when the hub serves TLS) the cert pin, then waits for the phone to scan and redeem it.
+Pair a phone with the hub without ever putting the token on screen. By default, run it on the hub machine; with `--url`, run it from an administrator's machine holding the remote hub token. It mints a one-time code and prints a QR that encodes the hub URL, the code, and (when a pinned LAN listener is available) the cert pin, then waits for the phone to scan and redeem it.
 
 ```bash
 signalbox pair                       # QR + code, then wait for the phone
 signalbox pair --host 192.168.1.94   # force the advertised IP
+signalbox pair --url https://my-hub.fly.dev   # pair against a remote hub
 ```
 
 Beneath the QR it prints the plain `signalbox://pair?url=<hub-url>&code=<code>[&fp=<pin>]` link and the URL and code on their own lines for manual entry. The code is base64url and good for 180 seconds. The phone POSTs it to `/pair` and the hub trades it for the bearer token, which the phone stores; the token itself never appears on screen, in the QR, or in scrollback. `pair` polls `/pair/status` and prints `phone paired` once the phone redeems, or `code expired - run signalbox pair again` at timeout.
 
-**TLS (#25).** When devices are allowed, the hub serves the phone over `https` with a persisted self-signed cert (`tls-cert.pem`/`tls-key.pem` in the state dir), on a listener one port above the loopback http port (e.g. `8378`). Local clients - the menu bar app, CLI, adapters - keep plain http on loopback, untouched. The QR's `url` is `https://<ip>:<tls-port>` and `fp` is the SHA-256 of the cert's DER, which the phone pins: an attacker presenting any other cert fails the pin, so a self-signed cert with no CA still gives MITM-proof transport with no user ceremony. If `openssl` is unavailable the hub cannot mint a cert and falls back to plain http (no `fp`), pairing over http as before. A hand-entered hub in the app's Settings is http and carries no pin.
+`--url` accepts an `https` hub origin. It rejects `http`, embedded credentials, a non-root path, a query, or a fragment, and preserves the accepted value verbatim in the QR. `pair` mints at that origin with `Authorization: Bearer $SIGNALBOX_TOKEN`, errors up front with a message naming `SIGNALBOX_TOKEN` when the variable is unset or empty, and polls `/pair/status` on the same origin. A normal remote-mode mint has no `fp` or TLS `port`, so the QR advertises the supplied URL with no `fp`; the phone validates the platform's CA-issued certificate with system trust. If a mint does carry both `fp` and `port`, the pinned LAN target wins over `--url`, and only that complete pair causes the QR to carry `fp`.
 
-It only works on a hub started with a wide `--bind` and `SIGNALBOX_TOKEN` set: a loopback-only hub that no phone could reach refuses to mint, and so does a hub with no token. The advertised host is the hub's bind when that is a concrete IP, otherwise this machine's LAN IPv4 (VPN and tunnel interfaces are skipped so a corp VPN address never wins); `--host` overrides. Minting a code and reading pairing status are loopback-only, so only the hub machine can start a pairing, even from a device already holding the token. The endpoints (`POST /pair`, `POST /pair/new`, `GET /pair/status`) and the full security rationale are in the [data model](events.md#pairing).
+**Pinned LAN TLS (#25).** Outside remote mode, when devices are allowed, the hub serves the phone over `https` with a persisted self-signed cert (`tls-cert.pem`/`tls-key.pem` in the state dir), on a listener one port above the loopback http port (e.g. `8378`). Local clients - the menu bar app, CLI, adapters - keep plain http on loopback, untouched. The QR's `url` is `https://<ip>:<tls-port>` and `fp` is the SHA-256 of the cert's DER, which the phone pins: an attacker presenting any other cert fails the pin, so a self-signed cert with no CA still gives MITM-proof transport with no user ceremony. If `openssl` is unavailable the hub cannot mint a cert and falls back to plain http (no `fp`), pairing over http as before. A hand-entered hub in the app's Settings is http and carries no pin.
+
+Pairing requires a hub with a non-loopback bind and a configured token: a hub bound to loopback, which no phone could reach, refuses to mint, and so does a hub with no token. For LAN pairing, the advertised host is the hub's bind when that is a concrete IP, otherwise this machine's LAN IPv4 (VPN and tunnel interfaces are skipped so a corp VPN address never wins); `--host` overrides. Minting a code and reading pairing status require a loopback peer or a valid bearer because a token holder is already fully trusted: they can read every prompt and forge events, so a loopback gate bought nothing and blocked the legitimate remote-admin flow. In remote mode the loopback half never applies, so the bearer is always required. The endpoints (`POST /pair`, `POST /pair/new`, `GET /pair/status`) and the full security rationale are in the [data model](events.md#pairing).
 
 ## config
 
@@ -286,5 +296,6 @@ Delivery from all hook-path commands is one POST with a 200ms timeout; on failur
 | `SIGNALBOX_PROFILE` | `full` | `redacted` drops cwd, title, prompt and reply, and hashes the session id |
 | `SIGNALBOX_EXPIRE` | `24h` | hub: end sessions with no agent event for this long |
 | `SIGNALBOX_BIND` | `127.0.0.1` | hub: bind address (`signalbox hub --bind` wins over it) |
+| `SIGNALBOX_REMOTE` | unset | hub: `1` or `true` runs the hub in remote mode (same as `--remote`) |
 | `SIGNALBOX_TOKEN` | unset | bearer token: required to bind non-loopback, and sent by clients as `Authorization: Bearer` |
 | `SIGNALBOX_RAW` | unset | diagnostic: `hook claude` / `hook cursor` attach the untouched hook payload to the fired event (stripped by the redacted profile) |

@@ -41,6 +41,14 @@ describe("grouped command dispatch", () => {
     expect(out).toContain("session unpin");
     expect(out).toContain("tmux status");
     expect(out).toContain("hook claude");
+    expect(out).toContain("--remote");
+    expect(out).toContain("SIGNALBOX_REMOTE");
+  });
+
+  test("hub --remote with no SIGNALBOX_TOKEN fails loudly", () => {
+    const { out, code } = run(["hub", "--remote"], { SIGNALBOX_TOKEN: "" });
+    expect(code).toBe(1);
+    expect(out).toContain("SIGNALBOX_TOKEN");
   });
 
   test("unknown top-level command errors", () => {

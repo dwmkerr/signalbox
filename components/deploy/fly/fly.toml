@@ -1,0 +1,36 @@
+# Deploy from the REPO ROOT so the Docker build context can see components/cli:
+#   fly launch --no-deploy -c components/deploy/fly/fly.toml   # once: pick app name + region
+#   fly volumes create signalbox_data -s 1 -c components/deploy/fly/fly.toml
+#   fly secrets set SIGNALBOX_TOKEN=$(openssl rand -base64 24) -c components/deploy/fly/fly.toml
+#   fly deploy -c components/deploy/fly/fly.toml .
+#
+# Remote mode prevents Fly's proxy peer address from granting a loopback auth exemption.
+
+app = "signalbox-hub"
+primary_region = "lhr"
+
+[build]
+  # This path is relative to this file.
+  dockerfile = "../Dockerfile"
+
+[env]
+  SIGNALBOX_STATE_DIR = "/data"
+
+[[mounts]]
+  source = "signalbox_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8377
+  force_https = true
+  # The hub is the board's single source of truth: keep exactly one machine
+  # running, never scaled to zero (a stopped hub is a blank phone).
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "3s"
+    method = "GET"
+    path = "/healthz"
