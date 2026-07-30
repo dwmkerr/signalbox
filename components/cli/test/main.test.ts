@@ -51,9 +51,46 @@ describe("grouped command dispatch", () => {
     expect(out).toContain("SIGNALBOX_TOKEN");
   });
 
+  test("hub --upstream refuses an explicit bind", () => {
+    const { out, code } = run(["hub", "--upstream", "https://x.example", "--bind", "0.0.0.0"]);
+    expect(code).toBe(1);
+    expect(out).toContain("--bind");
+  });
+
+  test("hub --upstream refuses remote mode", () => {
+    const { out, code } = run(
+      ["hub", "--upstream", "https://x.example", "--remote"],
+      { SIGNALBOX_TOKEN: "t" }
+    );
+    expect(code).toBe(1);
+    expect(out).toContain("--upstream");
+  });
+
+  test("hub --upstream refuses plain http off loopback", () => {
+    const { out, code } = run(["hub", "--upstream", "http://my-hub.fly.dev"]);
+    expect(code).toBe(1);
+    expect(out).toContain("hub.upstream");
+  });
+
+  test("help lists forwarder configuration", () => {
+    const { out } = run(["help"]);
+    expect(out).toContain("--upstream");
+    expect(out).toContain("SIGNALBOX_UPSTREAM");
+    expect(out).toContain("hub.upstream");
+  });
+
   test("unknown top-level command errors", () => {
     const { out, code } = run(["nonsense"]);
     expect(out).toContain("unknown command");
     expect(code).toBe(2);
+  });
+});
+
+describe("fire usage errors", () => {
+  test("an unknown --event warns on stderr and still exits 0 (hook-safe)", () => {
+    const { out, code } = run(["fire", "--agent", "script", "--event", "needs_you"]);
+    expect(code).toBe(0);
+    expect(out).toContain("valid events");
+    expect(out).toContain("attention");
   });
 });

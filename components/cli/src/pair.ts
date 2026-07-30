@@ -104,7 +104,7 @@ export function parsePairArgs(args: string[]): { host: string; url: string } {
       ) {
         throw new Error(pairURLError);
       }
-      urlFlag = value;
+      urlFlag = parsed.origin;
     }
   }
   return { host: hostFlag, url: urlFlag };

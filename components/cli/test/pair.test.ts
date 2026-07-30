@@ -47,9 +47,15 @@ describe("pairHost", () => {
 });
 
 describe("parsePairArgs", () => {
-  test("preserves --url verbatim", () => {
+  test("stores the canonical origin from --url", () => {
     expect(parsePairArgs(["--url", "https://Hub.Dev/"]).url)
-      .toBe("https://Hub.Dev/");
+      .toBe("https://hub.dev");
+  });
+
+  test("normalizes empty URL delimiters to the origin", () => {
+    expect(parsePairArgs(["--url", "https://h/?"]).url).toBe("https://h");
+    expect(parsePairArgs(["--url", "https://h/#"]).url).toBe("https://h");
+    expect(parsePairArgs(["--url", "https://@h"]).url).toBe("https://h");
   });
 
   test("rejects credentials in --url", () => {

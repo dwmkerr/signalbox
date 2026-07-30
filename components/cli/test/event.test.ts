@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as ev from "../src/event";
 
 describe("crops", () => {
@@ -31,6 +34,7 @@ describe("user events", () => {
     expect(e.v).toBe(1);
     expect(e.id).not.toBe("");
     expect(e.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    expect(e.machine).toBeTruthy();
   });
   test("newSeen falls back to user agent without the convention", () => {
     expect(ev.newSeen("nocolon").agent).toBe("user");
@@ -58,12 +62,69 @@ describe("user events", () => {
   });
 });
 
+describe("machine identity", () => {
+  test("machineID creates and caches a stable id", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sb-machine-"));
+    const id = ev.machineID(dir);
+    expect(id).toMatch(/^.+-[0-9a-f]{6}$/);
+    expect(id.startsWith(`${ev.shortHostname()}-`)).toBe(true);
+    expect(readFileSync(join(dir, "machine-id"), "utf8").trim()).toBe(id);
+    expect(ev.machineID(dir)).toBe(id);
+  });
+
+  test("machineID reads a pre-seeded id", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sb-machine-seeded-"));
+    writeFileSync(join(dir, "machine-id"), "seeded-machine-id\n");
+    expect(ev.machineID(dir)).toBe("seeded-machine-id");
+  });
+
+  test("concurrent creators all keep the first published id", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sb-machine-race-"));
+    const workers = 4;
+    const eventSrc = join(import.meta.dir, "..", "src", "event.ts");
+    const processes = Array.from({ length: workers }, (_, index) => {
+      const ready = join(dir, `${index}.ready`);
+      const script = `
+        import { readdirSync, writeFileSync } from "node:fs";
+        import { machineID } from ${JSON.stringify(eventSrc)};
+        const original = crypto.getRandomValues.bind(crypto);
+        crypto.getRandomValues = (bytes) => {
+          writeFileSync(${JSON.stringify(ready)}, "");
+          while (readdirSync(${JSON.stringify(dir)}).filter((name) => name.endsWith(".ready")).length < ${workers}) {
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+          }
+          original(bytes);
+          bytes.fill(${index + 1});
+          return bytes;
+        };
+        process.stdout.write(machineID(${JSON.stringify(dir)}));
+      `;
+      return Bun.spawn(["bun", "-e", script], { stdout: "pipe", stderr: "pipe" });
+    });
+
+    const results = await Promise.all(processes.map(async (proc) => {
+      const [exitCode, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      expect(stderr).toBe("");
+      expect(exitCode).toBe(0);
+      return stdout;
+    }));
+
+    expect(new Set(results).size).toBe(1);
+    expect(readFileSync(join(dir, "machine-id"), "utf8").trim()).toBe(results[0]);
+    expect(readdirSync(dir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+});
+
 describe("validate", () => {
   const valid = (): ev.Event => ({
     v: 1, id: "x", ts: "2026-07-07T10:00:00Z", host: "h", agent: "claude",
     event: "done", session_key: "claude:1",
   });
-  test("accepts a valid event", () => expect(ev.validate(valid())).toBeNull());
+  test("accepts a valid event without machine", () => expect(ev.validate(valid())).toBeNull());
   test("rejects wrong version", () => {
     expect(ev.validate({ ...valid(), v: 2 })).toContain("v must be");
   });
@@ -139,6 +200,16 @@ describe("wire format", () => {
 });
 
 describe("normalizeInbound (legacy migration)", () => {
+  test("backfills an absent machine from host", () => {
+    const e: ev.Event = { v: 1, id: "x", ts: "t", host: "h", agent: "claude", event: "done", session_key: "claude:1" };
+    ev.normalizeInbound(e);
+    expect(e.machine).toBe("h");
+  });
+  test("keeps an existing machine", () => {
+    const e: ev.Event = { v: 1, id: "x", ts: "t", host: "h", machine: "h-abc123", agent: "claude", event: "done", session_key: "claude:1" };
+    ev.normalizeInbound(e);
+    expect(e.machine).toBe("h-abc123");
+  });
   test("detail becomes prompt when prompt absent", () => {
     const e: any = { v: 1, id: "x", ts: "t", host: "h", agent: "claude", event: "done", session_key: "claude:1", detail: "old field" };
     ev.normalizeInbound(e);

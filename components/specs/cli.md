@@ -160,6 +160,8 @@ signalbox fire --agent github --event done \
 ```
 
 - Flags: `--agent` and `--event` (both required), `--reason`, `--title`, `--prompt`, `--reply`, `--session-key`, `--origin-url`, `--pid` (the agent process, for the hub's liveness sweep; `--pid-name` overrides the resolved name).
+- A missing `--agent` or an unknown `--event` warns on stderr - one line naming the valid events (`attention`, `error`, `done`, `busy`, `ended`, `seen`, `hide`, `show`, `pin`, `unpin`, `label`, `tag`, `untag`) - and still exits 0. fire is called from agent adapters and user hooks, so a usage mistake must be visible but never fatal to the caller; delivery failures likewise spool and exit 0, so scripts never break on a down hub.
+- A missing `--agent` or an unknown `--event` fails loudly: one stderr line naming the valid events (`attention`, `error`, `done`, `busy`, `ended`, `seen`, `hide`, `show`, `pin`, `unpin`, `label`, `tag`, `untag`) and exit 1. A bad flag is a caller bug, and exiting 0 silently would lose the event with no signal - unlike delivery failures, which still spool and exit 0 so scripts never break on a down hub.
 - Fired from inside tmux, the pane origin is captured automatically; from a VS Code / Cursor integrated terminal, an editor origin is captured instead, so `jump` can route back. tmux beats the editor check: a pane is a more precise jump target than an app window.
 - `--prompt` and `--reply` are cropped at the emitter (160 and 280 characters, one line). The full text never leaves the process. `--detail` is accepted as an alias for `--prompt`. See the [data model](events.md).
 
@@ -211,6 +213,7 @@ headless machines, CI, or development.
 signalbox hub --port 8377                 # loopback only (default)
 SIGNALBOX_TOKEN=... signalbox hub --bind 0.0.0.0   # serve other machines
 SIGNALBOX_TOKEN=... signalbox hub --remote   # container/PaaS: platform TLS in front
+signalbox hub --upstream https://my-hub.fly.dev   # forward to a remote hub
 ```
 
 ```text
@@ -220,6 +223,12 @@ signalbox hub 0.1.0 listening on http://127.0.0.1:8377 (state: /Users/you/.local
 Binds `127.0.0.1` by default. `--bind <host>` (or `SIGNALBOX_BIND`; the flag wins) widens that. Outside remote mode, loopback peers still need no token, but every non-loopback client must send `Authorization: Bearer $SIGNALBOX_TOKEN`. The hub never serves a non-loopback bind without a configured token. Binding, auth, and the unauthenticated exemptions are specified in the [data model](events.md#binding-and-auth).
 
 Outside remote mode, with no `--bind` and no `SIGNALBOX_BIND`, the hub falls back to the persisted `hub.bind` (see [config](#config)). So `signalbox config set hub.bind any` makes a bare `signalbox hub` come up reachable by other devices with a token, no flags or env needed. This also covers the hub the menu bar app spawns, which passes no flags. The resolution order is `--bind` flag, then `SIGNALBOX_BIND`, then `hub.bind`, then loopback; the token is `SIGNALBOX_TOKEN`, then `hub.token`. When the resolved bind is non-loopback and no token is set either way, the hub **generates a token, saves it to `hub.token`, and prints `signalbox: generated a hub token and saved it to <path>`** on stderr, so it stays reachable on a stable auto-token across restarts.
+
+With an upstream, `hub` runs a forwarder: upstream resolution is `--upstream`, then `SIGNALBOX_UPSTREAM`, then persisted `hub.upstream`, and the upstream bearer is `SIGNALBOX_TOKEN`, then persisted `hub.token`. The URL must be an origin: no path other than `/`, no query, no fragment, no embedded credentials. Embedded credentials are refused because `GET /healthz` echoes the upstream URL verbatim on the unauthenticated loopback listener, while startup diagnostics and `signalbox config get` print it; accepting them would leak the credential to any local process or anyone who can read stderr or the config. The URL must use `https`, except that `http` is accepted for `localhost`, `127.x.x.x` and `::1`; accepted values are canonicalized to their URL origin. A missing token is a startup warning, not a failure, because an upstream at `localhost`, `127.x.x.x` or `::1` may legitimately be unauthenticated. An explicit `--bind` or non-empty `SIGNALBOX_BIND` is fatal with an upstream because a forwarder is an unauthenticated, local-trust listener and must never be told to face the network. `--remote` (or `SIGNALBOX_REMOTE`) with an upstream is also fatal. A persisted `hub.bind` is ignored; if it is non-loopback the forwarder prints one warning and still binds `127.0.0.1`. This only warns so an app-spawned hub does not refuse to boot when the user enables the forwarder while a non-loopback bind remains saved from an earlier state-owning setup. Local clients continue to see an unauthenticated loopback hub and need no token anywhere. Events are stored in the forward spool and sent with the resolved upstream bearer when one is set; state and stream reads come from the upstream downlink.
+
+```text
+signalbox hub 0.1.0 (forwarder) listening on http://127.0.0.1:8377 -> upstream https://my-hub.fly.dev; local clients need no token (state: /Users/you/.local/state/signalbox)
+```
 
 `signalbox hub --remote` is one switch with four inseparable effects: the default bind is `0.0.0.0`; `SIGNALBOX_TOKEN` is mandatory and is read from the environment only, never from the persisted `hub.token`; no self-signed TLS listener is created because the platform terminates TLS; and there is no loopback auth exemption at all because, behind a proxy, the peer address is the proxy's and proves nothing about the client. The hub refuses to start when the environment token is missing or empty and never generates one: an ephemeral container filesystem would lose it on redeploy and strand every paired phone. `SIGNALBOX_REMOTE=1` or `SIGNALBOX_REMOTE=true` is equivalent to `--remote`. `GET /healthz` and `POST /pair` remain the only unauthenticated routes.
 
@@ -241,15 +250,17 @@ signalbox pair --url https://my-hub.fly.dev   # pair against a remote hub
 
 Beneath the QR it prints the plain `signalbox://pair?url=<hub-url>&code=<code>[&fp=<pin>]` link and the URL and code on their own lines for manual entry. The code is base64url and good for 180 seconds. The phone POSTs it to `/pair` and the hub trades it for the bearer token, which the phone stores; the token itself never appears on screen, in the QR, or in scrollback. `pair` polls `/pair/status` and prints `phone paired` once the phone redeems, or `code expired - run signalbox pair again` at timeout.
 
-`--url` accepts an `https` hub origin. It rejects `http`, embedded credentials, a non-root path, a query, or a fragment, and preserves the accepted value verbatim in the QR. `pair` mints at that origin with `Authorization: Bearer $SIGNALBOX_TOKEN`, errors up front with a message naming `SIGNALBOX_TOKEN` when the variable is unset or empty, and polls `/pair/status` on the same origin. A normal remote-mode mint has no `fp` or TLS `port`, so the QR advertises the supplied URL with no `fp`; the phone validates the platform's CA-issued certificate with system trust. If a mint does carry both `fp` and `port`, the pinned LAN target wins over `--url`, and only that complete pair causes the QR to carry `fp`.
+`--url` accepts an `https` hub origin. It rejects `http`, embedded credentials, a non-root path, a query, or a fragment, and the QR carries the URL's origin. `pair` mints at that origin with `Authorization: Bearer $SIGNALBOX_TOKEN`, errors up front with a message naming `SIGNALBOX_TOKEN` when the variable is unset or empty, and polls `/pair/status` on the same origin. A normal remote-mode mint has no `fp` or TLS `port`, so the QR advertises the supplied URL with no `fp`; the phone validates the platform's CA-issued certificate with system trust. If a mint does carry both `fp` and `port`, the pinned LAN target wins over `--url`, and only that complete pair causes the QR to carry `fp`.
 
 **Pinned LAN TLS (#25).** Outside remote mode, when devices are allowed, the hub serves the phone over `https` with a persisted self-signed cert (`tls-cert.pem`/`tls-key.pem` in the state dir), on a listener one port above the loopback http port (e.g. `8378`). Local clients - the menu bar app, CLI, adapters - keep plain http on loopback, untouched. The QR's `url` is `https://<ip>:<tls-port>` and `fp` is the SHA-256 of the cert's DER, which the phone pins: an attacker presenting any other cert fails the pin, so a self-signed cert with no CA still gives MITM-proof transport with no user ceremony. If `openssl` is unavailable the hub cannot mint a cert and falls back to plain http (no `fp`), pairing over http as before. A hand-entered hub in the app's Settings is http and carries no pin.
 
 Pairing requires a hub with a non-loopback bind and a configured token: a hub bound to loopback, which no phone could reach, refuses to mint, and so does a hub with no token. For LAN pairing, the advertised host is the hub's bind when that is a concrete IP, otherwise this machine's LAN IPv4 (VPN and tunnel interfaces are skipped so a corp VPN address never wins); `--host` overrides. Minting a code and reading pairing status require a loopback peer or a valid bearer because a token holder is already fully trusted: they can read every prompt and forge events, so a loopback gate bought nothing and blocked the legitimate remote-admin flow. In remote mode the loopback half never applies, so the bearer is always required. The endpoints (`POST /pair`, `POST /pair/new`, `GET /pair/status`) and the full security rationale are in the [data model](events.md#pairing).
 
+On a forwarder, `POST /pair`, `POST /pair/new` and `GET /pair/status` all return `409` with a message naming `signalbox pair --url <upstream>`. A forwarder owns neither the state nor the pairing token.
+
 ## config
 
-Persist how the hub binds, so it needs no flags or env to let other devices connect. Values live in `~/.config/signalbox/settings.json` under a `hub` section and are read by every `signalbox hub` start (the [hub](#hub) section covers the resolution order and the auto-token). A tiny two-key surface (`hub.bind`, `hub.token`); the app owns everything else in that file.
+Persist how the hub binds or which upstream it forwards to, so it needs no flags or env. Values live in `~/.config/signalbox/settings.json` under a `hub` section and are read by every `signalbox hub` start (the [hub](#hub) section covers the resolution orders and the auto-token). A tiny three-key surface (`hub.bind`, `hub.token`, `hub.upstream`); the app owns everything else in that file.
 
 ```bash
 signalbox config get                          # the effective hub config
@@ -259,11 +270,14 @@ signalbox config set hub.bind 192.168.1.94    # an explicit address
 signalbox config set hub.token <value>        # set the bearer token
 signalbox config set hub.token --generate     # mint and store a random token
 signalbox config set hub.token ""             # empty value also mints one
+signalbox config set hub.upstream https://my-hub.fly.dev   # run as a forwarder
+signalbox config set hub.upstream ""          # clear it and own state locally
 ```
 
 ```text
 hub.bind:  0.0.0.0 (other devices may connect; this Mac is reachable at 192.168.1.94)
 hub.token: set
+hub.upstream: https://my-hub.fly.dev
 ```
 
 `hub.bind` is stored as a literal address: what you set is what the hub binds. On `config set`, a few words are accepted as conveniences and normalized before saving:
@@ -274,6 +288,8 @@ hub.token: set
 - `lan` is refused with `"lan" is ambiguous: use "any" (all interfaces, incl. VPN) or a specific IP`, since a wildcard bind also answers VPN interfaces.
 
 The `0.0.0.0` wildcard is preferred over a single pinned interface IP because the hub must keep answering loopback (local hooks and the menu bar app reach it there), and a fixed IP goes stale when DHCP moves the machine. For a wildcard bind, `config get` adds the LAN IPv4 a device would actually dial. `config get` prints only `set` or `none` for the token. Setting a non-loopback `hub.bind` does not itself write a token; the next `signalbox hub` generates and saves one (see [hub](#hub)).
+
+`hub.upstream` accepts the same origin-only URL as `hub --upstream`: `https`, or plain `http` only for `localhost`, `127.x.x.x` or `::1`. Saving canonicalizes it to the URL origin. An empty value clears it; a non-empty value makes a bare or app-spawned `signalbox hub` run as a forwarder.
 
 ## hook and plumbing
 
@@ -296,6 +312,7 @@ Delivery from all hook-path commands is one POST with a 200ms timeout; on failur
 | `SIGNALBOX_PROFILE` | `full` | `redacted` drops cwd, title, prompt and reply, and hashes the session id |
 | `SIGNALBOX_EXPIRE` | `24h` | hub: end sessions with no agent event for this long |
 | `SIGNALBOX_BIND` | `127.0.0.1` | hub: bind address (`signalbox hub --bind` wins over it) |
+| `SIGNALBOX_UPSTREAM` | unset | hub: forward to this remote hub instead of owning state (`signalbox hub --upstream` wins) |
 | `SIGNALBOX_REMOTE` | unset | hub: `1` or `true` runs the hub in remote mode (same as `--remote`) |
 | `SIGNALBOX_TOKEN` | unset | bearer token: required to bind non-loopback, and sent by clients as `Authorization: Bearer` |
 | `SIGNALBOX_RAW` | unset | diagnostic: `hook claude` / `hook cursor` attach the untouched hook payload to the fired event (stripped by the redacted profile) |

@@ -18,6 +18,12 @@ const maxBodyBytes = 1 << 20;
 type Subscriber = (e: Event) => void;
 type CommandSubscriber = (c: Command) => void;
 
+// listen() serves anything that can answer a request; the Hub and the
+// forwarder are both such a thing, and neither needs to know about the other.
+export interface RequestHandler {
+  handle(req: Request, server: Bun.Server<undefined>): Response | Promise<Response> | undefined;
+}
+
 export class Hub {
   private seq = 0;
   private log: Event[] = [];
@@ -529,7 +535,7 @@ function base64url(bytes: Uint8Array): string {
 // runs a plain-http loopback listener and a TLS LAN listener side by side, so
 // local clients are never asked to trust the cert (see runHub, specs/ios).
 export function listen(
-  hub: Hub,
+  handler: RequestHandler,
   port: number,
   hostname: string = "127.0.0.1",
   tls?: { cert: string; key: string }
@@ -540,7 +546,7 @@ export function listen(
     ...(tls ? { tls } : {}),
     // Route dispatch happens in hub.handle so tests can drive it without a
     // socket; unknown paths 404 here.
-    fetch: (req, srv) => hub.handle(req, srv) ?? jsonError(404, "not found"),
+    fetch: (req, srv) => handler.handle(req, srv) ?? jsonError(404, "not found"),
     // Overridden per-request for /stream; generous default elsewhere.
     idleTimeout: 30,
   });

@@ -1,0 +1,468 @@
+// A forwarder is a loopback bridge to an upstream hub. It owns no source-of-
+// truth store, writes no durable event log, and never assigns seq: its Store is
+// only a materialised view of the upstream downlink. The cache therefore cannot
+// echo a local write because nothing local ever originates state.
+
+import * as cmd from "./command";
+import type { Command } from "./command";
+import { logTo } from "./client";
+import * as ev from "./event";
+import type { Event } from "./event";
+import { isLoopbackHost } from "./hub";
+import type { RequestHandler } from "./hub";
+import { PermanentError, Spool } from "./spool";
+import { Store } from "./state";
+
+// A bounded replay ring prevents a long-running forwarder from retaining the
+// upstream's entire history in memory.
+const maxCachedEvents = 2000;
+// Matching the hub's cadence keeps the app's 90s request timeout from firing
+// while a local stream is quiet.
+const heartbeatMs = 15_000;
+// The app already tolerates this reconnect cadence, so the forwarder recovers
+// promptly without hammering an unavailable upstream.
+const reconnectMinMs = 1_000;
+// A ceiling keeps prolonged outages gentle while still noticing recovery
+// within a useful interval.
+const reconnectMaxMs = 15_000;
+// The upstream heartbeats every 15s, so three missed beats mean a socket is
+// dead even when the network stack has not noticed.
+const uplinkIdleMs = 45_000;
+// A periodic pass catches a failed event POST even when the stream itself
+// stayed connected and therefore has no reconnect transition to trigger one.
+const drainTickMs = 10_000;
+// Bounding each pass prevents a large backlog from monopolising the runtime.
+const drainMaxEvents = 500;
+// A time budget lets other local requests proceed during a long recovery.
+const drainBudgetMs = 5_000;
+// The event cap keeps an offline machine from growing its forward spool without
+// bound while preserving a substantial recent history.
+const spoolMaxEvents = 10_000;
+// The byte cap bounds disk use even when individual events approach the input
+// body limit.
+const spoolMaxBytes = 16 * 1024 * 1024;
+// Forwarding happens away from the hook's latency-sensitive call, so a WAN POST
+// can have a generous timeout without delaying the hook.
+const postTimeoutMs = 10_000;
+// Events are small; a larger local POST is junk and should not consume memory
+// or disk merely because the forwarder trusts loopback callers.
+const maxBodyBytes = 1 << 20;
+
+type Subscriber = (e: Event) => void;
+type CommandSubscriber = (c: Command) => void;
+
+export interface ForwarderOptions {
+  upstream: string;
+  token: string;
+  stateDir: string;
+  version: string;
+}
+
+export class Forwarder implements RequestHandler {
+  private store = new Store();
+  private events: Event[] = [];
+  private subs = new Set<Subscriber>();
+  private cmdSubs = new Set<CommandSubscriber>();
+  private lastSeq = 0;
+  private connected = false;
+  private spool: Spool;
+  private closed = false;
+  private started = false;
+  private uplinkController: AbortController | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectResolve: (() => void) | null = null;
+  private drainTimer: ReturnType<typeof setInterval> | null = null;
+  private streamCleanups = new Set<() => void>();
+  private failureLogged = false;
+
+  constructor(private opts: ForwarderOptions) {
+    this.spool = new Spool(
+      opts.stateDir,
+      "forward-spool.jsonl",
+      { maxEvents: spoolMaxEvents, maxBytes: spoolMaxBytes },
+      (message) => this.log(message)
+    );
+  }
+
+  handle(req: Request, server: Bun.Server<undefined>): Response | Promise<Response> | undefined {
+    const url = new URL(req.url);
+    // Health remains reachable even when a caller's Host header is unsuitable,
+    // matching the hub's platform-health contract.
+    if (req.method === "GET" && url.pathname === "/healthz") {
+      return Response.json({
+        ok: true,
+        version: this.opts.version,
+        upstream: {
+          url: this.opts.upstream,
+          connected: this.connected,
+          lastSeq: this.lastSeq,
+          spooled: this.spool.count(),
+        },
+      });
+    }
+    // The forwarder is unauthenticated by design: local trust is the point and
+    // the token lives in one place, so DNS-rebinding defence is the one guard
+    // that still matters.
+    if (!isLoopbackHost(req.headers.get("host") ?? "")) {
+      return jsonError(403, "forbidden: hub only answers loopback hosts");
+    }
+    if (req.method === "POST" && url.pathname === "/events") return this.handleEvents(req);
+    if (req.method === "POST" && url.pathname === "/command") return this.handleCommand(req);
+    if (req.method === "GET" && url.pathname === "/state") {
+      return Response.json({ sessions: this.store.list() });
+    }
+    if (req.method === "GET" && url.pathname === "/stream") {
+      return this.handleStream(req, url, server);
+    }
+    // Pairing trades a code for the hub's own token. A forwarder holds neither
+    // the slot nor that authority, and proxying would expose the upstream
+    // credential through an unauthenticated local endpoint.
+    if (
+      (req.method === "POST" && url.pathname === "/pair") ||
+      (req.method === "POST" && url.pathname === "/pair/new") ||
+      (req.method === "GET" && url.pathname === "/pair/status")
+    ) {
+      return jsonError(
+        409,
+        `this signalbox is a forwarder (hub.upstream is set); pair against the upstream hub instead: signalbox pair --url ${this.opts.upstream}`
+      );
+    }
+    return undefined;
+  }
+
+  start(): void {
+    if (this.started || this.closed) return;
+    this.started = true;
+    void this.runUplink();
+    // Connect-time drains cover a dead link coming back; this timer covers the
+    // case where the link is fine but one event POST failed.
+    this.drainTimer = setInterval(() => {
+      if (this.spool.count() > 0) this.kickDrain();
+    }, drainTickMs);
+  }
+
+  close(): void {
+    this.closed = true;
+    this.connected = false;
+    this.uplinkController?.abort();
+    this.uplinkController = null;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.reconnectResolve?.();
+    this.reconnectResolve = null;
+    if (this.drainTimer) clearInterval(this.drainTimer);
+    this.drainTimer = null;
+    for (const cleanup of this.streamCleanups) cleanup();
+    this.streamCleanups.clear();
+  }
+
+  private async handleEvents(req: Request): Promise<Response> {
+    const contentType = (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (contentType !== "application/json") {
+      return jsonError(415, "Content-Type must be application/json");
+    }
+    const body = await req.arrayBuffer();
+    if (body.byteLength > maxBodyBytes) return jsonError(400, "body too large");
+    let e: Event;
+    try {
+      e = JSON.parse(new TextDecoder().decode(body));
+    } catch (err) {
+      return jsonError(400, `invalid json: ${err}`);
+    }
+    let invalid: string | null;
+    try {
+      ev.normalizeInbound(e);
+      invalid = ev.validate(e);
+    } catch (err) {
+      return jsonError(400, `invalid event: ${String(err)}`);
+    }
+    if (invalid) return jsonError(400, invalid);
+    delete e.acked;
+    delete e.hidden;
+    delete e.pinned;
+    delete e.engaged_ts;
+    delete e.seq;
+    // The hook gives its POST only 200 ms. Waiting for a WAN round trip would
+    // make the hook spool locally after this process had also delivered the
+    // event, creating a duplicate; one local append and one async drain avoid it.
+    try {
+      await this.spool.append(JSON.stringify(e));
+    } catch (err) {
+      return jsonError(500, String(err));
+    }
+    this.kickDrain();
+    return Response.json({ spooled: true }, { status: 202 });
+  }
+
+  private async handleCommand(req: Request): Promise<Response> {
+    const contentType = (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (contentType !== "application/json") {
+      return jsonError(415, "Content-Type must be application/json");
+    }
+    const body = await req.arrayBuffer();
+    if (body.byteLength > maxBodyBytes) return jsonError(400, "body too large");
+    let c: Command;
+    try {
+      c = JSON.parse(new TextDecoder().decode(body));
+    } catch (err) {
+      return jsonError(400, `invalid json: ${err}`);
+    }
+    let invalid: string | null;
+    try {
+      invalid = cmd.validateCommand(c);
+    } catch (err) {
+      return jsonError(400, `invalid command: ${String(err)}`);
+    }
+    if (invalid) return jsonError(400, invalid);
+    // A command is a request and is meaningless once stale, the same reason
+    // the hub never logs one, so a failed command is never spooled.
+    try {
+      const res = await fetch(`${this.opts.upstream}/command`, {
+        method: "POST",
+        headers: this.postHeaders(),
+        body: JSON.stringify(c),
+        signal: AbortSignal.timeout(postTimeoutMs),
+      });
+      if (!res.ok) {
+        const detail = (await res.text()).trim();
+        return jsonError(502, `upstream unreachable: ${res.status}${detail ? `: ${detail}` : ""}`);
+      }
+      const headers = new Headers();
+      const contentType = res.headers.get("content-type");
+      if (contentType) headers.set("Content-Type", contentType);
+      return new Response(res.body, { status: res.status, headers });
+    } catch (err) {
+      return jsonError(502, `upstream unreachable: ${String(err)}`);
+    }
+  }
+
+  private handleStream(req: Request, url: URL, server: Bun.Server<undefined>): Response {
+    const sinceRaw = url.searchParams.get("since");
+    let since = 0;
+    if (sinceRaw) {
+      since = parseInt(sinceRaw, 10);
+      if (Number.isNaN(since)) return jsonError(400, "since must be an integer seq");
+    }
+    server.timeout(req, 0);
+
+    const subs = this.subs;
+    const cmdSubs = this.cmdSubs;
+    // The replay ring is bounded, so a sufficiently long-absent client can
+    // miss frames. Every consumer, including the macOS app and phone, performs
+    // a full /state resync on reconnect, making that gap harmless.
+    const backlog = this.events.filter((e) => (e.seq ?? 0) > since);
+    let last = since;
+    const enc = new TextEncoder();
+    let cleanup: (() => void) | null = null;
+
+    const stream = new ReadableStream({
+      start: (controller) => {
+        const write = (text: string) => controller.enqueue(enc.encode(text));
+        write(": connected\n\n");
+        for (const e of backlog) {
+          write(`event: signal\ndata: ${JSON.stringify(e)}\n\n`);
+          last = e.seq ?? last;
+        }
+        const send: Subscriber = (e) => {
+          if ((e.seq ?? 0) <= last) return;
+          last = e.seq ?? last;
+          write(`event: signal\ndata: ${JSON.stringify(e)}\n\n`);
+        };
+        subs.add(send);
+        const sendCmd: CommandSubscriber = (c) => {
+          write(`event: command\ndata: ${JSON.stringify(c)}\n\n`);
+        };
+        cmdSubs.add(sendCmd);
+        const hb = setInterval(() => {
+          try {
+            write(": heartbeat\n\n");
+          } catch {
+            cleanup?.();
+          }
+        }, heartbeatMs);
+        cleanup = () => {
+          clearInterval(hb);
+          subs.delete(send);
+          cmdSubs.delete(sendCmd);
+          if (cleanup) this.streamCleanups.delete(cleanup);
+        };
+        this.streamCleanups.add(cleanup);
+      },
+      cancel: () => {
+        cleanup?.();
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
+  private async runUplink(): Promise<void> {
+    let backoff = reconnectMinMs;
+    while (!this.closed) {
+      const controller = new AbortController();
+      this.uplinkController = controller;
+      try {
+        const res = await fetch(`${this.opts.upstream}/stream?since=${this.lastSeq}`, {
+          headers: this.authHeaders(),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          await res.body?.cancel();
+          throw new Error(`upstream stream returned ${res.status}`);
+        }
+        if (!res.body) throw new Error("upstream stream returned no body");
+        this.connected = true;
+        this.failureLogged = false;
+        backoff = reconnectMinMs;
+        this.kickDrain();
+        this.resetIdleWatchdog(controller);
+        await this.consumeStream(res.body, controller);
+        if (!this.closed) throw new Error("upstream stream ended");
+      } catch (err) {
+        if (!this.closed) this.logFailure(err);
+      } finally {
+        this.connected = false;
+        if (this.idleTimer) clearTimeout(this.idleTimer);
+        this.idleTimer = null;
+        if (this.uplinkController === controller) this.uplinkController = null;
+      }
+      if (this.closed) break;
+      await this.waitForReconnect(backoff);
+      backoff = Math.min(backoff * 2, reconnectMaxMs);
+    }
+  }
+
+  private async consumeStream(body: ReadableStream<Uint8Array>, controller: AbortController): Promise<void> {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = "";
+    let label = "signal";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        this.resetIdleWatchdog(controller);
+        buffered += decoder.decode(value, { stream: true });
+        const lines = buffered.split("\n");
+        buffered = lines.pop() ?? "";
+        for (const raw of lines) {
+          const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+          if (line.startsWith("event:")) {
+            label = line.slice("event:".length).trim();
+          } else if (line.startsWith("data:")) {
+            this.dispatchDownlink(label, line.slice("data:".length).trimStart());
+            label = "signal";
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  private dispatchDownlink(label: string, payload: string): void {
+    try {
+      if (label === "command") {
+        const c = JSON.parse(payload) as Command;
+        for (const send of this.cmdSubs) {
+          try {
+            send(c);
+          } catch {
+            // One broken local subscriber must not break the shared downlink.
+          }
+        }
+        return;
+      }
+      if (label !== "signal") return;
+      const e = JSON.parse(payload) as Event;
+      ev.normalizeInbound(e);
+      this.store.apply(e);
+      this.events.push(e);
+      if (this.events.length > maxCachedEvents) {
+        this.events.splice(0, this.events.length - maxCachedEvents);
+      }
+      if ((e.seq ?? 0) > this.lastSeq) this.lastSeq = e.seq!;
+      for (const send of this.subs) {
+        try {
+          send(e);
+        } catch {
+          // One broken local subscriber must not break the shared downlink.
+        }
+      }
+    } catch {
+      // A malformed upstream frame is skipped so later frames can still flow.
+    }
+  }
+
+  private resetIdleWatchdog(controller: AbortController): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => controller.abort(), uplinkIdleMs);
+  }
+
+  private waitForReconnect(delayMs: number): Promise<void> {
+    return new Promise((resolve) => {
+      this.reconnectResolve = resolve;
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.reconnectResolve = null;
+        resolve();
+      }, delayMs);
+    });
+  }
+
+  private kickDrain(): void {
+    void this.drain().catch((err) => this.log(`drain: ${String(err)}`));
+  }
+
+  private drain(): Promise<number> {
+    return this.spool.drain((line) => this.sendEvent(line), {
+      maxEvents: drainMaxEvents,
+      budgetMs: drainBudgetMs,
+    });
+  }
+
+  private async sendEvent(line: string): Promise<void> {
+    const res = await fetch(`${this.opts.upstream}/events`, {
+      method: "POST",
+      headers: this.postHeaders(),
+      body: line,
+      signal: AbortSignal.timeout(postTimeoutMs),
+    });
+    const body = (await res.text()).trim();
+    if (res.ok) return;
+    if (res.status >= 400 && res.status < 500) {
+      throw new PermanentError(`upstream rejected event: ${res.status}${body ? `: ${body}` : ""}`);
+    }
+    throw new Error(`upstream returned ${res.status}${body ? `: ${body}` : ""}`);
+  }
+
+  private authHeaders(): Record<string, string> {
+    return this.opts.token ? { Authorization: `Bearer ${this.opts.token}` } : {};
+  }
+
+  private postHeaders(): Record<string, string> {
+    return { "Content-Type": "application/json", ...this.authHeaders() };
+  }
+
+  private logFailure(err: unknown): void {
+    if (this.failureLogged) return;
+    this.log(`upstream disconnected: ${String(err)}`);
+    this.failureLogged = true;
+  }
+
+  private log(message: string): void {
+    logTo(this.opts.stateDir, message);
+  }
+}
+
+function jsonError(status: number, message: string): Response {
+  return Response.json({ error: message }, { status });
+}

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { normalizeBindInput, shouldGenerateToken, generateToken } from "../src/config";
+import { normalizeBindInput, normalizeUpstreamInput, shouldGenerateToken, generateToken } from "../src/config";
 
 // loadSettings and saveSettings resolve the file under $HOME (via os.homedir()),
 // which Bun fixes at process start - so the file-backed cases run in a child
@@ -60,19 +60,19 @@ describe("claudeRenameTitle", () => {
 describe("hub settings", () => {
   test("defaults to loopback and no token when the file is missing", () => {
     const out = inHome(freshHome(), `process.stdout.write(JSON.stringify(c.loadSettings().hub));`);
-    expect(JSON.parse(out)).toEqual({ bind: "127.0.0.1", token: "" });
+    expect(JSON.parse(out)).toEqual({ bind: "127.0.0.1", token: "", upstream: "" });
   });
 
   test("reads hub.bind and hub.token from settings.json", () => {
     const home = freshHome({ hub: { bind: "0.0.0.0", token: "abc123" } });
     const out = inHome(home, `process.stdout.write(JSON.stringify(c.loadSettings().hub));`);
-    expect(JSON.parse(out)).toEqual({ bind: "0.0.0.0", token: "abc123" });
+    expect(JSON.parse(out)).toEqual({ bind: "0.0.0.0", token: "abc123", upstream: "" });
   });
 
   test("a partial hub section still gets the missing key's default", () => {
     const home = freshHome({ hub: { bind: "0.0.0.0" } });
     const out = inHome(home, `process.stdout.write(JSON.stringify(c.loadSettings().hub));`);
-    expect(JSON.parse(out)).toEqual({ bind: "0.0.0.0", token: "" });
+    expect(JSON.parse(out)).toEqual({ bind: "0.0.0.0", token: "", upstream: "" });
   });
 });
 
@@ -84,7 +84,7 @@ describe("saveSettings", () => {
       `c.saveSettings({ hub: { token: "deadbeef" } });` +
         `const s = c.loadSettings(); process.stdout.write(JSON.stringify({ clear: s.claudeClearEnds, hub: s.hub }));`
     );
-    expect(JSON.parse(out)).toEqual({ clear: false, hub: { bind: "127.0.0.1", token: "deadbeef" } });
+    expect(JSON.parse(out)).toEqual({ clear: false, hub: { bind: "127.0.0.1", token: "deadbeef", upstream: "" } });
   });
 
   test("creates the config dir and file when absent, pretty-printed", () => {
@@ -105,6 +105,30 @@ describe("saveSettings", () => {
     inHome(home, `c.saveSettings({ hub: { bind: c.normalizeBindInput("any").value } });`);
     const path = join(home, ".config", "signalbox", "settings.json");
     expect(JSON.parse(readFileSync(path, "utf8")).hub.bind).toBe("0.0.0.0");
+  });
+
+  test("roundtrips hub.upstream through the settings file", () => {
+    const home = freshHome();
+    const out = inHome(
+      home,
+      `c.saveSettings({ hub: { upstream: "https://x.example" } });` +
+        `process.stdout.write(c.loadSettings().hub.upstream);`
+    );
+    expect(out).toBe("https://x.example");
+  });
+
+  test("preserves hub.token when saving hub.upstream", () => {
+    const home = freshHome({ hub: { token: "existing-token" } });
+    const out = inHome(
+      home,
+      `c.saveSettings({ hub: { upstream: "https://x.example" } });` +
+        `process.stdout.write(JSON.stringify(c.loadSettings().hub));`
+    );
+    expect(JSON.parse(out)).toEqual({
+      bind: "127.0.0.1",
+      token: "existing-token",
+      upstream: "https://x.example",
+    });
   });
 });
 
@@ -146,6 +170,57 @@ describe("normalizeBindInput", () => {
       const r = normalizeBindInput(bad);
       expect(r.value).toBeUndefined();
       expect(r.error).toBeDefined();
+    }
+  });
+});
+
+describe("normalizeUpstreamInput", () => {
+  test("accepts secure origins and removes one trailing slash", () => {
+    expect(normalizeUpstreamInput("https://my-hub.fly.dev/")).toEqual({
+      value: "https://my-hub.fly.dev",
+    });
+  });
+
+  test("accepts empty input for clearing the setting", () => {
+    expect(normalizeUpstreamInput("")).toEqual({ value: "" });
+    expect(normalizeUpstreamInput("   ")).toEqual({ value: "" });
+  });
+
+  test("accepts plain http only for loopback upstreams", () => {
+    expect(normalizeUpstreamInput("http://127.0.0.1:8500")).toEqual({
+      value: "http://127.0.0.1:8500",
+    });
+    expect(normalizeUpstreamInput("http://localhost:8500")).toEqual({
+      value: "http://localhost:8500",
+    });
+    expect(normalizeUpstreamInput("http://[::1]:8500")).toEqual({
+      value: "http://[::1]:8500",
+    });
+  });
+
+  test("stores the canonical origin for empty URL artifacts", () => {
+    expect(normalizeUpstreamInput("https://h/?").value).toBe("https://h");
+    expect(normalizeUpstreamInput("https://h/#").value).toBe("https://h");
+    expect(normalizeUpstreamInput("https://@h/").value).toBe("https://h");
+  });
+
+  test("strips embedded control characters from the stored value", () => {
+    expect(normalizeUpstreamInput("https://h/\t").value).toBe("https://h");
+  });
+
+  test("rejects inputs that are not permitted hub origins", () => {
+    for (const input of [
+      "http://my-hub.fly.dev",
+      "my-hub.fly.dev",
+      "https://u:p@h",
+      "https://h/path",
+      "https://h/?q=1",
+      "https://h/#f",
+      "file:///etc/passwd",
+    ]) {
+      const result = normalizeUpstreamInput(input);
+      expect(result.value).toBeUndefined();
+      expect(result.error).toContain("hub.upstream");
     }
   });
 });

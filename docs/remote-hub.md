@@ -110,29 +110,115 @@ platform's certificate against the system CAs. The LAN path is different: it
 pins the hub's self-signed certificate.
 
 `--url` accepts an `https://` origin only: no path, query, fragment or
-credentials. The QR preserves that URL verbatim. If the token is missing or
+credentials. The QR carries the URL's origin. If the token is missing or
 empty, the command stops with:
 `pairing against --url needs SIGNALBOX_TOKEN set (the remote hub requires a bearer to mint)`.
 
+## Run your laptop as a forwarder
+
+A forwarder is a local `signalbox hub --upstream <url>` that every local client
+keeps talking to on loopback, so the remote hub's token lives in exactly one
+place on the machine instead of in every hook environment.
+
+### Set it up
+
+Persist the upstream and its token:
+
+```sh
+signalbox config set hub.upstream https://<app>.fly.dev
+signalbox config set hub.token <the same token the hub runs with>
+```
+
+Restart the menu bar app or the hub so it re-reads the settings. The app starts
+the forwarder itself with no flags. `make install` also stops the existing hub,
+then the app starts it again.
+
+`SIGNALBOX_UPSTREAM` and `SIGNALBOX_TOKEN` in the environment take precedence
+over the persisted values. To run the forwarder explicitly in the foreground:
+
+```sh
+signalbox hub --upstream https://<app>.fly.dev
+```
+
+Hooks, the CLI and the menu bar app keep using tokenless loopback after that.
+
+### Check the uplink
+
+```sh
+curl -s http://127.0.0.1:8377/healthz
+```
+
+The response includes the upstream status:
+
+```json
+{"ok":true,"version":"<version>","upstream":{"url":"https://<app>.fly.dev","connected":true,"lastSeq":42,"spooled":0}}
+```
+
+`connected` says whether the forwarder is connected to the upstream stream,
+`lastSeq` is the latest upstream sequence it has received, and `spooled` is the
+number of local events waiting to be sent.
+
+### When Wi-Fi drops
+
+Events wait in `~/.local/state/signalbox/forward-spool.jsonl`. The spool holds
+up to 10,000 events or 16 MiB, whichever comes first, and drops the oldest
+events past that limit. The board keeps rendering from its local read cache
+instead of going blank. Events replay in order with at-least-once delivery when
+the connection returns.
+
+### Pair a phone
+
+A forwarder refuses pairing with a 409. Pair against the upstream from a
+machine that has the token:
+
+```sh
+SIGNALBOX_TOKEN=... signalbox pair --url https://<app>.fly.dev
+```
+
+The app's Connect Phone window reports that the hub needs "other devices
+allowed" when it reaches a forwarder. That message is imprecise: use
+`signalbox pair --url` against the upstream instead. Phone jumps then relay
+through the forwarder to this laptop. Routing jumps among multiple laptops is
+future work.
+
+### What it does not own
+
+A forwarder owns no state, writes no `events.jsonl`, and assigns no `seq`. Its
+read cache is an in-memory replica of the upstream. It serves loopback only;
+`--bind` alongside `--upstream` is refused.
+
 ## Point your machines at it
 
-Set the URL and shared token where the hooks and CLI can see them on every
-machine:
+### Use a forwarder (preferred)
+
+On each laptop, [run a local forwarder](#run-your-laptop-as-a-forwarder). The
+upstream credential then lives in one place on that machine, events tolerate
+offline periods, and hooks, the CLI and the menu bar app need no other
+configuration.
+
+### Connect directly
+
+Pointing clients straight at the remote hub is still supported and can be the
+simplest option for a headless box. Set the URL and shared token where its hooks
+and CLI can see them:
 
 ```sh
 export SIGNALBOX_URL=https://<app>.fly.dev
 export SIGNALBOX_TOKEN=...
 ```
 
-In this phase, the token has to live in each machine's environment. A local
-forwarder that keeps the token in one place per machine is planned but not
-built.
+With this option, the token lives in every hook environment rather than only in
+the local forwarder.
 
 ## Where things live
 
 The image sets `SIGNALBOX_STATE_DIR=/data`. The durable event log is
 `/data/events.jsonl` on the mounted volume. The one-time pairing slot is only
 held in memory, so a redeploy clears a pending code.
+
+Each machine writes `machine-id` in its signalbox state directory, by default
+`~/.local/state/signalbox/machine-id`. This stable id travels with events
+alongside `host`.
 
 ## Specs
 

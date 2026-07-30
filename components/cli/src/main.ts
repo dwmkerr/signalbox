@@ -8,6 +8,7 @@ import * as ev from "./event";
 import type { Event, Origin, Proc } from "./event";
 import { Client, fetchState, hubURL, stateDir, logTo, DefaultURL } from "./client";
 import { Hub, listen, validateBindConfig, isLoopbackAddress } from "./hub";
+import { Forwarder } from "./forwarder";
 import { ensureCert, type HubTLS } from "./tls";
 import * as tmux from "./tmux";
 import { jump } from "./jump";
@@ -18,7 +19,7 @@ import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle
 import { mapCodexHook, codexReply, codexSessionName, type CodexHook } from "./codex";
 import {
   loadSettings, saveSettings, settingsPath, normalizeBindInput, lanHint,
-  shouldGenerateToken, generateToken,
+  normalizeUpstreamInput, shouldGenerateToken, generateToken,
 } from "./config";
 import { runSetup } from "./setup";
 import {
@@ -62,6 +63,9 @@ usage: signalbox <command> [flags]
                --status shows the checklist without the interactive picker
   hub          run the hub in the foreground [--port 8377] [--bind 127.0.0.1]
                (the menu bar app runs one for you; use this headless or in dev)
+               --upstream <url> runs a forwarder instead: local clients keep
+               talking to loopback with no token, writes go up with the bearer
+               (spooled and replayed across drops), the board is a read cache
                --bind wide (e.g. 0.0.0.0) needs SIGNALBOX_TOKEN; non-loopback
                clients must then send Authorization: Bearer <token>
                --remote (or SIGNALBOX_REMOTE=1): container/PaaS mode - plain
@@ -78,6 +82,7 @@ usage: signalbox <command> [flags]
                config set hub.bind <loopback|any|IP>  (loopback = this Mac only;
                                                 any = every interface, incl. VPN)
                config set hub.token <value>     ("" or --generate mints one)
+               config set hub.upstream <url|"">   forward to a remote hub (empty clears)
   state        show the board [--json] [--all] [--tag T] [--exclude-tag T]
   jump <key>   jump to a session's origin (tmux pane or URL) and mark it seen
   pick         pick a waiting session interactively and jump to it
@@ -114,6 +119,7 @@ env: SIGNALBOX_URL (default ${DefaultURL})
      SIGNALBOX_EXPIRE (hub: end sessions with no agent event for this long, default 24h)
      SIGNALBOX_BIND (hub: bind address, default 127.0.0.1; --bind wins)
      SIGNALBOX_TOKEN (bearer token; required to bind non-loopback, sent by clients)
+     SIGNALBOX_UPSTREAM (hub: forward to this remote hub instead of owning state; --upstream wins)
      SIGNALBOX_REMOTE (hub: 1/true = remote mode, same as --remote)
 `;
 }
@@ -200,6 +206,7 @@ async function buildEvent(opts: {
     id: crypto.randomUUID(),
     ts: ev.nowTS(),
     host: ev.shortHostname(),
+    machine: ev.machineID(),
     agent: opts.agent,
     event: opts.eventType,
     session_key: sessionKey,
@@ -243,7 +250,14 @@ async function runFire(args: string[]): Promise<void> {
   const agent = flags["agent"] ?? "";
   const eventType = flags["event"] ?? "";
   if (!agent || !ev.validType(eventType)) {
+    // A bad flag is a caller bug, and dropping the event with no signal hides
+    // it forever - but fire is also called from agent adapters and user hooks,
+    // where a non-zero exit surfaces as warnings (or kills set -e glue). So:
+    // loud on stderr, still exit 0.
     logTo(stateDir(), `fire: --agent and a valid --event are required (agent="${agent}" event="${eventType}")`);
+    console.error(
+      `signalbox: fire needs --agent and a valid --event (got agent="${agent}", event="${eventType}"); valid events: attention, error, done, busy, ended, seen, hide, show, pin, unpin, label, tag, untag`
+    );
     return;
   }
   let proc: Proc | null = null;
@@ -564,6 +578,45 @@ function runHub(args: string[]): void {
   // exemption - so there is no combination of knobs that is half-safe.
   const remoteEnv = (process.env.SIGNALBOX_REMOTE ?? "").toLowerCase();
   const remote = flags["remote"] === "true" || remoteEnv === "1" || remoteEnv === "true";
+  // The menu bar app spawns `signalbox hub --port <n>` with no other flags, so
+  // the persisted key is the only way its own hub can become a forwarder.
+  const upstreamInput =
+    flags["upstream"] || process.env.SIGNALBOX_UPSTREAM || settings.hub.upstream || "";
+  const upstreamNorm = normalizeUpstreamInput(upstreamInput);
+  if (upstreamNorm.error) fatal(upstreamNorm.error);
+  const upstream = upstreamNorm.value!;
+  if (upstream) {
+    if (remote) {
+      fatal("--remote and --upstream are different jobs: --remote owns state on a routable host, --upstream forwards to one");
+    }
+    if (Object.prototype.hasOwnProperty.call(flags, "bind") || (process.env.SIGNALBOX_BIND ?? "") !== "") {
+      fatal(`a forwarder serves loopback only: drop --bind (it forwards to ${upstream}, it does not serve the network)`);
+    }
+    // A user who allowed devices in Phase 1 must not get an app-spawned hub
+    // that refuses to boot after choosing an upstream.
+    if (settings.hub.bind && !isLoopbackAddress(settings.hub.bind)) {
+      console.error(
+        `signalbox: hub.upstream is set, so hub.bind (${settings.hub.bind}) is ignored; a forwarder serves 127.0.0.1 only - silence this with: signalbox config set hub.bind loopback`
+      );
+    }
+    const token = process.env.SIGNALBOX_TOKEN || settings.hub.token || "";
+    if (!token) {
+      console.error(
+        "signalbox: no upstream token found in SIGNALBOX_TOKEN or hub.token; the upstream will reject requests unless it is unauthenticated"
+      );
+    }
+    const fwdStateDir = stateDir();
+    const fwd = new Forwarder({ upstream, token, stateDir: fwdStateDir, version });
+    listen(fwd, port, "127.0.0.1");
+    fwd.start();
+    // PID 1 has no default SIGTERM disposition, so stop the uplink and spool
+    // work before the platform stops the container.
+    process.on("SIGTERM", () => { fwd.close(); process.exit(0); });
+    console.error(
+      `signalbox hub ${version} (forwarder) listening on http://127.0.0.1:${port} -> upstream ${upstream}; local clients need no token (state: ${fwdStateDir})`
+    );
+    return;
+  }
   // Bind resolution order: --bind flag, then SIGNALBOX_BIND, then the persisted
   // config.hub.bind, then loopback. The persisted value is what lets the
   // app-spawned hub (which passes no --bind) come up reachable by other devices
@@ -681,9 +734,8 @@ function runHub(args: string[]): void {
 // ---- config ----------------------------------------------------------------
 
 // runConfig reads and writes the persistent hub network settings that runHub
-// (and the app-spawned hub) honor. A deliberately tiny two-key surface
-// (hub.bind, hub.token), not a general config editor: the app owns everything
-// else in settings.json.
+// (and the app-spawned hub) honor. A deliberately tiny three-key surface, not
+// a general config editor: the app owns everything else in settings.json.
 function runConfig(args: string[]): void {
   const { flags, rest } = parseFlags(args, ["generate"]);
   const sub = rest[0] ?? "get";
@@ -709,6 +761,7 @@ function runConfig(args: string[]): void {
     }
     console.log(`hub.bind:  ${bind} (${reach})`);
     console.log(`hub.token: ${s.hub.token ? "set" : "none"}`);
+    console.log(`hub.upstream: ${s.hub.upstream || "none (this hub owns its state)"}`);
     return;
   }
   if (sub === "set") {
@@ -731,9 +784,16 @@ function runConfig(args: string[]): void {
       console.log("token saved");
       return;
     }
-    fatal(`unknown config key ${JSON.stringify(key)} (settable: hub.bind, hub.token)`);
+    if (key === "hub.upstream") {
+      const norm = normalizeUpstreamInput(value);
+      if (norm.error) fatal(norm.error);
+      saveSettings({ hub: { upstream: norm.value! } });
+      console.log(norm.value ? `hub.upstream set to ${norm.value}` : "hub.upstream cleared");
+      return;
+    }
+    fatal(`unknown config key ${JSON.stringify(key)} (settable: hub.bind, hub.token, hub.upstream)`);
   }
-  fatal(`unknown config subcommand ${JSON.stringify(sub)} (try: config get, config set hub.bind <value>, config set hub.token <value|--generate>)`);
+  fatal(`unknown config subcommand ${JSON.stringify(sub)} (try: config get, config set hub.bind <value>, config set hub.token <value|--generate>, config set hub.upstream <url|"">)`);
 }
 
 // ---- state / pick / tmux-status / drain -------------------------------------------

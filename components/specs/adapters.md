@@ -22,6 +22,12 @@ An adapter can only surface what its agent's hooks emit, so the board shows diff
 
 Installing: `signalbox init` converges everything ([cli.md](cli.md); `install` and `setup` are aliases); `signalbox init --agent <name>` (repeatable, `--agent all` for every agent) scopes the run to one or more agents and applies without the picker; `--remove` turns the same components off. `--app` and `--tmux` scope to the other components.
 
+## Where adapters send events
+
+Every adapter posts to `SIGNALBOX_URL`, which defaults to the trusted loopback endpoint `http://127.0.0.1:8377` and needs no token. That endpoint may be the hub that owns the state or a forwarder relaying to a remote hub; the adapter cannot tell and does not need to.
+
+Do not give an adapter a bearer token. Copying the upstream credential into every hook environment is the leak the forwarder exists to close: the forwarder keeps it in one place and presents the same unauthenticated loopback contract to every local adapter.
+
 ## Claude Code (`signalbox hook claude`, stdin JSON)
 
 Install:
