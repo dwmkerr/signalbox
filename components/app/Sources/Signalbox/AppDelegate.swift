@@ -48,6 +48,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }()
 
     private var statusItem: NSStatusItem!
+    // True while the status menu is open (tracking). Rebuilding then would
+    // dismiss it under the pointer; see rebuildMenu.
+    private var menuIsTracking = false
+    private var menuRebuildDeferred = false
     private let menu = NSMenu()
     private var sessions: [String: Session] = [:]
     // Hub-authoritative display order: /state order is adopted verbatim, and
@@ -75,6 +79,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var cliMissing = false
     // The app owns the hub: started here, killed on quit (see Hub.swift).
     private var hubSupervisor: HubSupervisor?
+    // Set while the hub is unreachable or refusing us, so an empty board reads
+    // as "the app cannot see the hub" instead of "nothing is running".
+    private var hubProblem: String?
+    // All status surfaces share one probe and reference-count their interest,
+    // so opening two of them never doubles the traffic to the hub.
+    private lazy var hubHealthMonitor = HubHealthMonitor(hubURL: hubURL)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -106,14 +116,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
 
         settings = SettingsController(
-            hubURL: hubURL,
+            monitor: hubHealthMonitor,
             onIconChange: { [weak self] in self?.updateStatusIcon() },
             onFilterChange: { [weak self] in self?.refreshUI() },
+            onPairDevice: { [weak self] in self?.connectPhone?.show() },
             restartHub: { [weak self] in await self?.hubSupervisor?.restart() }
         )
         connectPhone = ConnectPhoneController(
             hubURL: hubURL,
-            restartHub: { [weak self] in await self?.hubSupervisor?.restart() }
+            openSettingsHubTab: { [weak self] in self?.settings?.show(tab: .hub) }
         )
         setupNotifications()
         setupPalette()
@@ -154,12 +165,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Full /state resync on every (re)connect covers events missed
                 // while disconnected without relying solely on stream replay.
                 try await syncState()
+                setHubProblem(nil)
                 backoffSeconds = 1
                 try await consumeStream()
             } catch is CancellationError {
                 return
             } catch {
                 // Hub down or connection dropped - retry below.
+                setHubProblem(hubProblemText(for: error))
             }
             if Task.isCancelled { return }
             try? await Task.sleep(nanoseconds: backoffSeconds * 1_000_000_000)
@@ -167,12 +180,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // Why the hub answered with something other than a board. Kept apart from
+    // URLError so the menu can name a rejected bearer, which reads nothing like
+    // an unreachable hub to the person who has to fix it.
+    private enum HubError: Error {
+        case status(Int)
+    }
+
+    private func hubProblemText(for error: Error) -> String {
+        let host = hubURL.host ?? hubURL.absoluteString
+        if case HubError.status(let code) = error, code == 401 || code == 403 {
+            return "Hub rejected this app (\(code)) - set SIGNALBOX_TOKEN for \(host)"
+        }
+        return "Cannot reach the hub at \(hubURL.absoluteString)"
+    }
+
+    // Only redraw on a change: this runs on every reconnect attempt, and
+    // rebuilding an open menu underneath the user is worse than a stale age.
+    private func setHubProblem(_ text: String?) {
+        guard text != hubProblem else { return }
+        hubProblem = text
+        refreshUI()
+    }
+
     private func syncState() async throws {
         let url = hubURL.appendingPathComponent("state")
-        let (data, response) = try await urlSession.data(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw URLError(.badServerResponse)
-        }
+        let (data, response) = try await urlSession.data(for: HubAuth.request(url))
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard http.statusCode == 200 else { throw HubError.status(http.statusCode) }
         let decoded = try JSONDecoder().decode(StateResponse.self, from: data)
         applyFullState(decoded.sessions)
     }
@@ -185,10 +220,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         components.queryItems = [URLQueryItem(name: "since", value: String(lastSeq))]
         guard let url = components.url else { throw URLError(.badURL) }
 
-        let (bytes, response) = try await urlSession.bytes(from: url)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw URLError(.badServerResponse)
-        }
+        let (bytes, response) = try await urlSession.bytes(for: HubAuth.request(url))
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard http.statusCode == 200 else { throw HubError.status(http.statusCode) }
         // The frame label decides what the next data line means: `signal` is an
         // event to fold in, `command` is a request to act on now. Heartbeat
         // comments (":") carry no payload; the hub sends each JSON on a single
@@ -473,6 +507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupPalette() {
         palette = PaletteController(
+            monitor: hubHealthMonitor,
             rowsProvider: { [weak self] in self?.paletteRows() ?? [] },
             onJump: { [weak self] key in self?.jump(to: key) },
             onHide: { [weak self] key in self?.hide(sessionKey: key) },
@@ -480,7 +515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onRemove: { [weak self] key in self?.remove(sessionKey: key) },
             onLabel: { [weak self] key, text in self?.setLabel(sessionKey: key, text: text) },
             onPin: { [weak self] key, pinned in self?.setPinned(sessionKey: key, pinned: pinned) },
-            onSettings: { [weak self] in self?.settings?.show() }
+            onSettings: { [weak self] tab in self?.settings?.show(tab: tab) }
         )
         let spec: GlobalHotkey.Spec
         if let raw = UserDefaults.standard.string(forKey: "hotkey"), !raw.isEmpty {
@@ -775,6 +810,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func rebuildMenu() {
+        // Mutating an open menu's items dismisses it mid-click. Refresh
+        // triggers keep firing while it is up (stream events, the settings
+        // window's 3s health poll), so defer the rebuild until it closes -
+        // menuWillOpen refreshes ages anyway, so nothing stays stale.
+        if menuIsTracking {
+            menuRebuildDeferred = true
+            return
+        }
         menu.removeAllItems()
         if cliMissing {
             // jump/hide/remove are dead without the CLI; a session list that
@@ -798,7 +841,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             !$0.hidden && passesFilters($0, tokens)
         }
         if visible.isEmpty {
-            let item = NSMenuItem(title: "No sessions", action: nil, keyEquivalent: "")
+            let item = NSMenuItem(
+                title: hubProblem ?? "No sessions", action: nil, keyEquivalent: ""
+            )
             item.isEnabled = false
             menu.addItem(item)
         }
@@ -814,6 +859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.attributedTitle = menuTitle(
                 agent: event.agent,
                 name: displayName(for: event, label: session.label),
+                tags: session.tags ?? [],
                 age: ageString(from: sessionAgeStart(session), to: now),
                 unread: !session.acked && needsCheck(event.event),
                 read: session.acked && event.event != "busy",
@@ -882,7 +928,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func menuTitle(
-        agent: String, name: String, age: String, unread: Bool, read: Bool, pinned: Bool
+        agent: String, name: String, tags: [String], age: String,
+        unread: Bool, read: Bool, pinned: Bool
     ) -> NSAttributedString {
         let size = NSFont.systemFontSize
         let text = NSMutableAttributedString()
@@ -909,6 +956,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
         if read { nameAttributes[.foregroundColor] = NSColor.secondaryLabelColor }
         text.append(NSAttributedString(string: name, attributes: nameAttributes))
+        let visibleTags = tags.prefix(3).map { $0.lowercased() }.joined(separator: " ")
+        if !visibleTags.isEmpty {
+            // An attributed menu title cannot host a drawn pill without an
+            // image attachment per tag, so dim small text carries the same
+            // quiet signal that the jumplist pill does.
+            text.append(NSAttributedString(string: "  \(visibleTags)", attributes: [
+                .font: NSFont.systemFont(ofSize: size - 2),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]))
+        }
         text.append(NSAttributedString(string: "  \(age)", attributes: [
             .font: NSFont.monospacedDigitSystemFont(ofSize: size - 1, weight: .regular),
             .foregroundColor: NSColor.secondaryLabelColor,
@@ -1054,8 +1111,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
-        // Ages are rendered into the titles, so recompute them at open time.
+        // Ages are rendered into the titles, so recompute them at open time -
+        // before the tracking flag goes up, so this rebuild still runs.
         rebuildMenu()
+        menuIsTracking = true
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuIsTracking = false
+        if menuRebuildDeferred {
+            menuRebuildDeferred = false
+            rebuildMenu()
+        }
     }
 }
 

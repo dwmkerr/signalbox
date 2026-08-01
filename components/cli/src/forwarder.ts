@@ -12,6 +12,8 @@ import { isLoopbackHost } from "./hub";
 import type { RequestHandler } from "./hub";
 import { PermanentError, Spool } from "./spool";
 import { Store } from "./state";
+import { buildStamp } from "./build";
+import { hubLog } from "./log";
 
 // A bounded replay ring prevents a long-running forwarder from retaining the
 // upstream's entire history in memory.
@@ -56,6 +58,7 @@ export interface ForwarderOptions {
   token: string;
   stateDir: string;
   version: string;
+  port: number;
 }
 
 export class Forwarder implements RequestHandler {
@@ -90,9 +93,15 @@ export class Forwarder implements RequestHandler {
     // Health remains reachable even when a caller's Host header is unsuitable,
     // matching the hub's platform-health contract.
     if (req.method === "GET" && url.pathname === "/healthz") {
+      // `mode` is an explicit enum rather than "the caller can tell because
+      // there is an `upstream` key", because a client that sniffs shape breaks
+      // the moment the shape changes for an unrelated reason.
       return Response.json({
         ok: true,
         version: this.opts.version,
+        build: buildStamp,
+        mode: "forwarder",
+        port: this.opts.port,
         upstream: {
           url: this.opts.upstream,
           connected: this.connected,
@@ -460,6 +469,9 @@ export class Forwarder implements RequestHandler {
 
   private log(message: string): void {
     logTo(this.opts.stateDir, message);
+    // cli.log is the CLI-wide hook log, while hub.log is what the app shows a
+    // person, so an uplink failure must be visible in the log they inspect.
+    hubLog(message);
   }
 }
 

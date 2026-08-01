@@ -121,6 +121,26 @@ struct StateResponse: Decodable {
     let sessions: [SessionEvent]
 }
 
+// A loopback hub needs no token; a non-loopback one rejects every request
+// without the shared bearer (specs/events.md). SIGNALBOX_URL and
+// SIGNALBOX_TOKEN travel together in the direct-connect setup, so reading the
+// token from the same environment the URL comes from authenticates this app
+// exactly like the hooks and CLI beside it (cli/src/client.ts).
+enum HubAuth {
+    private static var token: String? {
+        let token = ProcessInfo.processInfo.environment["SIGNALBOX_TOKEN"] ?? ""
+        return token.isEmpty ? nil : token
+    }
+
+    static func request(_ url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        if let token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+}
+
 // "Needs checking" per contract: an unacked attention/error/done row is the
 // user's work queue; busy rows are informational only.
 func needsCheck(_ event: String) -> Bool {

@@ -46,7 +46,9 @@ jobs:
         # (broken signatures on darwin-arm64); harmless elsewhere. The
         # codesign step is macOS-only.
         run: |
-          BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify src/main.ts --outfile bin/signalbox
+          BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify \
+            --define "process.env.SIGNALBOX_BUILD='ci-${GITHUB_SHA:0:7}'" \
+            src/main.ts --outfile bin/signalbox
           if [ "$(uname)" = "Darwin" ]; then
             codesign --force --sign - bin/signalbox
             codesign --verify bin/signalbox

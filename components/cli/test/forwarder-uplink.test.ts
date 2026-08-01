@@ -159,7 +159,7 @@ function startForwarder(upstream: string): {
   url: string;
 } {
   const dir = tempDir("sbforwarder-uplink-");
-  const forwarder = new Forwarder({ upstream, token: TOKEN, stateDir: dir, version: "test" });
+  const forwarder = new Forwarder({ upstream, token: TOKEN, stateDir: dir, version: "test", port: 0 });
   const server = trackServer(listen(forwarder, 0));
   forwarders.push(forwarder);
   forwarder.start();

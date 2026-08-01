@@ -28,7 +28,8 @@ struct PaletteRow {
     let needsCheck: Bool
     // Drives next-to-check and Tab cycling; display order stays the hub's.
     let engagedDate: Date
-    // Discreet session tags; matched by `#tag` search, never rendered.
+    // Discreet session tags render quietly because they are filing aids, not
+    // status; `#tag` search matches the same values.
     let tags: [String]
     // User-pinned: draws a quiet pin mark. Order is the hub's (pinned-first);
     // this flag never sorts locally.
@@ -707,6 +708,49 @@ final class PalettePanel: NSPanel {
     }
 }
 
+// A small amount of custom drawing keeps the status light borderless while
+// still giving mouse users the hover and open-state affordance from the spec.
+final class PaletteStatusButton: NSButton {
+    private var trackingArea: NSTrackingArea?
+    private var isHovered = false
+    var isOpen = false {
+        didSet { updateBackground() }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        self.trackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateBackground()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateBackground()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, isEnabled, bounds.contains(point) else { return nil }
+        return self
+    }
+
+    private func updateBackground() {
+        let alpha: CGFloat = isOpen ? 0.08 : (isHovered ? 0.05 : 0)
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(alpha).cgColor
+    }
+}
+
 // The session list. Right-clicking a row builds a context menu for that row,
 // the mouse-discoverable form of the keyboard row actions (pin/rename/hide/
 // remove). Keys still belong to the panel (refusesFirstResponder), so this
@@ -724,6 +768,7 @@ final class PaletteTableView: NSTableView {
 
 @MainActor
 final class PaletteController: NSObject {
+    private let monitor: HubHealthMonitor
     private let rowsProvider: @MainActor () -> [PaletteRow]
     private let onJump: @MainActor (String) -> Void
     private let onHide: @MainActor (String) -> Void
@@ -733,7 +778,7 @@ final class PaletteController: NSObject {
     private let onLabel: @MainActor (String, String) -> Void
     // Desired pinned state (true = pin, false = unpin) for the given session.
     private let onPin: @MainActor (String, Bool) -> Void
-    private let onSettings: @MainActor () -> Void
+    private let onSettings: @MainActor (SettingsTab?) -> Void
 
     // All rows from the provider, and the slice that survives the search
     // filter - every selection/cycle operation works on the filtered view.
@@ -754,10 +799,17 @@ final class PaletteController: NSObject {
     private var searchField: NSTextField!
     private var labelBar: NSView!
     private var labelField: NSTextField!
+    private var statusLightButton: PaletteStatusButton!
+    private var statusLightDot: NSView!
+    private var statusLightLabel: NSTextField!
+    private var statusPopover: NSView!
+    private var statusPopoverRows: NSStackView!
+    private var statusPopoverOpen = false
     // Typing goes to the search field (its field editor is first responder);
     // a local monitor intercepts the command keys (⌃j/⌃k/⌃x/⌃r/⌃1-9/⌃⌫,
     // arrows, tab, ↩, esc) before the field editor sees them.
     private var keyMonitor: Any?
+    private var mouseMonitor: Any?
     // The session being renamed; nil when the label editor is closed. Held by
     // key, not row index, so an SSE reload mid-edit cannot retarget the rename.
     private var labelEditingKey: String?
@@ -777,6 +829,7 @@ final class PaletteController: NSObject {
     private static var rowHeight: CGFloat { s(47) }
 
     init(
+        monitor: HubHealthMonitor,
         rowsProvider: @escaping @MainActor () -> [PaletteRow],
         onJump: @escaping @MainActor (String) -> Void,
         onHide: @escaping @MainActor (String) -> Void,
@@ -784,8 +837,9 @@ final class PaletteController: NSObject {
         onRemove: @escaping @MainActor (String) -> Void,
         onLabel: @escaping @MainActor (String, String) -> Void,
         onPin: @escaping @MainActor (String, Bool) -> Void,
-        onSettings: @escaping @MainActor () -> Void
+        onSettings: @escaping @MainActor (SettingsTab?) -> Void
     ) {
+        self.monitor = monitor
         self.rowsProvider = rowsProvider
         self.onJump = onJump
         self.onHide = onHide
@@ -811,6 +865,8 @@ final class PaletteController: NSObject {
         reload(preservingSelection: false)
         restorePosition()
         startTicking()
+        applyHubStatus()
+        monitor.begin("palette") { [weak self] in self?.applyHubStatus() }
         // Nonactivating panel takes key focus while the previous app stays
         // active - Spotlight's pattern. Never call NSApp.activate here.
         panel.makeKeyAndOrderFront(nil)
@@ -827,6 +883,16 @@ final class PaletteController: NSObject {
                 return consumed ? nil : event
             }
         }
+        if mouseMonitor == nil {
+            mouseMonitor = NSEvent.addLocalMonitorForEvents(
+                matching: [.leftMouseDown, .rightMouseDown]
+            ) {
+                [weak self] event in
+                nonisolated(unsafe) let event = event
+                MainActor.assumeIsolated { self?.handleMonitoredMouseDown(event) }
+                return event
+            }
+        }
     }
 
     func hide() {
@@ -835,6 +901,12 @@ final class PaletteController: NSObject {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
         }
+        if let mouseMonitor {
+            NSEvent.removeMonitor(mouseMonitor)
+            self.mouseMonitor = nil
+        }
+        closeStatusPopover()
+        monitor.end("palette")
         cancelLabelEdit()
         stopTicking()
         panel.orderOut(nil)
@@ -1023,6 +1095,10 @@ final class PaletteController: NSObject {
         let ctrl = event.modifierFlags.contains(.control)
         switch event.keyCode {
         case 53: // esc clears the search first; a second esc closes
+            if statusPopoverOpen {
+                closeStatusPopover()
+                return nil
+            }
             if query.isEmpty { hide() } else { clearQuery() }
             return nil
         case 36, 76: jumpSelected(); return nil // return / keypad enter
@@ -1071,6 +1147,17 @@ final class PaletteController: NSObject {
             jumpRow(digit - 1)
         }
         return nil
+    }
+
+    private func handleMonitoredMouseDown(_ event: NSEvent) {
+        guard statusPopoverOpen, event.window === panel else { return }
+        let inLight = statusLightButton.bounds.contains(
+            statusLightButton.convert(event.locationInWindow, from: nil)
+        )
+        let inPopover = statusPopover.bounds.contains(
+            statusPopover.convert(event.locationInWindow, from: nil)
+        )
+        if !inLight && !inPopover { closeStatusPopover() }
     }
 
     private func moveSelection(_ delta: Int) {
@@ -1203,6 +1290,12 @@ final class PaletteController: NSObject {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
         }
+        if let mouseMonitor {
+            NSEvent.removeMonitor(mouseMonitor)
+            self.mouseMonitor = nil
+        }
+        closeStatusPopover()
+        if wasVisible { monitor.end("palette") }
         stopTicking()
         labelEditingKey = nil
         // Detach the delegate first: orderOut resigns key, and the resign-key
@@ -1322,7 +1415,8 @@ final class PaletteController: NSObject {
         let footer = buildFooter()
         let body = buildBody()
         let labelBar = buildLabelBar()
-        for view in [header, body, footer, labelBar] {
+        let statusPopover = buildStatusPopover()
+        for view in [header, body, footer, labelBar, statusPopover] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -1345,9 +1439,13 @@ final class PaletteController: NSObject {
             labelBar.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
             labelBar.topAnchor.constraint(equalTo: footer.topAnchor),
             labelBar.bottomAnchor.constraint(equalTo: footer.bottomAnchor),
+            statusPopover.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: s(10)),
+            statusPopover.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -s(6)),
+            statusPopover.widthAnchor.constraint(equalToConstant: s(268)),
         ])
 
         self.panel = panel
+        applyHubStatus()
     }
 
     // The rename editor: a footer-sized bar with a "Rename:" prompt and a
@@ -1469,6 +1567,43 @@ final class PaletteController: NSObject {
         label.font = .systemFont(ofSize: s(10.5))
         label.textColor = Theme.textDim
         label.alignment = .center
+        label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let light = PaletteStatusButton()
+        light.isBordered = false
+        light.title = ""
+        light.wantsLayer = true
+        light.layer?.cornerRadius = s(5)
+        light.target = self
+        light.action = #selector(statusLightClicked)
+        light.toolTip = "Hub status. Click for details."
+
+        let dot = NSView()
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = s(3.5)
+
+        let lightLabel = NSTextField(labelWithString: "Hub starting")
+        lightLabel.font = .systemFont(ofSize: s(10.5))
+        lightLabel.textColor = Theme.textDim
+        lightLabel.setContentHuggingPriority(.required, for: .horizontal)
+        lightLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        for view in [dot, lightLabel] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            light.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            dot.leadingAnchor.constraint(equalTo: light.leadingAnchor, constant: s(6)),
+            dot.centerYAnchor.constraint(equalTo: light.centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: s(7)),
+            dot.heightAnchor.constraint(equalToConstant: s(7)),
+            lightLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: s(6)),
+            lightLabel.trailingAnchor.constraint(equalTo: light.trailingAnchor, constant: -s(6)),
+            lightLabel.centerYAnchor.constraint(equalTo: light.centerYAnchor),
+            light.heightAnchor.constraint(equalToConstant: s(22)),
+        ])
 
         // Settings cog, bottom-right - the launcher convention (Raycast). Opens
         // the Settings window and closes the palette.
@@ -1483,25 +1618,205 @@ final class PaletteController: NSObject {
         gear.toolTip = "Settings (⌘,)"
 
         let border = Self.hairlineView()
-        for view in [label, gear, border] {
+        for view in [light, label, gear, border] {
             view.translatesAutoresizingMaskIntoConstraints = false
             footer.addSubview(view)
         }
+        // The hover target begins before the visible content, putting its dot
+        // at 16pt while preserving the mock's six-point click padding.
         NSLayoutConstraint.activate([
+            light.leadingAnchor.constraint(equalTo: footer.leadingAnchor, constant: s(10)),
+            light.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             label.centerXAnchor.constraint(equalTo: footer.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: light.trailingAnchor, constant: s(8)),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: gear.leadingAnchor, constant: -s(8)),
             gear.trailingAnchor.constraint(equalTo: footer.trailingAnchor, constant: -s(16)),
             gear.centerYAnchor.constraint(equalTo: footer.centerYAnchor),
             border.leadingAnchor.constraint(equalTo: footer.leadingAnchor),
             border.trailingAnchor.constraint(equalTo: footer.trailingAnchor),
             border.topAnchor.constraint(equalTo: footer.topAnchor),
         ])
+        self.statusLightButton = light
+        self.statusLightDot = dot
+        self.statusLightLabel = lightLabel
         return footer
     }
 
     @objc private func settingsClicked() {
         hide()
-        onSettings()
+        onSettings(nil)
+    }
+
+    @objc private func statusLightClicked() {
+        statusPopoverOpen.toggle()
+        statusLightButton.isOpen = statusPopoverOpen
+        statusPopover.isHidden = !statusPopoverOpen
+        if statusPopoverOpen { applyHubStatus() }
+        panel.makeFirstResponder(searchField)
+    }
+
+    // The popover stays inside the panel because an NSPopover would become key,
+    // make this borderless floating panel resign key, and dismiss both surfaces.
+    private func buildStatusPopover() -> NSView {
+        let container = NSView()
+        container.isHidden = true
+
+        let arrow = NSView()
+        arrow.wantsLayer = true
+        arrow.layer?.backgroundColor = NSColor(hex: 0x2E2E33).cgColor
+        arrow.layer?.borderColor = Theme.panelBorder.cgColor
+        arrow.layer?.borderWidth = 1
+        arrow.layer?.setAffineTransform(CGAffineTransform(rotationAngle: .pi / 4))
+
+        let card = NSView()
+        card.wantsLayer = true
+        card.layer?.backgroundColor = NSColor(hex: 0x2E2E33).cgColor
+        card.layer?.borderColor = Theme.panelBorder.cgColor
+        card.layer?.borderWidth = 1
+        card.layer?.cornerRadius = s(9)
+        card.layer?.shadowColor = NSColor.black.cgColor
+        card.layer?.shadowOpacity = 0.6
+        card.layer?.shadowRadius = s(17)
+        card.layer?.shadowOffset = NSSize(width: 0, height: -s(8))
+
+        let rows = NSStackView()
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.spacing = s(1)
+
+        let separator = Self.hairlineView()
+
+        func link(_ title: String, action: Selector) -> NSButton {
+            let button = NSButton(title: title, target: self, action: action)
+            button.isBordered = false
+            button.font = .systemFont(ofSize: s(11.5))
+            button.contentTintColor = Theme.accent
+            button.setContentHuggingPriority(.required, for: .horizontal)
+            return button
+        }
+        let openSettings = link("Open Settings", action: #selector(openHubSettingsFromStatus))
+        let openLog = link("Open log", action: #selector(openLogFromStatus))
+        let links = NSStackView(views: [openSettings, openLog])
+        links.orientation = .horizontal
+        links.alignment = .centerY
+        links.spacing = s(14)
+
+        for view in [arrow, card] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(view)
+        }
+        for view in [rows, separator, links] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            card.addSubview(view)
+        }
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: container.topAnchor),
+            card.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            card.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -s(7)),
+            arrow.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: s(16)),
+            arrow.centerYAnchor.constraint(equalTo: card.bottomAnchor),
+            arrow.widthAnchor.constraint(equalToConstant: s(10)),
+            arrow.heightAnchor.constraint(equalToConstant: s(10)),
+            rows.topAnchor.constraint(equalTo: card.topAnchor, constant: s(11)),
+            rows.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: s(13)),
+            rows.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -s(13)),
+            separator.topAnchor.constraint(equalTo: rows.bottomAnchor, constant: s(8)),
+            separator.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: s(13)),
+            separator.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -s(13)),
+            links.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: s(7)),
+            links.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: s(9)),
+            links.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -s(7)),
+        ])
+
+        self.statusPopover = container
+        self.statusPopoverRows = rows
+        return container
+    }
+
+    private func applyHubStatus() {
+        let status = HubStatus(
+            health: monitor.health,
+            lastGood: monitor.lastGood,
+            intentMode: SharedSettings.intentMode,
+            isStarting: monitor.isStarting,
+            lanIP: LANAddress.primary()
+        )
+
+        let dotColor: NSColor
+        switch status.condition {
+        case .healthy: dotColor = .systemGreen
+        case .warning: dotColor = .systemOrange
+        case .starting: dotColor = Theme.age
+        }
+        statusLightDot.layer?.backgroundColor = dotColor.cgColor
+        statusLightLabel.stringValue = status.lightText
+        statusLightLabel.textColor = status.condition == .warning
+            ? .systemOrange
+            : Theme.textDim
+
+        statusPopoverRows.arrangedSubviews.forEach {
+            statusPopoverRows.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        addStatusRow("Mode", value: status.mode.rawValue)
+        addStatusRow(
+            "Address",
+            value: status.addressRow,
+            warning: status.addressRow == "not answering"
+        )
+        addStatusRow("Hub version", value: status.versionRow)
+        if let uplink = status.uplinkRow {
+            addStatusRow(
+                "Uplink",
+                value: uplink,
+                warning: status.condition == .warning
+            )
+        }
+    }
+
+    private func addStatusRow(_ key: String, value: String, warning: Bool = false) {
+        let keyLabel = NSTextField(labelWithString: key)
+        keyLabel.font = .systemFont(ofSize: s(11.5))
+        keyLabel.textColor = Theme.readText
+        keyLabel.widthAnchor.constraint(equalToConstant: s(78)).isActive = true
+
+        let valueLabel = NSTextField(labelWithString: value)
+        valueLabel.font = .monospacedSystemFont(ofSize: s(11), weight: .regular)
+        valueLabel.textColor = warning ? .systemOrange : Theme.titleUnread
+        valueLabel.isSelectable = true
+        valueLabel.lineBreakMode = .byTruncatingTail
+        valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [keyLabel, valueLabel])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = s(8)
+        // Add before constraining: activating a constraint between views with
+        // no common ancestor throws, and AppKit swallowing that exception at
+        // launch left the whole app half-initialized (dead Settings, dead
+        // hotkey).
+        statusPopoverRows.addArrangedSubview(row)
+        row.widthAnchor.constraint(equalTo: statusPopoverRows.widthAnchor).isActive = true
+    }
+
+    private func closeStatusPopover() {
+        guard statusPopoverOpen else { return }
+        statusPopoverOpen = false
+        statusLightButton.isOpen = false
+        statusPopover.isHidden = true
+        if panel.isVisible { panel.makeFirstResponder(searchField) }
+    }
+
+    @objc private func openHubSettingsFromStatus() {
+        hide()
+        onSettings(.hub)
+    }
+
+    @objc private func openLogFromStatus() {
+        hide()
+        onSettings(.logs)
     }
 
     private func buildBody() -> NSView {
@@ -1944,7 +2259,17 @@ private final class SessionCellView: NSTableCellView {
         titleLabel.maximumNumberOfLines = 1
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        addSubview(titleLabel)
+
+        let titleRow = NSStackView()
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = s(6)
+        titleRow.addArrangedSubview(titleLabel)
+        for tag in row.tags.prefix(3) {
+            titleRow.addArrangedSubview(tagPill(tag))
+        }
+        titleRow.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleRow)
 
         ageLabel.font = .monospacedDigitSystemFont(ofSize: s(11), weight: .semibold)
         ageLabel.textColor = Theme.age
@@ -1980,10 +2305,10 @@ private final class SessionCellView: NSTableCellView {
             glyph.centerYAnchor.constraint(equalTo: centerYAnchor),
             glyph.widthAnchor.constraint(equalToConstant: s(22)),
             glyph.heightAnchor.constraint(equalToConstant: s(20)),
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading),
+            titleRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading),
             right.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(20)),
             right.centerYAnchor.constraint(equalTo: centerYAnchor),
-            right.leadingAnchor.constraint(greaterThanOrEqualTo: titleLabel.trailingAnchor, constant: s(8)),
+            right.leadingAnchor.constraint(greaterThanOrEqualTo: titleRow.trailingAnchor, constant: s(8)),
         ])
 
         // The subtext is the latest line of the exchange (spec: Subtext):
@@ -1993,7 +2318,7 @@ private final class SessionCellView: NSTableCellView {
         let reply = (row.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let detail = (row.mark == .working || reply.isEmpty) ? prompt : reply
         if detail.isEmpty {
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
+            titleRow.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
         } else {
             let breadcrumb = NSTextField(labelWithString: detail)
             breadcrumb.font = .systemFont(ofSize: s(10.5))
@@ -2003,7 +2328,7 @@ private final class SessionCellView: NSTableCellView {
             breadcrumb.translatesAutoresizingMaskIntoConstraints = false
             addSubview(breadcrumb)
             NSLayoutConstraint.activate([
-                titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: s(8)),
+                titleRow.topAnchor.constraint(equalTo: topAnchor, constant: s(8)),
                 breadcrumb.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: s(2)),
                 breadcrumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading),
                 breadcrumb.trailingAnchor.constraint(
@@ -2011,6 +2336,35 @@ private final class SessionCellView: NSTableCellView {
                 ),
             ])
         }
+    }
+
+    // A tag is a filing aid, not a status: it gets the quietest treatment on
+    // the row - lowercase, dim, no glow - so the mark and the title keep the
+    // eye. Marks and ages own colour here; a coloured tag would read as state.
+    private func tagPill(_ tag: String) -> NSView {
+        let label = NSTextField(labelWithString: tag.lowercased())
+        label.font = .systemFont(ofSize: s(9.5), weight: .medium)
+        label.textColor = Theme.textDim
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let pill = NSView()
+        pill.wantsLayer = true
+        pill.layer?.cornerRadius = s(4)
+        pill.layer?.backgroundColor = Theme.hairline.cgColor
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        pill.addSubview(label)
+        pill.setContentHuggingPriority(.required, for: .horizontal)
+        pill.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: pill.leadingAnchor, constant: s(5)),
+            label.trailingAnchor.constraint(equalTo: pill.trailingAnchor, constant: -s(5)),
+            label.topAnchor.constraint(equalTo: pill.topAnchor, constant: s(1)),
+            label.bottomAnchor.constraint(equalTo: pill.bottomAnchor, constant: -s(1)),
+        ])
+        return pill
     }
 
     private func makeMarkView() -> NSView {

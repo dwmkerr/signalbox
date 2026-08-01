@@ -4,3 +4,5 @@ events.jsonl
 .DS_Store
 pat.ignore
 components/assets/hero/catalogue/catalog.html
+components/ios/build-device/
+.playwright-mcp/

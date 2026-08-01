@@ -280,11 +280,17 @@ export function newEnded(sessionKey: string, reason: string): Event {
   return newUserEvent(Ended, sessionKey, reason);
 }
 
+// One event carries every tag: the reducer already unions e.tags into the
+// session, so N tags cost one round trip and one spool line instead of N.
+export function newTags(sessionKey: string, tags: string[]): Event {
+  const e = newUserEvent(Tag, sessionKey, "");
+  e.tags = tags;
+  return e;
+}
+
 // newTag / newUntag add or remove a discreet tag on a session.
 export function newTag(sessionKey: string, tag: string): Event {
-  const e = newUserEvent(Tag, sessionKey, "");
-  e.tags = [tag];
-  return e;
+  return newTags(sessionKey, [tag]);
 }
 
 export function newUntag(sessionKey: string, tag: string): Event {

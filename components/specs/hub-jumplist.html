@@ -32,7 +32,7 @@
   /* ---- the panel mockup ---- */
   .panel { width:100%; background:#1e1e21; border:1px solid #ffffff20; border-radius:16px;
            box-shadow:0 18px 50px rgba(0,0,0,.6); overflow:hidden; user-select:none;
-           font-size:13px; line-height:normal; }
+           font-size:13px; line-height:normal; position:relative; }
   header { display:flex; align-items:center; justify-content:space-between; padding:0 20px; height:46px;
            border-bottom:1px solid #ffffff14; }
   header .brand { color:#B5B5BA; font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
@@ -53,9 +53,13 @@
   .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
   .glyph { width:22px; display:flex; justify-content:center; flex-shrink:0; }
   .txt { flex:1; min-width:0; }
-  .txt .t { font-size:13px; color:#ADADB2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .txt .t { display:flex; align-items:center; gap:6px; font-size:13px; color:#ADADB2; white-space:nowrap; }
+  .txt .t .name { min-width:0; overflow:hidden; text-overflow:ellipsis; }
   .row.unread .txt .t { font-weight:700; color:#EDEDED; }
   .row.sel .txt .t { color:#fff; }
+  .pill { flex-shrink:0; padding:1px 5px; border-radius:4px; background:rgba(255,255,255,.07);
+          color:#6E6E73; font-size:9.5px; font-weight:500; line-height:normal;
+          text-transform:lowercase; box-shadow:none; }
   .txt .d { font-size:10.5px; color:#6E6E73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
   .right { text-align:right; flex-shrink:0; }
   .age { font-size:11px; font-weight:600; color:#98989D; }
@@ -108,6 +112,34 @@
   footer .cog { position:absolute; right:14px; top:50%; transform:translateY(-50%); color:#6E6E73;
                 font-size:14px; cursor:pointer; line-height:1; }
   footer .cog:hover { color:#B5B5BA; }
+  .jlight { position:absolute; left:10px; top:50%; transform:translateY(-50%); display:flex;
+            align-items:center; gap:6px; font-size:10.5px; white-space:nowrap; color:#8E8E93;
+            cursor:pointer; padding:3px 6px; border-radius:5px; }
+  .jlight:hover { color:#D8D8DC; background:#ffffff0d; }
+  .jlight.open { color:#D8D8DC; background:#ffffff14; }
+  .jlight .sdot { width:7px; height:7px; border-radius:50%; }
+  .jlight.warn { color:#FF9F0A; }
+
+  .pop { position:absolute; left:10px; bottom:40px; width:268px; background:#2e2e33;
+         border:1px solid #ffffff22; border-radius:9px; padding:11px 13px 9px;
+         box-shadow:0 14px 34px rgba(0,0,0,.6); display:none; z-index:20; user-select:auto; }
+  .pop.on { display:block; }
+  .pop::after { content:""; position:absolute; left:16px; bottom:-6px; width:10px; height:10px;
+                background:#2e2e33; border-right:1px solid #ffffff22; border-bottom:1px solid #ffffff22;
+                transform:rotate(45deg); }
+  .pop .prow { display:flex; gap:8px; font-size:11.5px; line-height:1.7; }
+  .pop .prow .k { color:#8E8E93; width:78px; flex-shrink:0; }
+  .pop .prow .v { color:#EDEDED; font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px;
+                  user-select:text; cursor:text; }
+  .pop .prow.warn .v { color:#FF9F0A; }
+  .pop .plinks { border-top:1px solid #ffffff14; margin-top:8px; padding-top:7px; display:flex; gap:14px; }
+  .pop .plinks a { color:#0A84FF; font-size:11.5px; cursor:pointer; text-decoration:none; }
+
+  /* Spec-only chrome: the app footer does not contain health-state controls. */
+  .specstates { margin:0 0 10px; font-size:12px; color:#6E6E73; }
+  .specstates button { background:#28282c; border:1px solid #ffffff22; border-radius:6px; color:#B5B5BA;
+                       font-size:11px; padding:3px 9px; margin-left:5px; cursor:pointer; font-family:inherit; }
+  .specstates button.cur { background:#0A84FF; border-color:#0A84FF; color:#fff; }
   .labelbar { position:absolute; inset:0; background:#1e1e21; border-top:1px solid #ffffff14;
               display:none; align-items:center; gap:8px; padding:0 20px; }
   .labelbar.show { display:flex; }
@@ -126,6 +158,10 @@
 <div class="subtitle">Open with <kbd>⌃</kbd><kbd>⌥</kbd><kbd>J</kbd> (change this in <a href="settings.html">settings</a>).</div>
 <div class="interactive-note"><b>Note:</b> the mockup below is interactive and operates as the living specification for the signalbox jumplist.</div>
 
+<div class="specstates">Hub health (spec control, not part of the jumplist):
+  <button data-h="healthy" class="cur">Healthy</button><button data-h="degraded">Degraded</button><button data-h="starting">Starting</button>
+</div>
+
 <div class="panel">
   <header>
     <span class="brand"><svg width="16" height="16" viewBox="0 0 20 20" stroke="#B5B5BA" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#B5B5BA" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>signalbox</span>
@@ -139,10 +175,12 @@
     </div>
   </div>
   <footer>
+    <span class="jlight" id="jlight" title="Hub status. Click for details."></span>
     <span class="keys">type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump  ·  esc clear/close</span>
     <span class="cog" title="Settings (⌘,)">⚙</span>
     <div class="labelbar" id="labelbar"><span class="p">Rename:</span><input id="labelinput" placeholder="session label - empty clears, ↩ saves, esc cancels"></div>
   </footer>
+  <div class="pop" id="pop"></div>
 </div>
 
 <div class="prose">
@@ -153,6 +191,19 @@
   or a click elsewhere. Drag any background area to reposition it, like Alfred or Raycast. It remembers
   its position across opens and recenters if that spot is offscreen, for example after a display is
   unplugged.</p>
+
+  <h2>Hub status light</h2>
+  <p>The hub status light sits at the left of the footer, opposite the cog, where you already look
+  while using the jumplist. Everyday hub status belongs here, not hidden inside Settings. Its exact
+  states are <b>Hub healthy</b> with a green dot, <b>Hub warning</b> with an amber dot, and
+  <b>Hub starting</b> with a grey dot. It never names a mode because "Remote" reads as a place, not
+  as health.</p>
+  <p>Click the light for a popover with Mode, Address, Hub version, and, only in Remote mode, Uplink.
+  Address reads <b>not answering</b> in amber when the hub is down. Uplink reads <b>connected</b>,
+  <b>down, N events spooled</b> in amber, or <b>starting</b>. The values are monospace and selectable.
+  <b>Open Settings</b> closes the jumplist and opens the Hub tab; <b>Open log</b> closes it and opens
+  the Logs tab. A click elsewhere, or <kbd class="sc">esc</kbd>, closes the popover. There are no menu
+  bar items for the light, these facts, or its links.</p>
 
   <h2>Status marks</h2>
   <ul>
@@ -168,6 +219,12 @@
   <p>The line under each name is the latest line of the exchange. While a session works you see your
   prompt; once it finishes, asks, or fails you see its reply. The preview on the right highlights the
   same line with the colored bullet, so the list and the preview always agree.</p>
+
+  <h2>Tags</h2>
+  <p>Tags are discreet lowercase pills after the title: a filing aid, never a status. They come from
+  <code>signalbox session tag</code> or <code>fire --tag</code>; <code>#tag</code> matches them and
+  <code>!tag</code> excludes them in Additional filters. <code>components/scripts/demo.sh</code> tags
+  every seeded session <code>demo</code>, so <code>!demo</code> hides a demo board.</p>
 
   <h2>Icons</h2>
   <p>The icon on each row shows the originator, taken from the event's <code>agent</code>
@@ -256,6 +313,7 @@
     <tr><td><kbd>⌃X</kbd></td><td>Hide until the session speaks again; on a row in the expanded Hidden section, unhide it</td></tr>
     <tr><td><kbd>⌃⌫</kbd></td><td>Remove now</td></tr>
     <tr><td><kbd>⌘,</kbd></td><td>Open Settings (same as the footer cog)</td></tr>
+    <tr><td><b>Hub status light</b></td><td>Open the hub facts popover; Open Settings targets Hub and Open log targets Logs</td></tr>
     <tr><td><kbd>⌘+</kbd> <kbd>⌘−</kbd> <kbd>⌘0</kbd></td><td>Zoom the jumplist in / out / reset (0.8×-1.6×, persists)</td></tr>
     <tr><td><kbd class="sc">esc</kbd></td><td>Clear the search, then close</td></tr>
   </table>
@@ -335,6 +393,13 @@ const SESSIONS = [
    reply:"Workflow run #8890 succeeded in 2m 3s - nothing else pending on that repo.",
    loc:"Open on GitHub (Actions run #8890)"},
 ];
+// Spec-only hub state. Remote shows the popover's conditional fourth row;
+// the real light never includes this mode name.
+const hub = { running:"remote", health:"healthy", popOpen:false };
+const GREEN = "#32D74B", AMBER = "#FF9F0A", STARTING = "#98989D";
+const HUB_VERSION = "0.9.2";
+const HUB_ADDR = { local:"127.0.0.1:8377", lan:"192.168.1.24:8377", remote:"signalbox-hub.fly.dev" };
+const HUB_NAME = { local:"Local", lan:"LAN", remote:"Remote" };
 // Topmost-unread default selection (fallback: top row).
 const needsCheck = s => s.state==="ask" || s.state==="unread" || s.state==="failed";
 let query = "";
@@ -380,6 +445,9 @@ function markHTML(st){
   return '<div class="ring"></div>';
 }
 function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+function tagPills(s){
+  return (s.tags||[]).slice(0,3).map(tag=>`<span class="pill">${esc(tag.toLowerCase())}</span>`).join("");
+}
 // The freshest half of the exchange: prompt while working, reply once the
 // session has finished, asked, or failed.
 function subtext(s){ return (s.state==="working" || !s.reply) ? s.prompt : s.reply; }
@@ -391,7 +459,7 @@ function renderList(){
     <div class="row ${i===sel?"sel":""} ${needsCheck(s)?"unread":""}" onclick="select(${i})" oncontextmenu="event.preventDefault();showCtxMenu(${i},event.clientX,event.clientY)">
       <div class="mark">${markHTML(s.state)}</div>
       <div class="glyph">${AG[s.agent]||AG.generic}</div>
-      <div class="txt"><div class="t">${esc(s.label||s.title)}</div><div class="d">${esc(subtext(s))}</div></div>
+      <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${esc(subtext(s))}</div></div>
       <div class="right">${s.pinned?`<span class="pin">${PIN}</span>`:""}<span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span></div>
     </div>`}).join("");
   const hidden = hiddenHTML();
@@ -416,7 +484,7 @@ function hiddenHTML(){
     <div class="row hrow">
       <div class="mark">${EYESLASH}</div>
       <div class="glyph">${AG[s.agent]||AG.generic}</div>
-      <div class="txt"><div class="t">${esc(s.label||s.title)}</div><div class="d">${esc(subtext(s))}</div></div>
+      <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${esc(subtext(s))}</div></div>
       <div class="right"><span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span></div>
     </div>`}).join("");
   return out;
@@ -447,6 +515,60 @@ function renderPreview(){
 }
 function select(i){ sel = i; renderList(); renderPreview(); }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 1300); }
+
+function starting(){ return hub.health === "starting"; }
+function degraded(){ return hub.health === "degraded"; }
+
+// Three health states and never a mode name, matching settings.html.
+function lightParts(){
+  if (starting()) return { dot:STARTING, text:"Hub starting", warn:false };
+  if (degraded()) return { dot:AMBER, text:"Hub warning", warn:true };
+  return { dot:GREEN, text:"Hub healthy", warn:false };
+}
+function renderLight(){
+  const p = lightParts(), el = document.getElementById("jlight");
+  el.className = "jlight" + (p.warn ? " warn" : "") + (hub.popOpen ? " open" : "");
+  el.innerHTML = '<span class="sdot" style="background:' + p.dot + '"></span>' + p.text;
+}
+
+// Facts stay copyable; Uplink exists only for Remote.
+function renderPop(){
+  const rows = [["Mode", HUB_NAME[hub.running], false]];
+  const addrWarn = degraded() && hub.running !== "remote";
+  rows.push(["Address", addrWarn ? "not answering" : HUB_ADDR[hub.running], addrWarn]);
+  rows.push(["Hub version", HUB_VERSION, false]);
+  if (hub.running === "remote") {
+    const value = starting() ? "starting" : degraded() ? "down, 12 events spooled" : "connected";
+    rows.push(["Uplink", value, degraded()]);
+  }
+  let html = "";
+  for (let i = 0; i < rows.length; i++) {
+    html += '<div class="prow' + (rows[i][2] ? " warn" : "") + '">' +
+      '<span class="k">' + rows[i][0] + '</span><span class="v">' + rows[i][1] + '</span></div>';
+  }
+  html += '<div class="plinks"><a id="popset">Open Settings</a><a id="poplog">Open log</a></div>';
+  const pop = document.getElementById("pop");
+  pop.innerHTML = html;
+  pop.className = "pop" + (hub.popOpen ? " on" : "");
+  if (!hub.popOpen) return;
+  document.getElementById("popset").onclick = () => { closePop(); toast("would open Settings on the Hub tab"); };
+  document.getElementById("poplog").onclick = () => { closePop(); toast("would open Settings on the Logs tab"); };
+}
+function closePop(){ hub.popOpen = false; renderLight(); renderPop(); }
+
+function syncHealthButtons(){
+  document.querySelectorAll(".specstates button").forEach(button =>
+    button.classList.toggle("cur", button.dataset.h === hub.health));
+}
+
+document.getElementById("jlight").onclick = e => {
+  e.stopPropagation(); hub.popOpen = !hub.popOpen; renderLight(); renderPop();
+};
+document.getElementById("pop").onclick = e => e.stopPropagation();
+document.querySelectorAll(".specstates button").forEach(button => {
+  button.onclick = () => { hub.health = button.dataset.h; syncHealthButtons(); renderLight(); renderPop(); };
+});
+document.addEventListener("click", () => { if (hub.popOpen) closePop(); });
 
 // Pinned sessions sort first: a toggle re-partitions immediately (stable
 // within each group, mirroring the hub's rule) - no waiting for a resync.
@@ -507,6 +629,7 @@ const searchEl = document.getElementById("search");
 searchEl.addEventListener("input", () => { query = searchEl.value.trim(); sel = defaultSel(); renderList(); renderPreview(); });
 
 document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && hub.popOpen) { e.preventDefault(); closePop(); return; }
   if (editing) return;
   const ctrl = e.ctrlKey;
   if (ctrl && (e.key==="j"||e.key==="J")) { e.preventDefault(); moveSel(1); }
@@ -528,5 +651,5 @@ document.addEventListener("keydown", e => {
   }
   else if (document.activeElement !== searchEl && e.key.length===1 && !e.metaKey && !ctrl) searchEl.focus();
 });
-sel = defaultSel(); renderList(); renderPreview(); searchEl.focus();
+sel = defaultSel(); renderList(); renderPreview(); renderLight(); renderPop(); searchEl.focus();
 </script></body></html>

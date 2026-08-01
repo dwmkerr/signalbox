@@ -15,10 +15,17 @@ function serverFrom(address: string): Bun.Server<undefined> {
 const fakeServer = serverFrom("127.0.0.1");
 
 const upstream = "http://127.0.0.1:1";
+const port = 8377;
 
 function newForwarder(): { forwarder: Forwarder; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "sbforwarder-"));
-  const forwarder = track(new Forwarder({ upstream, token: "test-token", stateDir: dir, version: "test" }));
+  const forwarder = track(new Forwarder({
+    upstream,
+    token: "test-token",
+    stateDir: dir,
+    version: "test",
+    port,
+  }));
   return { forwarder, dir };
 }
 
@@ -84,6 +91,9 @@ describe("forwarder routes", () => {
     expect(await res.json()).toEqual({
       ok: true,
       version: "test",
+      build: "",
+      mode: "forwarder",
+      port,
       upstream: { url: upstream, connected: false, lastSeq: 0, spooled: 0 },
     });
   });

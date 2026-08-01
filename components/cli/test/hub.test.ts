@@ -222,14 +222,20 @@ describe("validation and hardening", () => {
     expect(res.status).toBe(400);
   });
 
-  test("healthz reports version", async () => {
-    const { hub } = newHub();
-    track(hub);
+  test("healthz reports local mode, address, port, version, and build", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
+    const hub = track(new Hub(dir, "test", "", "127.0.0.1", "", 0, false, 8701));
     const req = new Request("http://127.0.0.1:8377/healthz", { headers: { Host: "localhost" } });
     const res = (await hub.handle(req, fakeServer))!;
+    expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.version).toBe("test");
+    expect(body.build).toBe("");
+    expect(typeof body.build).toBe("string");
+    expect(body.mode).toBe("local");
+    expect(body.bind).toBe("127.0.0.1");
+    expect(body.port).toBe(8701);
   });
 });
 
@@ -317,10 +323,15 @@ describe("bind and bearer auth", () => {
   });
 
   test("non-loopback peer reaches /healthz with no token", async () => {
-    const hub = tokenHub();
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
+    const hub = track(new Hub(dir, "test", TOKEN, "0.0.0.0", "", 0, false, 8704));
     const res = (await hub.handle(lanReq("/healthz"), lan))!;
     expect(res.status).toBe(200);
-    expect((await res.json()).ok).toBe(true);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.mode).toBe("lan");
+    expect(body.bind).toBe("0.0.0.0");
+    expect(body.port).toBe(8704);
   });
 
   test("loopback peer with a non-loopback Host is still 403 (rebinding defence)", async () => {
@@ -591,9 +602,9 @@ function pairHub(token: string, bind: string): Hub {
 
 // A hub in remote mode (hub --remote): behind a platform proxy, so the peer
 // address is never trusted and every request below the auth gate needs bearer.
-function remoteHub(token = TOKEN, bind = "0.0.0.0"): Hub {
+function remoteHub(token = TOKEN, bind = "0.0.0.0", port = 0): Hub {
   const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
-  return track(new Hub(dir, "test", token, bind, "", 0, true));
+  return track(new Hub(dir, "test", token, bind, "", 0, true, port));
 }
 
 function pairNewReq(body: unknown = {}, contentType = "application/json"): Request {
@@ -794,13 +805,17 @@ describe("remote mode", () => {
     expect(denied.status).toBe(401);
   });
 
-  test("/healthz stays open in remote mode", async () => {
-    const hub = remoteHub();
+  test("/healthz stays open and reports remote mode regardless of bind", async () => {
+    const hub = remoteHub(TOKEN, "127.0.0.1", 8702);
     const req = new Request("http://127.0.0.1:8377/healthz", {
       headers: { Host: "127.0.0.1:8377" },
     });
     const res = (await hub.handle(req, fakeServer))!;
     expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.mode).toBe("remote");
+    expect(body.bind).toBe("127.0.0.1");
+    expect(body.port).toBe(8702);
   });
 
   test("minting needs the bearer even from a loopback peer", async () => {

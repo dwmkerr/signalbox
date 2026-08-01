@@ -1,227 +1,92 @@
 # Run a remote hub
 
-## What this is
+Running a Signalbox hub on a remote server allows you to pair your phone without being on the same network, as well as having multiple machines forward to one central location:
 
-Hotel and corporate Wi-Fi often uses AP client isolation. Your phone and laptop
-can both reach the internet, but they cannot reach each other, so LAN pairing
-fails.
+<img src="images/remote-hub.svg" width="560" alt="Two machines forward their agent sessions to a remote hub; a phone connects to the hub.">
 
-A remote hub is the same signalbox binary running on a routable host. Your phone
-and every laptop connect to that host instead. This is self-deploy only - there
-is no hosted signalbox service.
+## Deploying a remote hub
 
-## What you are trading
+Signalbox has ready-to-go example configuration for [fly.io](https://fly.io) in [`components/deploy/fly`](../components/deploy/fly/) - clone the repository to use it, since the deploy needs `fly.toml` and the Dockerfile from the checkout.
 
-The hub holds a breadcrumb of every prompt and reply from every machine you
-point at it. That data lives on a host you rent and is protected by one shared
-bearer token. Anyone with the token can read the board and send events.
+In short, from the repository root:
 
-On machines where even a short breadcrumb must not leave, set
-`SIGNALBOX_PROFILE=redacted`. This drops the cwd, title, prompt and reply, and
-hashes the session id before sending.
-
-## Get the image
-
-Pull the published image:
-
-```sh
-docker pull ghcr.io/dwmkerr/signalbox:latest
-```
-
-Or build it from a checkout. Run this from the repository root because the
-Docker build context must be the repository root:
-
-```sh
-docker build -f components/deploy/Dockerfile -t signalbox-hub .
-```
-
-## Run it anywhere with Docker
-
-Create a token and a persistent volume, then run the published image:
-
-```sh
-export SIGNALBOX_TOKEN="$(openssl rand -base64 24)"
-docker volume create signalbox_data
-docker run --name signalbox-hub --detach \
-  -e SIGNALBOX_TOKEN \
-  -v signalbox_data:/data \
-  -p 8377:8377 \
-  ghcr.io/dwmkerr/signalbox:latest
-```
-
-If you built locally, use `signalbox-hub` as the image name in the last line.
-The image sets `SIGNALBOX_REMOTE=1`, so the hub serves plain HTTP and assumes
-that the platform or proxy in front of it terminates TLS. Do not expose port
-8377 directly to the internet.
-
-## Deploy to Fly
-
-Run the full sequence from the repository root. Pick an app name and region
-during `fly launch`, then use that region in the volume command:
-
-```sh
+```bash
+# Create the app (pick a name and region, no deploy yet).
 fly launch --no-deploy -c components/deploy/fly/fly.toml
+
+# Create a volume for the event log, in the region you picked.
 fly volumes create signalbox_data -s 1 -r <region> -c components/deploy/fly/fly.toml
-fly secrets set SIGNALBOX_TOKEN="$(openssl rand -base64 24)" -c components/deploy/fly/fly.toml
+
+# Create a token and store it as a secret - set it BEFORE the first deploy, and keep a copy.
+export SIGNALBOX_TOKEN="$(openssl rand -base64 24)"
+fly secrets set SIGNALBOX_TOKEN="$SIGNALBOX_TOKEN" -c components/deploy/fly/fly.toml
+
+# Deploy; one machine, one volume - the hub must not scale to two.
 fly deploy -c components/deploy/fly/fly.toml --dockerfile components/deploy/Dockerfile --ha=false .
 ```
 
-`--ha=false` keeps one machine attached to one volume. The hub is the single
-source of truth and must not be scaled to two machines. `SIGNALBOX_TOKEN` is a
-secret: keep a copy somewhere secure and never put its value in `fly.toml`.
+Once you have deployed a remote hub, point Signalbox on your local machine to it. Go to 'Settings > Hub', choose 'Mode: Remote', enter your hub address and token, then 'Test' and 'Confirm' - Confirm enables once the test passes. Or from the CLI:
 
-## Check it
-
-Set the public URL and the same token you stored on Fly:
-
-```sh
-export SIGNALBOX_URL=https://<app>.fly.dev
-export SIGNALBOX_TOKEN=...
+```bash
+# Point the local hub at the remote hub and store the token.
+signalbox config set hub.upstream https://<app>.fly.dev
+signalbox config set hub.token "$SIGNALBOX_TOKEN"
 ```
 
-The health check is public and returns `{"ok":true,...}`:
+When offline, the hub runs locally and replays events to the remote hub when reconnected.
 
-```sh
-curl "$SIGNALBOX_URL/healthz"
+You can also run the hub manually in any location with the published Docker image:
+
+```bash
+# Run the hub with a token and a persistent volume.
+export SIGNALBOX_TOKEN="$(openssl rand -base64 24)"
+docker volume create signalbox_data
+docker run --name signalbox-hub --detach \
+  -e SIGNALBOX_TOKEN -v signalbox_data:/data -p 8377:8377 \
+  ghcr.io/dwmkerr/signalbox:latest
+
+# From your machine, check the connection.
+curl -s http://<host>:8377/healthz
+curl -s -H "Authorization: Bearer $SIGNALBOX_TOKEN" http://<host>:8377/state
 ```
 
-The board returns 401 without the bearer:
-
-```sh
-curl "$SIGNALBOX_URL/state"
-```
-
-The same request returns the board with the bearer:
-
-```sh
-curl -H "Authorization: Bearer $SIGNALBOX_TOKEN" "$SIGNALBOX_URL/state"
-```
+The image sets `SIGNALBOX_REMOTE=1`, so the hub serves plain HTTP and expects the platform in front of it to terminate TLS - do not expose port 8377 directly to the internet. State lives on the `/data` volume.
 
 ## Pair a phone
 
-Mint a code against the public hub, then scan the QR from the signalbox app:
+Choose 'Connect Phone' in the menu bar app and scan the QR, exactly as you would on a LAN. Your Mac is a forwarder, so it cannot mint a code itself: the window mints against the remote hub with the token you entered in 'Settings > Hub', shows the QR, and waits for the phone to redeem it. The QR carries the hub's public address and the one-time code, never the token.
 
-```sh
-SIGNALBOX_TOKEN=... signalbox pair --url https://<app>.fly.dev
+If the window cannot mint - no token stored on this machine, a token the hub rejects, or a hub it cannot reach - it says why and hands you the command to run on any machine that holds the token:
+
+```bash
+export SIGNALBOX_TOKEN="<your hub token>"
+signalbox pair --url https://my-hub.fly.dev
 ```
 
-The QR carries the HTTPS URL with no `fp` pin. The phone validates the
-platform's certificate against the system CAs. The LAN path is different: it
-pins the hub's self-signed certificate.
+## Troubleshooting
 
-`--url` accepts an `https://` origin only: no path, query, fragment or
-credentials. The QR carries the URL's origin. If the token is missing or
-empty, the command stops with:
-`pairing against --url needs SIGNALBOX_TOKEN set (the remote hub requires a bearer to mint)`.
+**Troubleshooting a Fly deploy**
 
-## Run your laptop as a forwarder
+```bash
+# Curl hangs forever: the machine cannot start - almost always a missing token.
+fly logs -c components/deploy/fly/fly.toml      # Look for: remote mode requires SIGNALBOX_TOKEN.
+fly status -c components/deploy/fly/fly.toml    # Machine stopped at "max restart count".
 
-A forwarder is a local `signalbox hub --upstream <url>` that every local client
-keeps talking to on loopback, so the remote hub's token lives in exactly one
-place on the machine instead of in every hook environment.
+# Recover: set the secret, then start the stopped machine by hand.
+fly secrets set SIGNALBOX_TOKEN="$(openssl rand -base64 24)" -c components/deploy/fly/fly.toml
+fly machine start <id> -c components/deploy/fly/fly.toml
 
-### Set it up
-
-Persist the upstream and its token:
-
-```sh
-signalbox config set hub.upstream https://<app>.fly.dev
-signalbox config set hub.token <the same token the hub runs with>
+# Beware: SIGNALBOX_TOKEN="$TOKEN" with $TOKEN unset sets an EMPTY secret - same symptom.
+echo "${TOKEN:?TOKEN is not set}" | head -c 8   # Prove it is non-empty first.
 ```
 
-Restart the menu bar app or the hub so it re-reads the settings. The app starts
-the forwarder itself with no flags. `make install` also stops the existing hub,
-then the app starts it again.
+A 401 on `/state` is not a failure - every route except `/healthz` and `POST /pair` needs the bearer.
 
-`SIGNALBOX_UPSTREAM` and `SIGNALBOX_TOKEN` in the environment take precedence
-over the persisted values. To run the forwarder explicitly in the foreground:
+## Configuration
 
-```sh
-signalbox hub --upstream https://<app>.fly.dev
-```
+- `SIGNALBOX_TOKEN` - the bearer token; required in remote mode, never in `fly.toml` (it is committed).
+- `SIGNALBOX_REMOTE=1` - remote mode: plain HTTP behind platform TLS, token on every request. Set by the image.
+- `/data` volume - the event log; one machine, one volume.
+- `hub.remoteUrl` - the app's memory of the last confirmed remote address, so switching modes and back restores it; `hub.upstream` alone decides whether the hub forwards.
 
-Hooks, the CLI and the menu bar app keep using tokenless loopback after that.
-
-### Check the uplink
-
-```sh
-curl -s http://127.0.0.1:8377/healthz
-```
-
-The response includes the upstream status:
-
-```json
-{"ok":true,"version":"<version>","upstream":{"url":"https://<app>.fly.dev","connected":true,"lastSeq":42,"spooled":0}}
-```
-
-`connected` says whether the forwarder is connected to the upstream stream,
-`lastSeq` is the latest upstream sequence it has received, and `spooled` is the
-number of local events waiting to be sent.
-
-### When Wi-Fi drops
-
-Events wait in `~/.local/state/signalbox/forward-spool.jsonl`. The spool holds
-up to 10,000 events or 16 MiB, whichever comes first, and drops the oldest
-events past that limit. The board keeps rendering from its local read cache
-instead of going blank. Events replay in order with at-least-once delivery when
-the connection returns.
-
-### Pair a phone
-
-A forwarder refuses pairing with a 409. Pair against the upstream from a
-machine that has the token:
-
-```sh
-SIGNALBOX_TOKEN=... signalbox pair --url https://<app>.fly.dev
-```
-
-The app's Connect Phone window reports that the hub needs "other devices
-allowed" when it reaches a forwarder. That message is imprecise: use
-`signalbox pair --url` against the upstream instead. Phone jumps then relay
-through the forwarder to this laptop. Routing jumps among multiple laptops is
-future work.
-
-### What it does not own
-
-A forwarder owns no state, writes no `events.jsonl`, and assigns no `seq`. Its
-read cache is an in-memory replica of the upstream. It serves loopback only;
-`--bind` alongside `--upstream` is refused.
-
-## Point your machines at it
-
-### Use a forwarder (preferred)
-
-On each laptop, [run a local forwarder](#run-your-laptop-as-a-forwarder). The
-upstream credential then lives in one place on that machine, events tolerate
-offline periods, and hooks, the CLI and the menu bar app need no other
-configuration.
-
-### Connect directly
-
-Pointing clients straight at the remote hub is still supported and can be the
-simplest option for a headless box. Set the URL and shared token where its hooks
-and CLI can see them:
-
-```sh
-export SIGNALBOX_URL=https://<app>.fly.dev
-export SIGNALBOX_TOKEN=...
-```
-
-With this option, the token lives in every hook environment rather than only in
-the local forwarder.
-
-## Where things live
-
-The image sets `SIGNALBOX_STATE_DIR=/data`. The durable event log is
-`/data/events.jsonl` on the mounted volume. The one-time pairing slot is only
-held in memory, so a redeploy clears a pending code.
-
-Each machine writes `machine-id` in its signalbox state directory, by default
-`~/.local/state/signalbox/machine-id`. This stable id travels with events
-alongside `host`.
-
-## Specs
-
-- [CLI](../components/specs/cli.md) covers `hub` and `pair`.
-- [Events](../components/specs/events.md) defines endpoints, binding and auth.
-- [Architecture](../components/specs/architecture.html) describes the remote-hub tier.
+Fly specifics (ports, health check, machine sizing) live in [`components/deploy/fly/README.md`](../components/deploy/fly/README.md).

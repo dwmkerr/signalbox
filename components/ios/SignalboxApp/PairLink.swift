@@ -97,6 +97,16 @@ extension PairLink {
             let url = URL(string: raw)
             assert(url.flatMap(PairLink.init) == nil, "PairLink self-check: expected \(label) to be rejected")
         }
+        func expectTarget(_ raw: String, fingerprint: String?, _ target: PairTarget, _ label: String) {
+            guard let url = URL(string: raw) else {
+                assertionFailure("PairLink self-check: expected \(label) URL to parse")
+                return
+            }
+            assert(
+                PairTarget.of(url: url, fingerprint: fingerprint) == target,
+                "PairLink self-check: expected \(label) to be \(target)"
+            )
+        }
 
         let hex64 = String(repeating: "a1", count: 32) // 64 hex chars
 
@@ -132,24 +142,56 @@ extension PairLink {
         expectNil("signalbox://pair?url=http%3A%2F%2F127.0.0.1%3A8377&code=", "empty code")
         expectNil("signalbox://pair?code=abc", "missing url")
         expectNil("notsignalbox://pair?url=http%3A%2F%2F127.0.0.1%3A8377&code=abc", "wrong scheme")
+
+        let lanMessage = PairError.unreachable(host: "192.168.1.20", target: .lan).message
+        assert(lanMessage.contains("same Wi-Fi"), "PairLink self-check: LAN advice must name same Wi-Fi")
+        assert(lanMessage.contains("remote hub"), "PairLink self-check: LAN advice must name remote hub")
+        let remoteMessage = PairError.unreachable(host: "hub.example.com", target: .remote).message
+        assert(remoteMessage.contains("internet connection"), "PairLink self-check: remote advice must name internet")
+        assert(!remoteMessage.contains("Wi-Fi"), "PairLink self-check: remote advice must not name Wi-Fi")
+
+        expectTarget("https://192.168.1.20:8378", fingerprint: hex64, .lan, "https with pin")
+        expectTarget("http://192.168.1.20:8377", fingerprint: nil, .lan, "http without pin")
+        expectTarget("https://hub.example.com", fingerprint: nil, .remote, "https without pin")
+        expectTarget("http://192.168.1.20:8377", fingerprint: hex64, .lan, "http with stray fp")
     }
 }
 #endif
+
+// Which kind of hub failed to answer. The advice differs completely: a LAN
+// hub is unreachable when the two devices cannot see each other, which hotel
+// and office networks routinely arrange even on one SSID (AP isolation),
+// while a remote hub is unreachable when the phone has no internet at all.
+enum PairTarget: Equatable { case lan, remote }
+
+extension PairTarget {
+    // A pin means a LAN hub's self-signed cert; plain http means a LAN hub
+    // with no TLS at all. https with no pin is a hub behind platform TLS,
+    // which is only ever reached over the internet.
+    static func of(url: URL, fingerprint: String?) -> PairTarget {
+        fingerprint != nil || url.scheme?.lowercased() == "http" ? .lan : .remote
+    }
+}
 
 // The failure surface for the whole pairing flow, phrased for a person holding
 // a phone rather than a log. Every path that can go wrong maps to exactly one
 // of these so the alert always has something plain to say.
 enum PairError: Error, Equatable {
     case badLink
-    case unreachable(String)
+    case unreachable(host: String, target: PairTarget)
     case rejected
 
     var message: String {
         switch self {
         case .badLink:
             return "That is not a valid signalbox pairing code."
-        case .unreachable(let host):
-            return "Could not reach \(host); phone and computer must be on the same Wi-Fi."
+        case .unreachable(let host, let target):
+            switch target {
+            case .lan:
+                return "Could not reach \(host). The phone and the Mac must be on the same Wi-Fi - and some hotel and office networks stop devices seeing each other even when they are. If that is what is happening, run a remote hub instead: see \"Run a remote hub\" in the signalbox docs."
+            case .remote:
+                return "Could not reach \(host). Check the phone's internet connection, and that the hub is running."
+            }
         case .rejected:
             return "Code expired or already used - run signalbox pair again on your computer."
         }

@@ -99,9 +99,12 @@ jobs:
 
       - name: Compile
         working-directory: components/cli
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
           bun install --frozen-lockfile
           BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify \
+            --define "process.env.SIGNALBOX_BUILD='$TAG'" \
             --target=${{ matrix.target }} src/main.ts --outfile bin/signalbox
           case "${{ matrix.target }}" in
             bun-darwin-*)
@@ -151,14 +154,18 @@ jobs:
 
       - name: Compile universal CLI
         working-directory: components/cli
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
         # bun compiles per-arch; lipo fuses the slices. The result is ad-hoc
         # signed only so `version` runs here - notarize re-signs it with the
         # Developer ID and the JIT entitlements.
         run: |
           bun install --frozen-lockfile
           BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify \
+            --define "process.env.SIGNALBOX_BUILD='$TAG'" \
             --target=bun-darwin-arm64 src/main.ts --outfile bin/signalbox-arm64
           BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify \
+            --define "process.env.SIGNALBOX_BUILD='$TAG'" \
             --target=bun-darwin-x64 src/main.ts --outfile bin/signalbox-x64
           lipo -create bin/signalbox-arm64 bin/signalbox-x64 -output bin/signalbox
           codesign --force --sign - bin/signalbox

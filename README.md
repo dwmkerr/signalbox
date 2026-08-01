@@ -72,22 +72,51 @@ A (janky) video showing how to manage sessions with signalbox:
 
 https://github.com/user-attachments/assets/2f45c187-e90a-4151-bc40-19ddfa48d89a
 
+## Running a remote hub
+
+To connect your phone over the internet, or forward events from multiple machines to one board, run a [remote hub](docs/remote-hub.md).
+
+<img src="docs/images/remote-hub.svg" width="560" alt="Two machines forward their agent sessions to a remote hub; a phone connects to the hub.">
+
+As an example, deploying to [fly.io](https://fly.io) from the repository root:
+
+```bash
+# Create the fly app, but don't deploy until the volume and token exist.
+fly launch --no-deploy -c components/deploy/fly/fly.toml
+
+# Create a volume for the event log, in the region you picked.
+fly volumes create signalbox_data -s 1 -r <region> -c components/deploy/fly/fly.toml
+
+# Create a token, store it as a secret, then deploy.
+export SIGNALBOX_TOKEN="$(openssl rand -base64 24)"
+fly secrets set SIGNALBOX_TOKEN="$SIGNALBOX_TOKEN" -c components/deploy/fly/fly.toml
+fly deploy -c components/deploy/fly/fly.toml --dockerfile components/deploy/Dockerfile --ha=false .
+```
+
+Then open 'Settings > Hub', choose 'Mode: Remote', enter the hub URL and token, then 'Test' and 'Confirm'. Or from the CLI:
+
+```bash
+# Point the local hub at the remote hub and store the token.
+signalbox config set hub.upstream https://<app>.fly.dev
+signalbox config set hub.token "$SIGNALBOX_TOKEN"
+```
+
+The [remote hub guide](docs/remote-hub.md) has the details.
+
 ## Features
 
 - A single command to install, uninstall or configure coding agent integrations: `signalbox init`
 - `⌃⌥J` opens the jumplist: see sessions and their status, jump to sessions, search sessions, rename sessions, hide sessions
 - Menu bar session list for quick access
 - [Integrations](docs/integrations.md) for Cursor, Claude Code, Codex, OpenCode, pi and VS Code
-- A [remote hub](docs/remote-hub.md) for hotel and corporate wifi, where the phone cannot reach your laptop
+- Run a [remote hub](docs/remote-hub.md) to forward events from multiple machines and connect your phone over the internet
 - A native [tmux jump list](docs/tmux.md) (`<Leader>J`)
 - Events can be sent via the `signalbox fire` command allowing you to build your own integrations or workflows
 - Easily develop by iterating on the [specs](components/specs/) then letting your coding agent update them
 
-Troubleshooting: the app-spawned hub logs to `~/.local/state/signalbox/hub.log` (version, mode, warnings, crashes) - start there when the board looks wrong.
-
 ## Privacy & Security
 
-signalbox sends signals and messages from coding agent sessions - these can include sensitive data. Signalbox currently runs locally and no data leaves your machine. However this is an early-stage, experimental project and should still be used with caution.
+signalbox sends signals and messages from coding agent sessions - these can include sensitive data. In Local mode no data leaves localhost. In LAN mode events are accessible to machines on the same local network. Remote mode forwards events to a remote host and should be used with caution. This is an early-stage, experimental project.
 
 ## Developer Guide
 
@@ -111,6 +140,11 @@ open components/ios/Signalbox.xcodeproj
 On the simulator the app connects to your Mac's hub automatically. On a real device, pair with a QR code: run `signalbox pair` (or choose "Connect Phone" in the menu bar app) and scan it from Settings > Scan to Connect. The full guide - command-line builds, device signing, dev hooks - is [Building the mobile app](docs/mobile.md); the UI spec is [ios.html](components/specs/ios.html).
 
 Check with your coding agent on how to work with the menubar / app.
+
+## Troubleshooting
+
+- The app-spawned hub logs to `~/.local/state/signalbox/hub.log` (view it in 'Settings > Logs') - start there when the board looks wrong.
+- Remote hub issues: see [troubleshooting](docs/remote-hub.md#troubleshooting) in the remote hub guide.
 
 ## License
 

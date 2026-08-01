@@ -10,6 +10,7 @@ import * as cmd from "./command";
 import type { Command } from "./command";
 import { Store } from "./state";
 import { procAlive } from "./proc";
+import { buildStamp } from "./build";
 
 const heartbeatMs = 15_000;
 // Bounds a single POST body; events are tiny, so anything bigger is junk.
@@ -67,7 +68,11 @@ export class Hub {
     // the proxy's, which may look like loopback - so the loopback auth
     // exemption is never granted and EVERY request needs the bearer, except
     // /healthz and /pair which are unauthenticated by design.
-    private remote: boolean = false
+    private remote: boolean = false,
+    // The port this hub listens on, echoed by /healthz. A surface that wants
+    // to tell a person where to reach the hub must not have to guess it from
+    // the URL it happened to dial.
+    private port: number = 0
   ) {
     mkdirSync(stateDir, { recursive: true });
     this.logPath = join(stateDir, "events.jsonl");
@@ -140,6 +145,15 @@ export class Hub {
     return this.store.list();
   }
 
+  // The mode is STATED, never inferred by a caller from the bind address or
+  // from the shape of this response. A surface that inferred it ("a wide
+  // bind means devices can reach this Mac") told the user the opposite of
+  // the truth while a forwarder was running, which is what this field ends.
+  private modeName(): "local" | "lan" | "remote" {
+    if (this.remote) return "remote";
+    return isLoopbackAddress(this.bind) || this.bind === "" ? "local" : "lan";
+  }
+
   // startExpiry runs the sweep once now - dead sessions from before a
   // restart must not wait for the first tick - then on every interval.
   startExpiry(intervalMs: number, maxAgeMs: number): void {
@@ -185,9 +199,17 @@ export class Hub {
   handle(req: Request, server: Bun.Server<undefined>): Response | Promise<Response> | undefined {
     const url = new URL(req.url);
     // /healthz stays unauthenticated from anywhere: platform health checks need
-    // it before any credential, and it leaks only ok+version.
+    // it before any credential. The added fields disclose only what the hub
+    // already announces on stderr at startup.
     if (req.method === "GET" && url.pathname === "/healthz") {
-      return Response.json({ ok: true, version: this.version });
+      return Response.json({
+        ok: true,
+        version: this.version,
+        build: buildStamp,
+        mode: this.modeName(),
+        bind: this.bind,
+        port: this.port,
+      });
     }
     // unauthenticated exemptions: /healthz and /pair ONLY - everything above the
     // auth gate bypasses ALL auth. /pair is unauthenticated by design: the

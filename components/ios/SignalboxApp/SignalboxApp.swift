@@ -152,7 +152,10 @@ struct SignalboxApp: App {
             } catch let error as PairError {
                 pairAlert = .failed(error)
             } catch {
-                pairAlert = .failed(.unreachable(link.url.host ?? "the hub"))
+                pairAlert = .failed(.unreachable(
+                    host: link.url.host ?? "the hub",
+                    target: .of(url: link.url, fingerprint: link.fingerprint)
+                ))
             }
         }
     }

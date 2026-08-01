@@ -249,8 +249,12 @@ final class HubClient: ObservableObject {
             // A transport failure here is almost always the phone and the
             // computer being on different networks, so name the host. A pin
             // mismatch also lands here (the TLS handshake is cancelled), which is
-            // the same "could not reach it safely" story to a person.
-            throw PairError.unreachable(url.host ?? "the hub")
+            // the same "could not reach it safely" story to a person. A pin
+            // mismatch is a LAN case, so the LAN advice is still the right advice.
+            throw PairError.unreachable(
+                host: url.host ?? "the hub",
+                target: .of(url: url, fingerprint: fingerprint)
+            )
         }
         guard let http = response as? HTTPURLResponse else { throw PairError.rejected }
         // Any 4xx means the code is bad, expired or already spent - all of

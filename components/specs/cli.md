@@ -157,13 +157,18 @@ signalbox fire --agent github --event done \
   --title "deploy" \
   --reply "Workflow run #9182 succeeded in 4m 12s." \
   --origin-url "https://github.com/dwmkerr/signalbox/actions/runs/9182"
+
+signalbox fire --agent script --event busy \
+  --session-key script:demo --title "demo run" --tag demo
 ```
 
-- Flags: `--agent` and `--event` (both required), `--reason`, `--title`, `--prompt`, `--reply`, `--session-key`, `--origin-url`, `--pid` (the agent process, for the hub's liveness sweep; `--pid-name` overrides the resolved name).
+- Flags: `--agent` and `--event` (both required), `--reason`, `--title`, `--prompt`, `--reply`, `--session-key`, `--origin-url`, `--tag <t>` (repeatable), `--pid` (the agent process, for the hub's liveness sweep; `--pid-name` overrides the resolved name). Repeatable `--tag` fires one `tag` event immediately after the session event, carrying every tag and the same resolved session key, so `#tag` and `!tag` filters see it.
 - A missing `--agent` or an unknown `--event` warns on stderr - one line naming the valid events (`attention`, `error`, `done`, `busy`, `ended`, `seen`, `hide`, `show`, `pin`, `unpin`, `label`, `tag`, `untag`) - and still exits 0. fire is called from agent adapters and user hooks, so a usage mistake must be visible but never fatal to the caller; delivery failures likewise spool and exit 0, so scripts never break on a down hub.
-- A missing `--agent` or an unknown `--event` fails loudly: one stderr line naming the valid events (`attention`, `error`, `done`, `busy`, `ended`, `seen`, `hide`, `show`, `pin`, `unpin`, `label`, `tag`, `untag`) and exit 1. A bad flag is a caller bug, and exiting 0 silently would lose the event with no signal - unlike delivery failures, which still spool and exit 0 so scripts never break on a down hub.
 - Fired from inside tmux, the pane origin is captured automatically; from a VS Code / Cursor integrated terminal, an editor origin is captured instead, so `jump` can route back. tmux beats the editor check: a pane is a more precise jump target than an app window.
 - `--prompt` and `--reply` are cropped at the emitter (160 and 280 characters, one line). The full text never leaves the process. `--detail` is accepted as an alias for `--prompt`. See the [data model](events.md).
+
+`components/scripts/demo.sh` tags every session it seeds `demo`. Add `!demo` to
+the app's Additional filters to hide those sessions without removing them.
 
 ## session - acting on a session
 
@@ -216,9 +221,24 @@ SIGNALBOX_TOKEN=... signalbox hub --remote   # container/PaaS: platform TLS in f
 signalbox hub --upstream https://my-hub.fly.dev   # forward to a remote hub
 ```
 
+A running state-owning hub reports its runtime explicitly at the unauthenticated
+`GET /healthz` endpoint: `{"ok": true, "version": "0.1.5", "build":
+"d6907e1-dirty", "mode": "local", "bind": "127.0.0.1", "port": 8377}`.
+`mode` is `local`, `lan`, or `remote` and is the single oracle for which runtime
+is answering - callers must never infer it from `bind` or from other response
+keys. `version` stays the bare semver, and `build` is empty on an unstamped
+build. A forwarder instead reports `{"ok": true, "version": "0.1.5", "build":
+"d6907e1-dirty", "mode": "forwarder", "port": 8377, "upstream": {"url":
+"https://my-hub.fly.dev", "connected": true, "lastSeq": 118, "spooled": 0}}`.
+
 ```text
 signalbox hub 0.1.0 listening on http://127.0.0.1:8377 (state: /Users/you/.local/state/signalbox, expire: 24h)
 ```
+
+The hub writes its lifecycle lines to stderr, each prefixed
+`YYYY-MM-DD HH:MM:SS` in local time. The macOS app redirects them to
+`~/.local/state/signalbox/hub.log` and shows the last 500 lines in Settings >
+Logs. A forwarder's uplink lines go to both `hub.log` and `cli.log`.
 
 Binds `127.0.0.1` by default. `--bind <host>` (or `SIGNALBOX_BIND`; the flag wins) widens that. Outside remote mode, loopback peers still need no token, but every non-loopback client must send `Authorization: Bearer $SIGNALBOX_TOKEN`. The hub never serves a non-loopback bind without a configured token. Binding, auth, and the unauthenticated exemptions are specified in the [data model](events.md#binding-and-auth).
 
@@ -257,6 +277,14 @@ Beneath the QR it prints the plain `signalbox://pair?url=<hub-url>&code=<code>[&
 Pairing requires a hub with a non-loopback bind and a configured token: a hub bound to loopback, which no phone could reach, refuses to mint, and so does a hub with no token. For LAN pairing, the advertised host is the hub's bind when that is a concrete IP, otherwise this machine's LAN IPv4 (VPN and tunnel interfaces are skipped so a corp VPN address never wins); `--host` overrides. Minting a code and reading pairing status require a loopback peer or a valid bearer because a token holder is already fully trusted: they can read every prompt and forge events, so a loopback gate bought nothing and blocked the legitimate remote-admin flow. In remote mode the loopback half never applies, so the bearer is always required. The endpoints (`POST /pair`, `POST /pair/new`, `GET /pair/status`) and the full security rationale are in the [data model](events.md#pairing).
 
 On a forwarder, `POST /pair`, `POST /pair/new` and `GET /pair/status` all return `409` with a message naming `signalbox pair --url <upstream>`. A forwarder owns neither the state nor the pairing token.
+The macOS Connect Phone window therefore never asks the forwarder to mint: it
+mints against the upstream origin itself, exactly as `pair --url` does (`POST
+<upstream>/pair/new` with `Authorization: Bearer` from the stored `hub.token`),
+shows the QR in the window, and polls `<upstream>/pair/status` with the same
+bearer. A remote mint carries no `fp` or TLS `port`, so the QR advertises the
+upstream origin with no pin. When it cannot mint - no upstream address, no
+stored token, a rejected token, or an unreachable hub - the window falls back to
+the copyable `signalbox pair --url <upstream>` command with the reason.
 
 ## config
 
@@ -291,6 +319,8 @@ The `0.0.0.0` wildcard is preferred over a single pinned interface IP because th
 
 `hub.upstream` accepts the same origin-only URL as `hub --upstream`: `https`, or plain `http` only for `localhost`, `127.x.x.x` or `::1`. Saving canonicalizes it to the URL origin. An empty value clears it; a non-empty value makes a bare or app-spawned `signalbox hub` run as a forwarder.
 
+The app also writes `hub.remoteUrl` into the same section: the remote hub address it last confirmed, remembered so its Hub tab can offer it again. Nothing in the CLI reads it and it is not settable (`config set hub.remoteUrl` is an unknown key), because `hub.upstream` alone decides whether this hub forwards - switching the app to Local or LAN empties `hub.upstream` while `hub.remoteUrl` keeps the address for the next switch back. Like every app-owned key it survives `config set` untouched.
+
 ## hook and plumbing
 
 - `signalbox hook claude` - reads a Claude Code hook payload on stdin and fires the mapped event ([agent integrations](adapters.md)).
@@ -302,6 +332,20 @@ The `0.0.0.0` wildcard is preferred over a single pinned interface IP because th
 The flat forms (`signalbox ack`, `signalbox claude-hook`, `signalbox tmux-status`, …) still work as aliases, and `install`/`setup` are aliases for `init`, so existing configs keep running.
 
 Delivery from all hook-path commands is one POST with a 200ms timeout; on failure the event spools to disk and the next invocation delivers it (the opportunistic drain is bounded to 100 events and 2s, so a backlog can never stall the hook path). No daemon on the hook path, no waiting.
+
+## version
+
+```bash
+signalbox version      # 0.1.5 (d6907e1-dirty)
+```
+
+The bare semver, plus the build provenance in parentheses when the binary was
+stamped at compile time. `make build` stamps `git describe --always --dirty
+--tags`; release CI stamps the release tag; an unstamped build (a plain
+`bun run src/main.ts`) prints the semver alone. The same provenance appears in
+the hub's startup log line and in `GET /healthz` as the separate `build` field,
+while `version` remains the bare semver, so "which build is this hub" has one
+answer everywhere.
 
 ## Environment
 

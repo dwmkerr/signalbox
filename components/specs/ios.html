@@ -582,6 +582,15 @@ the hub to redeem against; <code>code</code> is a one-time pairing code. The pho
 <code>{ "code": &lt;code&gt; }</code> to <code>&lt;url&gt;/pair</code> and gets back
 <code>{ "token": &lt;string&gt; }</code>; any 4xx means the code is bad, expired, or spent. The token
 goes to the Keychain and the app reconnects.</p>
+<p>An unreachable pairing target gives advice for the kind of hub the link names:</p>
+<table>
+  <tr><th>Target</th><th>Message</th></tr>
+  <tr><td>Pinned LAN, or plain <code>http</code></td><td>Could not reach &lt;host&gt;. The phone and the Mac must be on the same Wi-Fi - and some hotel and office networks stop devices seeing each other even when they are. If that is what is happening, run a remote hub instead: see "Run a remote hub" in the signalbox docs.</td></tr>
+  <tr><td>Remote <code>https</code> with no pin</td><td>Could not reach &lt;host&gt;. Check the phone's internet connection, and that the hub is running.</td></tr>
+</table>
+<p>A pin identifies a LAN hub; plain <code>http</code> is LAN too because it has no TLS to pin.
+An <code>https</code> target with no pin is remote. "Same Wi-Fi" is wrong advice when a network uses
+AP isolation to stop devices seeing each other, and a remote hub is the product's answer to that.</p>
 <p><b>Pinned TLS (#25).</b> When devices are allowed the hub serves the phone over <code>https</code> with a
 persisted self-signed cert; the LAN's plaintext gap - a same-network attacker reading prompts/replies or
 forging events - is otherwise the one real exposure. <code>fp</code> is the SHA-256 of the cert's DER, which

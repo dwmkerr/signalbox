@@ -9,6 +9,8 @@ import type { Event, Origin, Proc } from "./event";
 import { Client, fetchState, hubURL, stateDir, logTo, DefaultURL } from "./client";
 import { Hub, listen, validateBindConfig, isLoopbackAddress } from "./hub";
 import { Forwarder } from "./forwarder";
+import { versionString } from "./build";
+import { hubLog } from "./log";
 import { ensureCert, type HubTLS } from "./tls";
 import * as tmux from "./tmux";
 import { jump } from "./jump";
@@ -32,12 +34,13 @@ import {
 // too (see .github/workflows) - and release-please only watches components/cli,
 // so an app/iOS-only release is cut with a `Release-As:` commit under this path.
 const version = "0.1.5"; // x-release-please-version
+const displayVersion = versionString(version);
 
 // The short help: what a person types. Plumbing (hooks, tmux glue, drain)
 // and env vars live in `signalbox help` - the first screen a new user sees
 // should fit in one glance.
 function shortUsage(): string {
-  return `signalbox ${version} - one board for everything you run
+  return `signalbox ${displayVersion} - one board for everything you run
 
 usage: signalbox <command> [flags]
 
@@ -53,7 +56,7 @@ usage: signalbox <command> [flags]
 }
 
 function usage(): string {
-  return `signalbox ${version} - one board for everything you run
+  return `signalbox ${displayVersion} - one board for everything you run
 
 usage: signalbox <command> [flags]
 
@@ -88,6 +91,7 @@ usage: signalbox <command> [flags]
   pick         pick a waiting session interactively and jump to it
   fire         fire an event: --agent A --event E [--reason R] [--title T]
                [--prompt P] [--reply R] [--session-key K] [--origin-url U]
+               [--tag T] (repeatable)
                [--pid P [--pid-name N]] (pid = the agent process, for the
                hub's liveness sweep; name resolved from the pid when omitted)
 
@@ -156,6 +160,19 @@ function parseFlags(args: string[], boolFlags: string[] = []): { flags: Record<s
     }
   }
   return { flags, rest };
+}
+
+// Repeatable flags need every occurrence, which parseFlags deliberately
+// does not keep; scanning the raw argv is cheaper than teaching it a
+// second return shape used by exactly one flag.
+function collectFlag(args: string[], name: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== `--${name}`) continue;
+    const value = (args[++i] ?? "").trim();
+    if (value && !out.includes(value)) out.push(value);
+  }
+  return out;
 }
 
 // ---- fire ------------------------------------------------------------------
@@ -265,19 +282,23 @@ async function runFire(args: string[]): Promise<void> {
   if (pid > 0) {
     proc = flags["pid-name"] ? { pid, name: flags["pid-name"] } : captureProc(pid);
   }
-  await fireEvent(
-    await buildEvent({
-      agent,
-      eventType,
-      reason: flags["reason"],
-      title: flags["title"],
-      prompt: flags["prompt"] ?? flags["detail"],
-      reply: flags["reply"],
-      sessionKey: flags["session-key"],
-      originURL: flags["origin-url"],
-      proc,
-    })
-  );
+  const built = await buildEvent({
+    agent,
+    eventType,
+    reason: flags["reason"],
+    title: flags["title"],
+    prompt: flags["prompt"] ?? flags["detail"],
+    reply: flags["reply"],
+    sessionKey: flags["session-key"],
+    originURL: flags["origin-url"],
+    proc,
+  });
+  await fireEvent(built);
+  const tags = collectFlag(args, "tag");
+  // After the session event, never before: a tag for a session the board has
+  // not seen yet would apply to nothing. Both go through the same client, so
+  // a hub that is down spools them in this order and replays them in it.
+  if (tags.length > 0) await deliver(ev.newTags(built.session_key, tags));
 }
 
 // ---- user actions ------------------------------------------------------------
@@ -595,25 +616,25 @@ function runHub(args: string[]): void {
     // A user who allowed devices in Phase 1 must not get an app-spawned hub
     // that refuses to boot after choosing an upstream.
     if (settings.hub.bind && !isLoopbackAddress(settings.hub.bind)) {
-      console.error(
+      hubLog(
         `signalbox: hub.upstream is set, so hub.bind (${settings.hub.bind}) is ignored; a forwarder serves 127.0.0.1 only - silence this with: signalbox config set hub.bind loopback`
       );
     }
     const token = process.env.SIGNALBOX_TOKEN || settings.hub.token || "";
     if (!token) {
-      console.error(
+      hubLog(
         "signalbox: no upstream token found in SIGNALBOX_TOKEN or hub.token; the upstream will reject requests unless it is unauthenticated"
       );
     }
     const fwdStateDir = stateDir();
-    const fwd = new Forwarder({ upstream, token, stateDir: fwdStateDir, version });
+    const fwd = new Forwarder({ upstream, token, stateDir: fwdStateDir, version, port });
     listen(fwd, port, "127.0.0.1");
     fwd.start();
     // PID 1 has no default SIGTERM disposition, so stop the uplink and spool
     // work before the platform stops the container.
     process.on("SIGTERM", () => { fwd.close(); process.exit(0); });
-    console.error(
-      `signalbox hub ${version} (forwarder) listening on http://127.0.0.1:${port} -> upstream ${upstream}; local clients need no token (state: ${fwdStateDir})`
+    hubLog(
+      `signalbox hub ${displayVersion} (forwarder) listening on http://127.0.0.1:${port} -> upstream ${upstream}; local clients need no token (state: ${fwdStateDir})`
     );
     return;
   }
@@ -646,11 +667,11 @@ function runHub(args: string[]): void {
     token = generateToken();
     try {
       saveSettings({ hub: { token } });
-      console.error(`signalbox: generated a hub token and saved it to ${settingsPath()}`);
+      hubLog(`signalbox: generated a hub token and saved it to ${settingsPath()}`);
     } catch (err) {
       // Persisting failed (read-only home?); still boot with the token for this
       // run, but warn that it will not survive a restart.
-      console.error(`signalbox: generated a hub token but could not save it (${err}); it will not persist`);
+      hubLog(`signalbox: generated a hub token but could not save it (${err}); it will not persist`);
     }
   }
   // Backstop: still refuse a non-loopback bind with no token. The auto-generate
@@ -676,7 +697,7 @@ function runHub(args: string[]): void {
     const lanIP = bind === "0.0.0.0" || bind === "::" ? (lanIPv4() ?? "") : bind;
     tls = ensureCert(stateDir(), lanIP ? [lanIP] : []);
     if (!tls)
-      console.error(
+      hubLog(
         "signalbox: could not create a TLS cert (is openssl installed?); the LAN listener will be plain http"
       );
   }
@@ -688,7 +709,8 @@ function runHub(args: string[]): void {
     bind,
     tls?.fingerprint ?? "",
     tls ? tlsPort : 0,
-    remote
+    remote,
+    port
   );
   const expire = expireAgeMs();
   hub.startExpiry(10 * 60 * 1000, expire);
@@ -704,8 +726,8 @@ function runHub(args: string[]): void {
     // even a loopback peer must present the bearer (the proxy may connect
     // from a loopback-looking sidecar address, so peer address proves nothing).
     listen(hub, port, bind);
-    console.error(
-      `signalbox hub ${version} (remote mode) listening on http://${bind}:${port} - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: ${stateDir()}, expire: ${expire / 3600000}h)`
+    hubLog(
+      `signalbox hub ${displayVersion} (remote mode) listening on http://${bind}:${port} - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: ${stateDir()}, expire: ${expire / 3600000}h)`
     );
     return;
   }
@@ -713,18 +735,18 @@ function runHub(args: string[]): void {
   // Loopback http always: the menu bar app, CLI, and adapters speak to this and
   // are entirely unchanged by the LAN TLS work.
   listen(hub, port, "127.0.0.1");
-  console.error(
-    `signalbox hub ${version} listening on http://127.0.0.1:${port} (state: ${stateDir()}, expire: ${expire / 3600000}h)`
+  hubLog(
+    `signalbox hub ${displayVersion} listening on http://127.0.0.1:${port} (state: ${stateDir()}, expire: ${expire / 3600000}h)`
   );
   if (!isLoopbackAddress(bind)) {
     if (tls) {
       listen(hub, tlsPort, "0.0.0.0", { cert: tls.cert, key: tls.key });
-      console.error(
+      hubLog(
         `signalbox: LAN listener https://0.0.0.0:${tlsPort} (pinned self-signed, fp ${tls.fingerprint.slice(0, 16)}...); non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN`
       );
     } else {
       listen(hub, port, bind);
-      console.error(
+      hubLog(
         `signalbox: bound to http://${bind}:${port}; non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN (loopback clients need no token)`
       );
     }
@@ -1024,7 +1046,7 @@ switch (cmd) {
     break;
   case "version":
   case "--version":
-    console.log(version);
+    console.log(displayVersion);
     break;
   case "help":
     process.stdout.write(usage());

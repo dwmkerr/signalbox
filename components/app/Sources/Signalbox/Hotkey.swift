@@ -10,6 +10,32 @@ final class GlobalHotkey {
         let keyCode: UInt32
         let modifiers: UInt32
         let display: String
+
+        // Modifier glyphs in Apple's canonical order, which is the order every
+        // menu and shortcut field on macOS renders them in - independent of
+        // the order the combination was typed in the config string.
+        private static let modifierGlyphs: [(mask: Int, glyph: String)] = [
+            (controlKey, "\u{2303}"), (optionKey, "\u{2325}"),
+            (shiftKey, "\u{21E7}"), (cmdKey, "\u{2318}"),
+        ]
+
+        // Keys with no single-character glyph in menus keep their name; macOS
+        // itself spells Space out rather than drawing it.
+        private static let keyGlyphs: [String: String] = [
+            "space": "Space", "return": "\u{21A9}", "enter": "\u{21A9}", "tab": "\u{21E5}",
+        ]
+
+        // "⌃⌥J" - how a shortcut reads in every menu and shortcut field on
+        // macOS. `display` is the config syntax the user types into defaults,
+        // which is not something to put in front of them.
+        var glyphs: String {
+            let mods = Self.modifierGlyphs
+                .filter { modifiers & UInt32($0.mask) != 0 }
+                .map(\.glyph)
+                .joined()
+            let key = display.split(separator: "+").last.map(String.init) ?? ""
+            return mods + (Self.keyGlyphs[key] ?? key.uppercased())
+        }
     }
 
     // ⌃⌥J. Carbon registrations are first-come-first-served across the whole
@@ -22,6 +48,20 @@ final class GlobalHotkey {
     )
 
     static let fallbackSpec = defaultSpec
+
+    // Modifier glyphs in Apple's canonical order, which is the order every
+    // menu and shortcut field on macOS renders them in - independent of the
+    // order the combination was typed in the config string.
+    private static let modifierGlyphs: [(mask: Int, glyph: String)] = [
+        (controlKey, "\u{2303}"), (optionKey, "\u{2325}"),
+        (shiftKey, "\u{21E7}"), (cmdKey, "\u{2318}"),
+    ]
+
+    // Keys with no single-character glyph in menus keep their name; macOS
+    // itself spells Space out rather than drawing it.
+    private static let keyGlyphs: [String: String] = [
+        "space": "Space", "return": "\u{21A9}", "enter": "\u{21A9}", "tab": "\u{21E5}",
+    ]
 
     /// Parses "ctrl+alt+j" / "cmd+shift+space" style strings. Returns nil on
     /// anything unrecognised so the caller can log and fall back to the default.

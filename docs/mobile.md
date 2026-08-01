@@ -66,8 +66,9 @@ It listens on `http://127.0.0.1:8377` by default.
 On the simulator, loopback reaches the Mac's hub directly, so the app
 auto-connects with no setup.
 
-On a real device you pair over the LAN. The hub must be bound wide enough for the
-phone to reach it (not loopback only). Either path handles this:
+On a real device you pair over the LAN. The hub must be reachable from the
+phone: in 'Settings > Hub' choose 'Mode: LAN', then 'Confirm'. Then either
+path shows the QR:
 
 - Run `signalbox pair` on the Mac. It prints a QR code that encodes the hub's LAN
   URL and a one-time code.

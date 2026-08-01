@@ -42,6 +42,14 @@ final class HubSupervisor {
     private var task: Task<Void, Never>?
     private let hubURL: URL
 
+    private static let logTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
     init(hubURL: URL) {
         self.hubURL = hubURL
     }
@@ -96,7 +104,7 @@ final class HubSupervisor {
     }
 
     private func hubResponds() async -> Bool {
-        var request = URLRequest(url: hubURL.appendingPathComponent("state"))
+        var request = HubAuth.request(hubURL.appendingPathComponent("state"))
         request.timeoutInterval = 1
         guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
         return (response as? HTTPURLResponse)?.statusCode == 200
@@ -111,23 +119,38 @@ final class HubSupervisor {
     }
 
     private func spawn(port: Int) {
+        let log = logHandle()
         guard let binary = SignalboxCLI.resolve() else {
-            NSLog("Signalbox: cannot start the hub - signalbox binary not found")
+            recordLifecycle(
+                "Signalbox: cannot start the hub - signalbox binary not found",
+                in: log
+            )
             return
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = ["hub", "--port", String(port)]
-        let log = logHandle()
         process.standardOutput = log ?? FileHandle.nullDevice
         process.standardError = log ?? FileHandle.nullDevice
         do {
             try process.run()
             child = process
-            NSLog("Signalbox: started hub (pid \(process.processIdentifier), port \(port))")
+            recordLifecycle(
+                "Signalbox: started hub (pid \(process.processIdentifier), port \(port))",
+                in: log
+            )
         } catch {
-            NSLog("Signalbox: failed to start hub: \(error)")
+            recordLifecycle("Signalbox: failed to start hub: \(error)", in: log)
         }
+    }
+
+    // A restart is exactly when someone opens the Logs tab, so supervisor
+    // messages must stay beside child output instead of making hub.log silent.
+    private func recordLifecycle(_ message: String, in handle: FileHandle?) {
+        NSLog("%@", message)
+        let line = "\(Self.logTimestampFormatter.string(from: Date())) \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        try? handle?.write(contentsOf: data)
     }
 
     // Hub output lands in the state dir next to the data it describes, so

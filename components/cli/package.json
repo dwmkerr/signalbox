@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test",
-    "build": "BUN_NO_CODESIGN_MACHO_BINARY=1 bun build --compile --minify src/main.ts --outfile bin/signalbox && codesign --force --sign - bin/signalbox"
+    "build": "bash scripts/build.sh"
   },
   "dependencies": {
     "qrcode": "1.5.4"
