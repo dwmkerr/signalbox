@@ -1,8 +1,10 @@
 # Run a remote hub
 
-Running a Signalbox hub on a remote server allows you to pair your phone without being on the same network, as well as having multiple machines forward to one central location:
+Run a remote hub to connect your phone over the internet, or to forward events from multiple machines to one board. It is the same signalbox hub, running on a server you own.
 
 <img src="images/remote-hub.svg" width="560" alt="Two machines forward their agent sessions to a remote hub; a phone connects to the hub.">
+
+Your machines keep talking to their local hub, which forwards to the remote one. Your phone pairs with the remote hub, so it no longer needs to be on the same network as your machines.
 
 ## Deploying a remote hub
 
