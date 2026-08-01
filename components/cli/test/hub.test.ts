@@ -222,14 +222,20 @@ describe("validation and hardening", () => {
     expect(res.status).toBe(400);
   });
 
-  test("healthz reports version", async () => {
-    const { hub } = newHub();
-    track(hub);
+  test("healthz reports local mode, address, port, version, and build", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
+    const hub = track(new Hub(dir, "test", "", "127.0.0.1", "", 0, false, 8701));
     const req = new Request("http://127.0.0.1:8377/healthz", { headers: { Host: "localhost" } });
     const res = (await hub.handle(req, fakeServer))!;
+    expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.version).toBe("test");
+    expect(body.build).toBe("");
+    expect(typeof body.build).toBe("string");
+    expect(body.mode).toBe("local");
+    expect(body.bind).toBe("127.0.0.1");
+    expect(body.port).toBe(8701);
   });
 });
 
@@ -317,10 +323,15 @@ describe("bind and bearer auth", () => {
   });
 
   test("non-loopback peer reaches /healthz with no token", async () => {
-    const hub = tokenHub();
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
+    const hub = track(new Hub(dir, "test", TOKEN, "0.0.0.0", "", 0, false, 8704));
     const res = (await hub.handle(lanReq("/healthz"), lan))!;
     expect(res.status).toBe(200);
-    expect((await res.json()).ok).toBe(true);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.mode).toBe("lan");
+    expect(body.bind).toBe("0.0.0.0");
+    expect(body.port).toBe(8704);
   });
 
   test("loopback peer with a non-loopback Host is still 403 (rebinding defence)", async () => {
@@ -582,11 +593,18 @@ describe("commands", () => {
 
 // Pairing. A hub that can mint needs a token AND a non-loopback bind (a
 // loopback bind means no phone could reach it), so pairHub sets both. Requests
-// to /pair/new and /pair/status are loopback-only regardless of bearer, so they
-// drive fakeServer (127.0.0.1); the LAN-peer guard tests drive `lan`.
+// to /pair/new and /pair/status accept a loopback peer OR a valid bearer.
+// Remote mode drops the loopback half, so even local proxy peers need bearer.
 function pairHub(token: string, bind: string): Hub {
   const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
   return track(new Hub(dir, "test", token, bind));
+}
+
+// A hub in remote mode (hub --remote): behind a platform proxy, so the peer
+// address is never trusted and every request below the auth gate needs bearer.
+function remoteHub(token = TOKEN, bind = "0.0.0.0", port = 0): Hub {
+  const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
+  return track(new Hub(dir, "test", token, bind, "", 0, true, port));
 }
 
 function pairNewReq(body: unknown = {}, contentType = "application/json"): Request {
@@ -621,12 +639,18 @@ describe("pairing", () => {
     expect(body.bind).toBe("0.0.0.0");
   });
 
-  test("mint from a LAN peer is 403 even with a valid bearer", async () => {
-    // Past the auth gate the bearer already proved this peer; the explicit
-    // loopback guard is what still refuses a mint from another machine.
+  test("mint from a LAN peer with a valid bearer succeeds", async () => {
     const hub = pairHub(TOKEN, "0.0.0.0");
     const res = (await hub.handle(lanReq("/pair/new", { bearer: TOKEN, method: "POST", body: {} }), lan))!;
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    expect((await res.json()).code).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  });
+
+  test("mint from a LAN peer with no bearer is 401", async () => {
+    const hub = pairHub(TOKEN, "0.0.0.0");
+    const res = (await hub.handle(lanReq("/pair/new", { method: "POST", body: {} }), lan))!;
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe("Bearer");
   });
 
   test("mint with no token configured is 409", async () => {
@@ -702,10 +726,129 @@ describe("pairing", () => {
     expect((await (await hub.handle(pairStatusReq(), fakeServer))!.json()).status).toBe("redeemed");
   });
 
-  test("status from a LAN peer is 403 even with a valid bearer", async () => {
+  test("status from a LAN peer with a valid bearer is readable", async () => {
     const hub = pairHub(TOKEN, "0.0.0.0");
     const res = (await hub.handle(lanReq("/pair/status", { bearer: TOKEN }), lan))!;
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("none");
+  });
+
+  test("status from a LAN peer with no bearer is 401", async () => {
+    const hub = pairHub(TOKEN, "0.0.0.0");
+    const res = (await hub.handle(lanReq("/pair/status"), lan))!;
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe("Bearer");
+  });
+});
+
+describe("remote mode", () => {
+  test("/stream and /command need the bearer", async () => {
+    const hub = remoteHub();
+    const stream = (await hub.handle(
+      new Request("http://127.0.0.1:8377/stream?since=0", { headers: { Host: "127.0.0.1:8377" } }),
+      fakeServer
+    ))!;
+    expect(stream.status).toBe(401);
+
+    const command = (await hub.handle(
+      new Request("http://127.0.0.1:8377/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Host: "127.0.0.1:8377" },
+        body: JSON.stringify(wireCommand("a")),
+      }),
+      fakeServer
+    ))!;
+    expect(command.status).toBe(401);
+  });
+
+  test("a loopback peer with a non-loopback Host still takes the bearer path", async () => {
+    const hub = remoteHub();
+    const req = new Request("http://hub.example/state", { headers: { Host: "hub.example" } });
+    const res = (await hub.handle(req, fakeServer))!;
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe("Bearer");
+  });
+
+  test("a loopback peer with no bearer is 401", async () => {
+    const hub = remoteHub();
+    const stateReq = new Request("http://127.0.0.1:8377/state", {
+      headers: { Host: "127.0.0.1:8377" },
+    });
+    const state = (await hub.handle(stateReq, fakeServer))!;
+    expect(state.status).toBe(401);
+    expect(state.headers.get("www-authenticate")).toBe("Bearer");
+
+    const eventsReq = new Request("http://127.0.0.1:8377/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Host: "127.0.0.1:8377" },
+      body: JSON.stringify(wireEvent("a", ev.Busy)),
+    });
+    const events = (await hub.handle(eventsReq, fakeServer))!;
+    expect(events.status).toBe(401);
+    expect(events.headers.get("www-authenticate")).toBe("Bearer");
+  });
+
+  test("a loopback peer with the bearer is served", async () => {
+    const hub = remoteHub();
+    const req = new Request("http://127.0.0.1:8377/state", {
+      headers: { Host: "127.0.0.1:8377", Authorization: `Bearer ${TOKEN}` },
+    });
+    const res = (await hub.handle(req, fakeServer))!;
+    expect(res.status).toBe(200);
+  });
+
+  test("a LAN peer with the bearer is served, without one is 401", async () => {
+    const hub = remoteHub();
+    const served = (await hub.handle(lanReq("/state", { bearer: TOKEN }), lan))!;
+    expect(served.status).toBe(200);
+    const denied = (await hub.handle(lanReq("/state"), lan))!;
+    expect(denied.status).toBe(401);
+  });
+
+  test("/healthz stays open and reports remote mode regardless of bind", async () => {
+    const hub = remoteHub(TOKEN, "127.0.0.1", 8702);
+    const req = new Request("http://127.0.0.1:8377/healthz", {
+      headers: { Host: "127.0.0.1:8377" },
+    });
+    const res = (await hub.handle(req, fakeServer))!;
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.mode).toBe("remote");
+    expect(body.bind).toBe("127.0.0.1");
+    expect(body.port).toBe(8702);
+  });
+
+  test("minting needs the bearer even from a loopback peer", async () => {
+    const hub = remoteHub();
+    const denied = (await hub.handle(pairNewReq(), fakeServer))!;
+    expect(denied.status).toBe(401);
+
+    const authorizedReq = pairNewReq();
+    authorizedReq.headers.set("Authorization", `Bearer ${TOKEN}`);
+    const served = (await hub.handle(authorizedReq, fakeServer))!;
+    expect(served.status).toBe(200);
+  });
+
+  test("the full remote pairing flow works off loopback", async () => {
+    const hub = remoteHub();
+    const mint = (await hub.handle(
+      lanReq("/pair/new", { bearer: TOKEN, method: "POST", body: {} }),
+      lan
+    ))!;
+    expect(mint.status).toBe(200);
+    const { code } = await mint.json();
+
+    const pending = (await hub.handle(lanReq("/pair/status", { bearer: TOKEN }), lan))!;
+    expect(pending.status).toBe(200);
+    expect((await pending.json()).status).toBe("pending");
+
+    const redeem = (await hub.handle(lanReq("/pair", { method: "POST", body: { code } }), lan))!;
+    expect(redeem.status).toBe(200);
+    expect((await redeem.json()).token).toBe(TOKEN);
+
+    const redeemed = (await hub.handle(lanReq("/pair/status", { bearer: TOKEN }), lan))!;
+    expect(redeemed.status).toBe(200);
+    expect((await redeemed.json()).status).toBe("redeemed");
   });
 });
 

@@ -66,8 +66,9 @@ It listens on `http://127.0.0.1:8377` by default.
 On the simulator, loopback reaches the Mac's hub directly, so the app
 auto-connects with no setup.
 
-On a real device you pair over the LAN. The hub must be bound wide enough for the
-phone to reach it (not loopback only). Either path handles this:
+On a real device you pair over the LAN. The hub must be reachable from the
+phone: in 'Settings > Hub' choose 'Mode: LAN', then 'Confirm'. Then either
+path shows the QR:
 
 - Run `signalbox pair` on the Mac. It prints a QR code that encodes the hub's LAN
   URL and a one-time code.
@@ -92,11 +93,10 @@ Two ways around it:
 - **Mobile hotspot** - put the Mac and the phone on the same phone hotspot.
   There is no isolation on a hotspot, so pairing works immediately. Good for a
   quick test.
-- **Remote hub** - run the hub on a machine both devices can reach (a VPS, a
-  home server, or any host with a routable address), bind it wide
-  (`signalbox hub --bind 0.0.0.0`), and point the phone at it with
-  `SIGNALBOX_URL` or by scanning that hub's QR. This is the durable answer when
-  the office network will not carry device-to-device traffic.
+- **Remote hub** - run `signalbox hub --remote` on a routable host and point
+  the phone and your machines at it. Follow the [remote hub guide](remote-hub.md)
+  to deploy it safely. This is the durable answer when the office network will
+  not carry device-to-device traffic.
 
 ### Dev and test hooks
 

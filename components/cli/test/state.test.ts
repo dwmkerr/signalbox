@@ -271,6 +271,15 @@ describe("carry", () => {
     expect(row.proc?.pid).toBe(123);
   });
 
+  test("machine identity carries across omitting events", () => {
+    const s = new Store();
+    const busy = mk("a", ev.Busy, t(0), 1);
+    busy.machine = "m-1";
+    s.apply(busy);
+    s.apply(mk("a", ev.Done, t(1), 2));
+    expect(s.list()[0].machine).toBe("m-1");
+  });
+
   test("latest non-empty wins", () => {
     const s = new Store();
     const first = mk("a", ev.Busy, t(0), 1);

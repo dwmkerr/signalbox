@@ -1,0 +1,13 @@
+# Trims the build context uploaded to Docker/Fly's remote builder. flyctl
+# generated an unusable 500-line version of this from every .gitignore in the
+# tree; this is the curated replacement. Correctness never depends on it - the
+# Dockerfile COPYs named paths only (see components/deploy/Dockerfile).
+.git
+scratch
+docs
+components/app
+components/assets
+components/ios
+components/cli/bin
+**/node_modules
+**/.DS_Store

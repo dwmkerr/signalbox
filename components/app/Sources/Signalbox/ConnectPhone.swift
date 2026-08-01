@@ -1,25 +1,31 @@
 import AppKit
 import CoreImage
 
-// The "Connect Phone" window: a WhatsApp-Web style QR pairing flow. It mints a
-// one-time pairing code from the loopback hub, renders the pairing deep link as
-// a QR the phone scans, and polls until the phone redeems the code. When the
-// hub only answers this Mac (its default), pairing needs other devices allowed,
-// so the window offers to do that: it writes hub.bind = "0.0.0.0" to the shared
-// settings, restarts the hub, and re-mints once the reachable hub is up.
+// The "Connect Phone" window has two paths, and both end in the same QR. A
+// state-owning hub mints a one-time pairing code on loopback. A forwarder
+// cannot mint - the phone's board lives upstream - so this window mints against
+// the upstream hub itself, with the token this machine already holds, and polls
+// the upstream for redemption. Only when that cannot be done (no upstream
+// address, no token, a rejected token, an unreachable hub) does it fall back to
+// handing over the `signalbox pair --url` command with the reason why.
 //
-// The QR carries only the one-time code and the LAN URL, never the hub token -
-// the phone learns the token by redeeming the code against the hub over the
-// network, so a photo of the QR after use or after it expires is worthless.
+// This window never changes the hub's mode: Settings owns that (a mode change
+// is a confirmed, restart-bearing decision), so a local-only hub gets a pointer
+// to the Hub tab rather than an "Allow other devices" toggle here.
+//
+// The QR carries only the one-time code and the URL the phone dials (the LAN
+// address, or the upstream origin), never the hub token - the phone learns the
+// token by redeeming the code against that hub over the network, so a photo of
+// the QR after use or after it expires is worthless.
 @MainActor
 final class ConnectPhoneController: NSObject, NSWindowDelegate {
     private let hubURL: URL
-    private let restartHub: @MainActor () async -> Void
+    private let openSettingsHubTab: @MainActor () -> Void
 
     private var window: NSWindow?
-    // The single in-flight pairing flow (mint + poll, or enable-access + re-mint).
-    // Cancelled when the window closes or a new flow starts, so a closed window
-    // never keeps polling the hub.
+    private var remotePairCommand: String?
+    // The single in-flight pairing flow (mint + poll). Cancelled when the window
+    // closes or a new flow starts, so a closed window never keeps polling the hub.
     private var flowTask: Task<Void, Never>?
 
     // Loopback pairing calls are quick; a short timeout keeps a wedged hub from
@@ -31,9 +37,18 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
         return URLSession(configuration: config)
     }()
 
-    init(hubURL: URL, restartHub: @escaping @MainActor () async -> Void) {
+    // Upstream pairing crosses the WAN to a hub that may be cold-starting, so it
+    // gets a longer leash than the loopback session.
+    private let upstreamSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 10
+        config.waitsForConnectivity = false
+        return URLSession(configuration: config)
+    }()
+
+    init(hubURL: URL, openSettingsHubTab: @escaping @MainActor () -> Void) {
         self.hubURL = hubURL
-        self.restartHub = restartHub
+        self.openSettingsHubTab = openSettingsHubTab
         super.init()
     }
 
@@ -78,23 +93,24 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
         flowTask = Task { await self.runFlow() }
     }
 
-    private func runFlow(afterEnableAccess: Bool = false) async {
-        render(.loading(afterEnableAccess ? "Reconnecting to the hub…" : "Preparing pairing code…"))
+    private func runFlow() async {
+        render(.loading("Preparing pairing code…"))
+        let health = await HubHealthProbe.fetch(hubURL: hubURL)
+        if health?.mode == "forwarder" {
+            await runRemoteFlow(reportedUpstream: health?.upstream?.url)
+            return
+        }
         switch await mintCode() {
         case .ok(let response):
             await showQRAndPoll(response)
-        case .needsAccess:
-            if afterEnableAccess {
-                // We just wrote hub.bind = "0.0.0.0" and restarted, yet the hub
-                // is still refusing to mint - surface it rather than looping
-                // back to the same "Allow other devices" screen.
-                render(.error(
-                    "Other devices were allowed, but the hub is still local-only. "
-                        + "Try again in a moment, or check ~/.config/signalbox/settings.json."
-                ))
-            } else {
-                render(.needsAccess)
-            }
+        case .forwarder:
+            // The probe missed (its 2s timeout is shorter than the mint's 5s),
+            // but the hub's own 409 body has just told us it is a forwarder.
+            // Toggling the bind here is exactly the bug this window used to
+            // have, so route to the same flow the probe branch runs.
+            await runRemoteFlow(reportedUpstream: nil)
+        case .localOnly:
+            render(.localOnly)
         case .error(let message):
             render(.error(message))
         }
@@ -123,20 +139,21 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
             return
         }
         render(.qr(qr, lanURL))
-        await pollStatus(expiresIn: response.expiresIn ?? 180)
+        await pollStatus(expiresIn: response.expiresIn ?? 180, base: hubURL, token: nil, session: session)
     }
 
-    // Poll /pair/status every 2s. Redeemed swaps to the paired state and
-    // auto-closes; a code that expires (status back to none, or its lifetime
-    // elapsed) offers a fresh one. Transient fetch errors are ignored so a hub
-    // blip does not read as expiry.
-    private func pollStatus(expiresIn: Int) async {
+    // Poll /pair/status every 2s on whichever hub minted the code - this Mac's
+    // loopback hub, or the upstream with the bearer. Redeemed swaps to the
+    // paired state and auto-closes; a code that expires (status back to none, or
+    // its lifetime elapsed) offers a fresh one. Transient fetch errors are
+    // ignored so a hub blip does not read as expiry.
+    private func pollStatus(expiresIn: Int, base: URL, token: String?, session: URLSession) async {
         let deadline = Date().addingTimeInterval(TimeInterval(expiresIn))
         var sawPending = false
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             if Task.isCancelled { return }
-            switch await fetchStatus() {
+            switch await fetchStatus(base: base, token: token, session: session) {
             case "redeemed":
                 render(.paired)
                 await autoClose()
@@ -167,56 +184,106 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
         window?.close()
     }
 
-    // MARK: - Network access
-
-    @objc private func allowOtherDevices() {
-        flowTask?.cancel()
-        flowTask = Task { await self.enableAccessAndReconnect() }
-    }
-
-    private func enableAccessAndReconnect() async {
-        render(.enablingAccess)
-        // Deep-merges hub.bind = "0.0.0.0" and leaves every other key (including
-        // an existing hub.token) untouched. Never enabled silently: we are here
-        // only because the user clicked "Allow other devices".
-        SharedSettings.enableNetworkAccess()
-        // The restarted hub re-reads settings.json, binds every interface, and
-        // mints a token if it has none.
-        await restartHub()
-        guard await waitForHub() else {
-            if Task.isCancelled { return }
-            render(.error(
-                "The hub did not come back after allowing other devices. "
-                    + "Try again in a moment."
-            ))
-            return
-        }
-        if Task.isCancelled { return }
-        await runFlow(afterEnableAccess: true)
-    }
-
-    // Wait for the freshly restarted hub to answer on loopback again (about 20s
-    // of headroom) before re-minting a code.
-    private func waitForHub() async -> Bool {
-        for _ in 0..<40 {
-            if Task.isCancelled { return false }
-            var request = URLRequest(url: hubURL.appendingPathComponent("state"))
-            request.timeoutInterval = 1
-            if let (_, response) = try? await session.data(for: request),
-               (response as? HTTPURLResponse)?.statusCode == 200 {
-                return true
-            }
-            try? await Task.sleep(nanoseconds: 500_000_000)
-        }
-        return false
-    }
-
     // MARK: - Hub calls
 
     private enum MintResult {
         case ok(PairNewResponse)
-        case needsAccess
+        case localOnly
+        case forwarder
         case error(String)
+    }
+
+    private enum RemoteMintResult {
+        case ok(PairNewResponse)
+        // One line, lower-case, completing "could not mint a pairing code: ...".
+        case failed(String)
+    }
+
+    // Both the probe branch and the late-409 branch land here: the phone must
+    // pair against the upstream hub, never this Mac. The upstream address comes
+    // from the probe when it answered, else from the settings intent; the bearer
+    // only ever from settings, because /healthz never carries it.
+    private func runRemoteFlow(reportedUpstream: String?) async {
+        guard let origin = Self.upstreamOrigin(reported: reportedUpstream) else {
+            render(.remoteHub(host: "", command: nil, reason: nil))
+            return
+        }
+        let host = URL(string: origin)?.host ?? origin
+        let command = "signalbox pair --url \(origin)"
+        let token = SharedSettings.hubToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty, let base = URL(string: origin) else {
+            render(.remoteHub(
+                host: host, command: command, reason: "no hub token is stored on this machine"
+            ))
+            return
+        }
+        switch await mintUpstream(base: base, token: token) {
+        case .ok(let response):
+            await showRemoteQRAndPoll(response, origin: origin, base: base, token: token)
+        case .failed(let reason):
+            render(.remoteHub(host: host, command: command, reason: reason))
+        }
+    }
+
+    // A remote hub sits behind platform TLS, so its mint carries no fp or port:
+    // the QR names the upstream origin exactly as the CLI's `pair --url` does,
+    // and the phone validates the CA-issued certificate with system trust.
+    private func showRemoteQRAndPoll(
+        _ response: PairNewResponse, origin: String, base: URL, token: String
+    ) async {
+        let deepLink = Self.pairDeepLink(url: origin, code: response.code, fingerprint: nil)
+        guard let qr = Self.qrImage(from: deepLink, points: 240) else {
+            render(.error("Could not render the pairing code."))
+            return
+        }
+        render(.qr(qr, origin))
+        await pollStatus(
+            expiresIn: response.expiresIn ?? 180, base: base, token: token, session: upstreamSession
+        )
+    }
+
+    private func mintUpstream(base: URL, token: String) async -> RemoteMintResult {
+        var request = URLRequest(url: base.appendingPathComponent("pair/new"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = Data("{}".utf8)
+        do {
+            let (data, response) = try await upstreamSession.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return .failed("the remote hub gave no response")
+            }
+            switch http.statusCode {
+            case 200:
+                guard let decoded = try? JSONDecoder().decode(PairNewResponse.self, from: data) else {
+                    return .failed("the remote hub sent a pairing response we could not read")
+                }
+                return .ok(decoded)
+            case 401:
+                return .failed("the remote hub rejected this machine's token")
+            default:
+                return .failed("the remote hub returned an unexpected status (\(http.statusCode))")
+            }
+        } catch {
+            return .failed("the remote hub could not be reached")
+        }
+    }
+
+    // The origin alone, never a path or query: it is both what the phone dials
+    // and what `pair --url` accepts.
+    private static func upstreamOrigin(reported: String?) -> String? {
+        let candidates = [reported ?? "", SharedSettings.hubUpstream]
+        for candidate in candidates {
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty,
+                  let url = URL(string: trimmed),
+                  let scheme = url.scheme,
+                  let host = url.host
+            else { continue }
+            let port = url.port.map { ":\($0)" } ?? ""
+            return "\(scheme)://\(host)\(port)"
+        }
+        return nil
     }
 
     private func mintCode() async -> MintResult {
@@ -236,9 +303,14 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
                 }
                 return .ok(decoded)
             case 409:
-                // The hub only answers this Mac or has no token - pairing needs
-                // other devices allowed.
-                return .needsAccess
+                // Two hubs 409 here: a forwarder (refuses to mint by design, and
+                // says so in the body) and a loopback-only hub. runFlow's probe
+                // usually catches the forwarder first, but its timeout is shorter
+                // than this request's, so the body is the reliable tell.
+                if String(data: data, encoding: .utf8)?.contains("forwarder") == true {
+                    return .forwarder
+                }
+                return .localOnly
             default:
                 return .error("The hub returned an unexpected status (\(http.statusCode)).")
             }
@@ -247,9 +319,12 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func fetchStatus() async -> String? {
-        var request = URLRequest(url: hubURL.appendingPathComponent("pair/status"))
+    private func fetchStatus(base: URL, token: String?, session: URLSession) async -> String? {
+        var request = URLRequest(url: base.appendingPathComponent("pair/status"))
         request.httpMethod = "GET"
+        if let token, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
         guard let (data, response) = try? await session.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
               let decoded = try? JSONDecoder().decode(PairStatusResponse.self, from: data)
@@ -315,8 +390,8 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
     private enum State {
         case loading(String)
         case qr(NSImage, String)
-        case needsAccess
-        case enablingAccess
+        case remoteHub(host: String, command: String?, reason: String?)
+        case localOnly
         case paired
         case expired
         case error(String)
@@ -324,6 +399,11 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
 
     private func render(_ state: State) {
         guard let container = window?.contentView else { return }
+        if case .remoteHub(_, let command, _) = state {
+            remotePairCommand = command
+        } else {
+            remotePairCommand = nil
+        }
         container.subviews.forEach { $0.removeFromSuperview() }
         let stack = buildStack(for: state)
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -349,18 +429,33 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
                 monospace(lanURL),
                 body("The code refreshes every 3 minutes.", secondary: true, size: 11),
             ]
-        case .needsAccess:
+        case .remoteHub(let host, let command, let reason):
+            if let command {
+                views = [
+                    title("Pair with the remote hub"),
+                    body(
+                        "This Mac forwards to \(host), but this window could not mint a pairing "
+                            + "code: \(reason ?? "the remote hub did not mint one"). Run this on a "
+                            + "machine that has the hub token:"
+                    ),
+                    monospace(command),
+                    primaryButton("Copy command", action: #selector(copyRemotePairCommand)),
+                ]
+            } else {
+                views = [
+                    title("Pair with the remote hub"),
+                    body(
+                        "This Mac forwards to a remote hub, but its address is not in "
+                            + "~/.config/signalbox/settings.json."
+                    ),
+                ]
+            }
+        case .localOnly:
             views = [
-                title("Connect your phone"),
-                body("Signalbox only answers this Mac. Allow other devices to connect to show the QR."),
-                primaryButton("Allow other devices", action: #selector(allowOtherDevices)),
-                body(
-                    "Anyone on your network with the code could pair; the hub token is stored on your phone.",
-                    secondary: true, size: 11
-                ),
+                title("Phones cannot connect yet"),
+                body("The hub is local-only, so phones cannot connect. Open Settings and choose LAN or Remote."),
+                primaryButton("Open Settings", action: #selector(openSettingsForHub)),
             ]
-        case .enablingAccess:
-            views = [spinner(), title("Allowing other devices…")]
         case .paired:
             views = [checkmark(), title("Phone paired")]
         case .expired:
@@ -385,6 +480,21 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
 
     @objc private func newCode() {
         startFlow()
+    }
+
+    // Settings owns the mode, so this window hands the user over rather than
+    // writing hub.bind itself. Closing first keeps the stale "cannot connect"
+    // screen from sitting behind the window that fixes it.
+    @objc private func openSettingsForHub() {
+        window?.close()
+        openSettingsHubTab()
+    }
+
+    @objc private func copyRemotePairCommand() {
+        guard let remotePairCommand else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(remotePairCommand, forType: .string)
     }
 
     // MARK: - View builders

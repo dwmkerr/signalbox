@@ -27,8 +27,16 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   "id": "0197-...",
   "ts": "2026-07-07T18:04:11Z",
 
-  // The machine the event fired on.
+  // The display name of the machine the event fired on. Two laptops on one
+  // remote hub may have the same host.
   "host": "daves-mbp",
+
+  // Stable identity of the machine that fired the event. Read or created at
+  // machine-id in the state dir as <short hostname>-<6 hex>, then cached in
+  // the process and reused. Agent events and user-action events both stamp it.
+  // Unlike host it does not collide when two laptops share a display name.
+  // Optional on read and not required by validation, for old logs and emitters.
+  "machine": "daves-mbp-3f9a2c",
 
   // Who is doing the work. This is also the row's icon: claude, opencode,
   // pi and github have glyphs, anything else gets the fallback ring. An
@@ -76,7 +84,9 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   // The exchange breadcrumb: your last prompt (max 160 chars) and the
   // agent's last message (max 280 chars). One line each, cropped before
   // they leave the emitting process. Never transcripts. (`prompt` was
-  // `detail` before v0.2; the hub still reads `detail` from old events.)
+  // `detail` before v0.2; the hub still reads `detail` from old events. On
+  // the same read path, an event with no machine gets machine = host, so a
+  // pre-upgrade events.jsonl and older emitters behave exactly as before.)
   "prompt": "good enough. commit work for now.",
   "reply": "Done - the dashboard now shows per-post traffic.",
 
@@ -131,7 +141,7 @@ the rules below. A fired event that tries to set them is ignored.
 The hub keeps one row per `session_key`, following these rules:
 
 - **Latest event wins.** A new agent event replaces the row's status. `ended` removes the row (the event log keeps everything).
-- **Breadcrumbs carry.** `prompt`, `reply`, `origin` and `proc` persist across events that omit them, so a done without prompt text keeps showing the prompt that started it. `label` always carries, and only a `label` event can change or clear it.
+- **Breadcrumbs carry.** `prompt`, `reply`, `origin`, `proc` and `machine` persist across events that omit them, so a done without prompt text keeps showing the prompt that started it and an older emitter cannot blank the machine identity. `label` always carries, and only a `label` event can change or clear it.
 - **An enriched ask is not clobbered by its bare twin.** One blocked dialog can reach the hub twice (e.g. Claude's `PermissionRequest` with the real ask in `reply`, and its bare `Notification` with only "Claude needs your permission"). While a row is in attention, a second attention event whose `reply` is empty or carries no more than the generic message keeps the richer `reply` already on the row, regardless of arrival order. Any non-attention agent event ends the ask and normal reply rules resume.
 - **Tags carry.** `tags` persist across agent events that omit them (like `prompt`/`reply`), but an event carrying its own `tags` keeps them - even when the session already existed untagged. `tag`/`untag` events add or remove them. Filter with `state --tag` / `--exclude-tag`.
 - **New activity resets your flags.** Any agent event clears `acked` and `hidden` - a hidden session that speaks again comes back.
@@ -220,7 +230,7 @@ Executing a remote jump fires a `seen` from the machine that did it, exactly as 
 
 ## The hub API
 
-Default `http://127.0.0.1:8377`, loopback only, no auth.
+The default posture is `http://127.0.0.1:8377`, loopback only, with no auth. Wide-bind and remote-mode postures are specified below.
 
 | Endpoint | Behaviour |
 |---|---|
@@ -228,39 +238,65 @@ Default `http://127.0.0.1:8377`, loopback only, no auth.
 | `POST /command` | Fan out a [command](#commands) to every live stream and forget it: no `seq`, no log, no state. Returns `{"ok": true, "delivered": 2}`. |
 | `GET /state` | `{"sessions": [...]}` in display order. |
 | `GET /stream?since=N` | Server-sent events: replay everything after seq N, then live. Heartbeat every 15s. Commands are live-only and never appear in the replay. |
-| `GET /healthz` | `{"ok": true, "version": "0.1.0"}` (the running CLI's version). Never authenticated - platform health checks reach it from anywhere. |
+| `GET /healthz` | `{"ok": true, "version": "0.1.5", "build": "d6907e1-dirty", "mode": "local"|"lan"|"remote", "bind": "127.0.0.1", "port": 8377}`. `mode` is the single oracle for which runtime is answering: it is stated and must never be inferred from `bind` or from the presence of other keys. `version` is the bare semver and `build` is empty on an unstamped build. Never authenticated - platform health checks reach it from anywhere. |
 | `POST /pair` | Trade a valid [pairing code](#pairing) for the bearer token: `{"token": "..."}`, or `401 {"error": "invalid or expired pairing code"}` for any failure. Unauthenticated - the code is the credential. Requires `Content-Type: application/json`. |
-| `POST /pair/new` | Mint a pairing code (loopback peer only, even with a valid bearer): `{"code", "expires_in": 180, "bind"}`, plus `"fp"` (cert pin) and `"port"` (TLS listener) when the hub serves the phone over https. `403` off the hub machine; `409` with no token configured or a loopback bind. Requires `Content-Type: application/json`. |
-| `GET /pair/status` | The pairing slot's state for `signalbox pair` (loopback peer only): `{"status": "pending" \| "redeemed" \| "none"}`. |
+| `POST /pair/new` | Mint a pairing code. Reachable from a loopback peer or with a valid bearer; in remote mode the bearer is always required. Returns `{"code", "expires_in": 180, "bind"}`, plus `"fp"` (cert pin) and `"port"` (TLS listener) when the hub exposes pinned LAN TLS. A missing or wrong bearer is `401` off loopback, or from any peer in remote mode; `409` with no token configured or a loopback bind. Requires `Content-Type: application/json`. |
+| `GET /pair/status` | Read the pairing slot's state for `signalbox pair`: `{"status": "pending" \| "redeemed" \| "none"}`. Reachable from a loopback peer or with a valid bearer; in remote mode the bearer is always required. A missing or wrong bearer is `401` off loopback, or from any peer in remote mode. |
 
 The hub appends every event to `events.jsonl` in the state dir and rebuilds its state from that file on boot; `seq` continues from the highest persisted value. Commands are not written, so they are never rebuilt or replayed. Only `application/json` may post (blocks cross-origin form posts from hostile pages), and bodies are capped at 1 MiB.
 
+On `SIGTERM`, the hub closes its append file descriptor and exits successfully. This gives a container platform a prompt clean stop instead of waiting out its kill timeout, and prevents a redeploy from interrupting a JSONL append.
+
 ### Binding and auth
 
-The hub binds `127.0.0.1` by default. `signalbox hub --bind <host>` (or `SIGNALBOX_BIND`) widens that - e.g. `--bind 0.0.0.0` to serve other machines. Auth is decided by the connection's real peer address, never the client-controlled `Host` header:
+The hub's default posture binds `127.0.0.1`. `signalbox hub --bind <host>` (or `SIGNALBOX_BIND`) selects another bind - e.g. `--bind 0.0.0.0` to serve other machines - while remote mode selects a separate proxy-facing auth posture. Auth is decided by the connection's real peer address, never the client-controlled `Host` header:
 
-- **Loopback peer** (`127.0.0.0/8`, `::1`): no token required, exactly the v0 contract. The peer's `Host` header must still be a loopback literal (DNS-rebinding defence: a hostile page can point a name it controls at `127.0.0.1` and read `/state` same-origin). Local hooks and the menu bar app keep working unchanged even when the hub is bound wide.
+- **Loopback peer outside remote mode** (`127.0.0.0/8`, `::1`): no token required, exactly the v0 contract. The peer's `Host` header must still be a loopback literal (DNS-rebinding defence: a hostile page can point a name it controls at `127.0.0.1` and read `/state` same-origin). Local hooks and the menu bar app keep working unchanged even when the hub is bound wide.
 - **Non-loopback peer**: must send `Authorization: Bearer $SIGNALBOX_TOKEN`, compared in constant time. A missing or wrong token is `401` with `WWW-Authenticate: Bearer`. The loopback-`Host` check is skipped once the token has proved the caller (a hostile webpage cannot attach a bearer header cross-origin; the hub grants no CORS).
+- **Remote mode**: `signalbox hub --remote` (or `SIGNALBOX_REMOTE=1` or `true`) means the hub sits behind a proxy that terminates TLS, so the peer address is the proxy's and the loopback exemption is never granted. Every request that passes through the auth gate needs the bearer, including one from a loopback peer, and `SIGNALBOX_TOKEN` is mandatory at boot.
 
-`/healthz` and `POST /pair` are exempt from both checks - `/pair` because the pairing code it carries is itself the credential (see [Pairing](#pairing)). The hub **refuses to start** bound to a non-loopback address with no `SIGNALBOX_TOKEN` set: that would expose the board with no auth. There is no override flag; a loopback bind never needs a token.
+`GET /healthz` and `POST /pair` are the only exemptions from these checks, and both remain exempt in remote mode. `/pair` is exempt because the pairing code it carries is itself the credential (see [Pairing](#pairing)). A non-loopback bind is never served without a token: outside remote mode the hub resolves or generates one as described below, and the startup validation refuses the bind if it is still absent. Remote mode instead requires `SIGNALBOX_TOKEN` from the environment and exits before token generation when it is missing or empty.
 
-The `hub` section of `~/.config/signalbox/settings.json` (`hub.bind`, `hub.token`) is the persistent, file-backed equivalent of `--bind` and `SIGNALBOX_TOKEN`, so the hub the menu bar app spawns (it passes only `--port`) can let other devices connect with no flags. The bind resolves as `--bind` flag, then `SIGNALBOX_BIND`, then `hub.bind`, then loopback; the token as `SIGNALBOX_TOKEN`, then `hub.token`. `hub.bind` is stored as a literal address the hub binds verbatim (`config set` normalizes friendly words like `any` to `0.0.0.0` and refuses the ambiguous `lan` before saving); the `0.0.0.0` wildcard is what lets other devices connect while loopback stays served. When the resolved bind is non-loopback and no token is set either way, the hub does not refuse - it **generates a token and saves it to `hub.token`**, so the refuse-to-start rule above is the backstop. See the [CLI spec](https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md#config) for `signalbox config`.
+Outside remote mode, the `hub` section of `~/.config/signalbox/settings.json` (`hub.bind`, `hub.token`) is the persistent, file-backed equivalent of `--bind` and `SIGNALBOX_TOKEN`, so the hub the menu bar app spawns (it passes only `--port`) can let other devices connect with no flags. The bind resolves as `--bind` flag, then `SIGNALBOX_BIND`, then `hub.bind`, then loopback; the token as `SIGNALBOX_TOKEN`, then `hub.token`. `hub.bind` is stored as a literal address the hub binds verbatim (`config set` normalizes friendly words like `any` to `0.0.0.0` and refuses the ambiguous `lan` before saving); the `0.0.0.0` wildcard is what lets other devices connect while loopback stays served. When the resolved bind is non-loopback and no token is set either way, the hub **generates a token and saves it to `hub.token`**, so the startup validation is a backstop. Remote mode ignores both persisted values: its default bind is `0.0.0.0` and its token comes from `SIGNALBOX_TOKEN` only. See the [CLI spec](https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md#config) for `signalbox config`.
+
+### The forwarder
+
+`signalbox hub --upstream <url>` runs a forwarder instead of a state-owning hub. It has no local state write path, writes no `events.jsonl`, and never assigns `seq`; only the upstream hub assigns sequence numbers. Its `Store` is an in-memory read cache materialized from the upstream downlink, not a source of truth.
+
+A local surface distinguishes a forwarder from a hub by `mode`, not by probing for an `upstream` key.
+
+The local listener is always unauthenticated http on `127.0.0.1` (port 8377 by default). Local hooks, the CLI and the menu bar app continue to use loopback with no bearer token. The loopback `Host` check still rejects DNS-rebinding attempts on every route behind the health check; `/healthz` keeps the hub's platform-health exemption.
+
+| Endpoint on a forwarder | Behaviour |
+|---|---|
+| `POST /events` | Normalize and validate, remove derived fields and `seq`, append to `${stateDir}/forward-spool.jsonl` under its `.lock`, start an asynchronous drain, and immediately return `202 {"spooled": true}` without waiting for the upstream. This response acknowledges spooling only and carries no `seq`; the upstream assigns one on ingest after the drain delivers the event, and the forwarder receives it later through the downlink. The hook client allows its POST only 200 ms; waiting for a WAN round trip would make the hook spool an event that the forwarder might also have delivered. The drain is the only sender of spooled events, so delivery stays FIFO and there is one spool. |
+| `POST /command` | Validate and synchronously proxy to the upstream. A successful upstream response supplies the same `{"ok": true, "delivered": N}` body; any upstream failure returns `502` with an error body. Commands are never spooled because a stale request has no meaning. |
+| `GET /state` | Return `{"sessions": [...]}` from the in-memory downlink cache. |
+| `GET /stream?since=N` | Replay cached `signal` frames after N, then re-broadcast live `signal` and `command` frames from the downlink. The signal backlog is bounded to the newest 2,000 events; commands remain live-only. The stream sends an immediate `: connected` comment so a same-process fetch receives first bytes before the first event, then the normal 15-second heartbeat comments. |
+| `GET /healthz` | Return `{"ok": true, "version": "0.1.5", "build": "d6907e1-dirty", "mode": "forwarder", "port": 8377, "upstream": {"url": "https://my-hub.fly.dev", "connected": true, "lastSeq": 118, "spooled": 0}}`. `mode` is the single oracle for which runtime is answering: it is stated and must never be inferred from the presence of `upstream` or other keys. `version` is the bare semver and `build` is empty on an unstamped build. Never authenticated. |
+| `POST /pair`, `POST /pair/new`, `GET /pair/status` | Return `409` with a message naming `signalbox pair --url <upstream>`. A forwarder owns neither the state nor the pairing token. |
+
+The uplink opens `GET <upstream>/stream?since=<lastSeq>`, using `since=0` on first connect to build the cache from the full upstream log. It sends the resolved bearer when one is configured, resumes after the last seen upstream `seq`, and reconnects after 1 second with exponential backoff capped at 15 seconds. `signal` frames are normalized, applied to the cache, added to the bounded backlog and re-broadcast. `command` frames are only re-broadcast and never touch the cache. The same resolved credential is used for event and command POSTs; a tokenless forwarder sends no Authorization header, which supports an unauthenticated loopback upstream but normally leaves the upstream to reject the request.
+
+The forward spool is bounded by 10,000 events or 16 MiB, whichever limit is reached first. Overflow drops the oldest events and writes one log line when the overflow episode begins. Drains send oldest first. Uplink delivery is at-least-once: a crash after a successful send but before the reconcile write can resend an event on the next drain, which is safe because events carry unique ids and the reducer is last-write-wins. An upstream 4xx permanently drops that event so it cannot wedge the queue; a network error or any other upstream status keeps it for a later pass. Spooled events carry no `seq` because the upstream assigns one on ingest.
+
+The cache is fed only by the downlink. A local `POST /events` returns `202 {"spooled": true}` as soon as the event is spooled; that acknowledgement has no `seq`, and the event is neither applied nor broadcast locally. The drain later sends it upstream, where ingest assigns `seq`; the sequenced event arrives asynchronously over the downlink and is then applied to the cache exactly once. Nothing originates local state, so there is nothing to reconcile or deduplicate.
 
 ### Pairing
 
-`signalbox pair` gets the bearer token onto a phone without ever showing it. The hub mints one ephemeral code; the phone reads a QR carrying the hub's LAN URL and that code, POSTs the code to `/pair`, and receives the token in return. The pairing slot lives only in memory - like a command it is never persisted, so a restart clears it.
+`signalbox pair` gets the bearer token onto a phone without ever showing it. The hub mints one ephemeral code; the phone reads a QR carrying the hub URL and that code, POSTs the code to `/pair`, and receives the token in return. The pairing slot lives only in memory - like a command it is never persisted, so a restart clears it.
 
 - **`/pair` is the second unauthenticated exemption, beside `/healthz`.** It sits above the auth gate because the code it carries *is* the credential. Every failure - no code, expired, wrong, already redeemed, or a non-string code - returns one uniform `401 {"error": "invalid or expired pairing code"}`, so an attacker gets no oracle for which case it hit.
-- **`/pair/new` and `/pair/status` are loopback-only regardless of any bearer.** They sit below the auth gate but re-check the peer address explicitly, so a LAN client holding the token still cannot mint or inspect a pairing. Only the hub machine starts a pairing.
-- **A code is single-use and short-lived**: 128 bits from a CSPRNG, base64url, 180 seconds. Redemption is synchronous - the slot is marked redeemed before the handler yields - so racing requests cannot redeem one code twice. There is deliberately **no failed-attempt invalidation and no attempt counter**: a cap is a denial-of-pairing lever and useless against a 128-bit space.
+- **`/pair/new` and `/pair/status` sit below the auth gate.** Outside remote mode, a loopback peer or any valid bearer holder may mint and inspect a pairing; remote mode always requires the bearer. A token holder is already fully trusted and can read every prompt and forge events, so the old peer restriction bought nothing against them and blocked `pair --url`. This audience change leaves the uniform `401` on `/pair`, the single slot, single-use redemption, and the 180-second lifetime unchanged.
+- **A code is single-use and short-lived**: 128 bits from a CSPRNG, base64url, 180 seconds. Minting replaces the one existing slot, so only the newest code is live. Redemption is synchronous - the slot is marked redeemed before the handler yields - so racing requests cannot redeem one code twice. There is deliberately **no failed-attempt invalidation and no attempt counter**: a cap is a denial-of-pairing lever and useless against a 128-bit space.
 - **`Content-Type: application/json` is required on `/pair` and `/pair/new`**: it blocks the CORS "simple request" a hostile page could POST cross-origin without a preflight.
-- **The phone's transport is pinned TLS (#25).** When devices are allowed the hub serves them over https with a persisted self-signed cert, on a listener one port above the loopback http port; local clients keep plain http on loopback (no MITM risk there), so nothing local trusts the cert. The mint carries the cert's SHA-256 DER fingerprint (`fp`) and TLS port; the QR carries them into the phone, which pins the fingerprint and refuses any other cert. This closes the LAN's plaintext gap - a same-network attacker could otherwise read prompts/replies or forge events - without a CA or any user ceremony. `openssl`-less hosts fall back to plain http (no `fp`); a hand-entered hub is http and unpinned.
+- **The phone's LAN transport is pinned TLS (#25).** When LAN devices are allowed outside remote mode, the hub serves them over https with a persisted self-signed cert, on a listener one port above the loopback http port; local clients keep plain http on loopback (no MITM risk there), so nothing local trusts the cert. The mint carries the cert's SHA-256 DER fingerprint (`fp`) and TLS port; the QR carries `fp` only when both are present, and the phone refuses any certificate that does not match. This closes the LAN's plaintext gap - a same-network attacker could otherwise read prompts/replies or forge events - without a CA or any user ceremony. `openssl`-less hosts fall back to plain http with no pin. Remote mode creates no self-signed listener; an https `pair --url` link carries no `fp`, and the phone uses system CA validation for the platform certificate.
 
 What pairing does and does not do:
 
-- It **does not reduce the token's exposure on the LAN.** The bearer already crosses the LAN in cleartext on every request; pairing changes nothing there. What it removes is the token from *screens, QR images, terminal scrollback, and clipboards* - the places a long shared secret leaks by being copied around by hand.
-- **Any local process can mint and redeem to obtain the token.** Loopback is fully trusted here, as everywhere else in the hub (local hooks post unauthenticated): a process already running as you on the hub machine can read the token from the environment or config regardless.
+- It **does not remove the token from later authenticated requests.** The bearer still crosses the transport on every such request, inside pinned TLS for the normal LAN path or platform TLS for a remote https URL. What pairing removes is the token from *screens, QR images, terminal scrollback, and clipboards* - the places a long shared secret leaks by being copied around by hand.
+- **Outside remote mode, any local process can mint and redeem to obtain the token.** Loopback is fully trusted there, as elsewhere in the normal hub posture (local hooks post unauthenticated): a process already running as you on the hub machine can read the token from the environment or config regardless. Remote mode requires the bearer even for a local mint or status request.
 
 ## Privacy
 
-Signals and a two-line breadcrumb of the exchange, never transcripts. `prompt` and `reply` are the only content-bearing fields in normal operation and both are cropped at the emitter (the diagnostic `raw` field is opt-in via `SIGNALBOX_RAW`). The redacted profile (`SIGNALBOX_PROFILE=redacted`) drops cwd, title, prompt, reply and raw, and hashes the session id - for machines where even one line must not leave.
+Signals and a two-line breadcrumb of the exchange, never transcripts. `prompt` and `reply` are the only content-bearing fields in normal operation and both are cropped at the emitter (the diagnostic `raw` field is opt-in via `SIGNALBOX_RAW`). The redacted profile (`SIGNALBOX_PROFILE=redacted`) drops cwd, title, prompt, reply and raw, and hashes the session id - for machines where even one line must not leave. It keeps `machine`: the value is the already-retained hostname plus random hex, so it discloses nothing further while preserving stable machine identity.

@@ -19,6 +19,10 @@ import { isLoopbackAddress } from "./hub";
 export interface HubSettings {
   bind: string;
   token: string;
+  // When set, `signalbox hub` runs as a FORWARDER against this URL instead of
+  // owning state. This is how the app-spawned hub, which passes only --port,
+  // becomes a forwarder with no flags. Empty means own the state locally.
+  upstream: string;
 }
 
 export interface Settings {
@@ -50,7 +54,7 @@ const defaults: Settings = {
   claudeRenameTitle: true,
   codexClearEnds: true,
   codexRenameTitle: true,
-  hub: { bind: "127.0.0.1", token: "" },
+  hub: { bind: "127.0.0.1", token: "", upstream: "" },
 };
 
 export function settingsPath(): string {
@@ -65,7 +69,7 @@ export function loadSettings(): Settings {
     // missing or malformed → defaults
   }
   // hub is nested, so a shallow spread would drop the defaults when the file
-  // sets only one of bind/token - merge it explicitly.
+  // sets only part of it - merge it explicitly.
   const s: Settings = {
     ...defaults,
     ...fromFile,
@@ -139,6 +143,50 @@ export function normalizeBindInput(input: string): { value?: string; error?: str
   // An IPv6 literal; a bare colon is enough to tell it apart from a typo.
   if (raw.includes(":")) return { value: raw };
   return { error: `invalid hub.bind ${JSON.stringify(input)} (expected an IP, "loopback"/"local", or "any"/"all")` };
+}
+
+const upstreamInputError =
+  "hub.upstream needs an https hub origin, e.g. https://my-hub.fly.dev (plain http is allowed only for a loopback upstream)";
+
+export function normalizeUpstreamInput(input: string): { value?: string; error?: string } {
+  const raw = input.trim();
+  if (!raw) return { value: "" };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return { error: upstreamInputError };
+  }
+
+  const hostname = parsed.hostname.startsWith("[") && parsed.hostname.endsWith("]")
+    ? parsed.hostname.slice(1, -1)
+    : parsed.hostname;
+  const loopbackHostname = isLoopbackAddress(hostname) && (
+    hostname === "localhost"
+    || hostname === "::1"
+    || /^127(?:\.\d{1,3}){3}$/.test(hostname)
+  );
+  // The upstream credential and every prompt cross this link, so plaintext is
+  // acceptable only when the link cannot leave the machine. This exception
+  // keeps a local upstream usable for development and tests.
+  const protocolAllowed = parsed.protocol === "https:"
+    || (parsed.protocol === "http:" && loopbackHostname);
+  if (
+    !protocolAllowed
+    || parsed.username
+    || parsed.password
+    || parsed.pathname !== "/"
+    || parsed.search
+    || parsed.hash
+  ) {
+    return { error: upstreamInputError };
+  }
+
+  // Raw input can retain control characters stripped during parsing and
+  // empty-but-present query, fragment, or userinfo markers missed above.
+  // The parser's canonical origin is therefore the only safe value to persist.
+  return { value: parsed.origin };
 }
 
 // lanHint returns the LAN IPv4 a device would dial to reach a wildcard-bound

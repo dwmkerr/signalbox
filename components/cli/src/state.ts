@@ -117,6 +117,8 @@ export class Store {
       if (!e.reply) e.reply = prev.reply;
       if (!e.origin) e.origin = prev.origin;
       if (!e.proc) e.proc = prev.proc;
+      // Machine identity is a breadcrumb too, so an older emitter cannot blank it.
+      if (!e.machine) e.machine = prev.machine;
       // The user's label always carries: agent events never set it.
       if (prev.label) e.label = prev.label;
       else delete e.label;

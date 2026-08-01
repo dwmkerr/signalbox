@@ -23,176 +23,795 @@
   .prose li { margin-bottom:4px; }
   .prose code { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:13.5px;
                 background:#ffffff12; border-radius:4px; padding:1px 5px; color:#D8D8DC; }
-  .prose table { border-collapse:collapse; margin:10px 0; }
-  .prose th, .prose td { border:1px solid #ffffff1e; padding:6px 12px; text-align:left; font-size:14.5px; }
+  .prose table { border-collapse:collapse; margin:10px 0; width:100%; }
+  .prose th, .prose td { border:1px solid #ffffff1e; padding:6px 12px; text-align:left;
+                         font-size:13.5px; vertical-align:top; }
   .prose th { color:#EDEDED; }
+  .prose td.str { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:12.5px; color:#EDEDED; }
   .prose a { color:#0A84FF; text-decoration:none; }
 
-  /* The settings window mockup: a plain macOS preferences window. */
-  .win { width:420px; background:#28282c; border:1px solid #ffffff22; border-radius:10px;
-         box-shadow:0 18px 50px rgba(0,0,0,.6); overflow:hidden;
+  /* The settings window mockup: a macOS preferences window with toolbar tabs. */
+  .win { width:690px; background:#28282c; border:1px solid #ffffff22; border-radius:10px;
+         box-shadow:0 18px 50px rgba(0,0,0,.6); overflow:hidden; position:relative;
          font-size:13px; line-height:normal; }
   .titlebar { height:36px; display:flex; align-items:center; padding:0 12px; position:relative;
-              background:linear-gradient(#2e2e33,#292930); border-bottom:1px solid #00000055; }
+              background:linear-gradient(#2e2e33,#292930); }
   .lights { display:flex; gap:8px; }
   .lights span { width:12px; height:12px; border-radius:50%; }
   .titlebar .title { position:absolute; left:0; right:0; text-align:center; color:#D8D8DC;
                      font-size:13px; font-weight:600; pointer-events:none; }
-  .content { padding:16px 20px 20px; color:#D8D8DC; }
+  .tabs { display:flex; justify-content:center; gap:6px; padding:2px 0 8px;
+          background:linear-gradient(#292930,#28282c); border-bottom:1px solid #00000055; }
+  .tab { display:flex; flex-direction:column; align-items:center; gap:2px; min-width:64px;
+         padding:5px 10px 4px; border-radius:7px; cursor:pointer; color:#98989D; font-size:11px; }
+  .tab svg { width:20px; height:20px; }
+  .tab.cur { background:#ffffff14; color:#EDEDED; }
+  .tab.cur svg { stroke:#0A84FF; }
+  .content { padding:16px 20px 20px; color:#D8D8DC; min-height:260px; }
+  .pane { display:none; }
+  .pane.cur { display:block; }
   .frow { display:flex; align-items:center; min-height:30px; gap:10px; }
   .frow .lbl { color:#B5B5BA; flex-shrink:0; }
+  /* The General tab is a plain label column: right aligned, one width, so the
+     three controls line up and no row needs a heading of its own. */
+  .frow .lbl.gcol { width:118px; text-align:right; }
   .frow .ctl { flex:1; display:flex; align-items:center; gap:8px; }
   .sect { color:#EDEDED; font-size:13px; font-weight:600; margin:14px 0 4px; }
+  .sect:first-child { margin-top:0; }
   .subnote { color:#8E8E93; font-size:11px; margin:2px 0 8px; line-height:1.5; }
   .field { background:#1d1d20; border:1px solid #ffffff14; border-radius:6px; padding:4px 10px;
            font-size:12px; color:#6E6E73; width:200px; display:inline-block; }
-  .popup { display:inline-flex; align-items:center; gap:6px; background:#48484c; border:1px solid #ffffff14;
-           border-radius:6px; padding:3px 4px 3px 10px; color:#EDEDED; font-size:12px; }
-  .popup .chev { line-height:5px; font-size:7px; background:#0A84FF; border-radius:4px; padding:2px 3px; color:#fff; }
   .check { width:14px; height:14px; border-radius:3.5px; border:1.5px solid #98989D; display:inline-flex;
            align-items:center; justify-content:center; font-size:10.5px; color:#fff; flex-shrink:0; }
   .check.on { background:#0A84FF; border-color:#0A84FF; }
+  .btn { background:#48484c; border:1px solid #ffffff1a; border-radius:6px; color:#EDEDED;
+         font-size:12px; padding:4px 12px; cursor:pointer; font-family:inherit; }
+  .btn.small { font-size:11px; padding:3px 9px; }
+  .btn.primary { background:#0A84FF; border-color:#0A84FF; color:#fff; }
+  .btn[disabled] { opacity:.4; cursor:default; }
+  .recorder { background:#1d1d20; border:1px solid #ffffff14; border-radius:6px; padding:3px 12px;
+              font-size:12px; color:#EDEDED; display:inline-flex; gap:4px; }
+  .inp { background:#1d1d20; border:1px solid #ffffff20; border-radius:6px; padding:4px 9px;
+         font-size:12px; color:#EDEDED; font-family:'SF Mono',ui-monospace,Menlo,monospace; width:230px; }
+  .inp:focus { outline:2px solid #0A84FF; outline-offset:-1px; }
+  .testline { font-size:11px; margin-top:7px; color:#8E8E93; line-height:1.5; min-height:16px; }
+  .testline.ok { color:#32D74B; }
+  .testline.bad { color:#FF9F0A; }
+
+  /* The status pill: one line of reality under the mode control - a dot, the
+     running mode, and where the hub is. The address is monospace and
+     selectable so it can be copied straight out of the pill. */
+  .pill { display:inline-flex; align-items:center; gap:7px; background:#1d1d20;
+          border:1px solid #ffffff14; border-radius:20px; padding:4px 13px 4px 11px;
+          font-size:12px; color:#D8D8DC; margin:2px 0 4px; }
+  .pill .pdot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .pill .addr { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11.5px;
+                color:#EDEDED; user-select:text; cursor:text; }
+  .pill .suffix { color:#FF9F0A; }
+  .pill.warn { border-color:#FF9F0A44; }
+
+  /* macOS popup button, built by hand so the menu can be styled and driven. */
+  .popwrap { position:relative; display:inline-block; }
+  .popbtn { display:inline-flex; align-items:center; gap:8px; background:#48484c;
+            border:1px solid #ffffff14; border-radius:6px; padding:3px 4px 3px 11px;
+            color:#EDEDED; font-size:12px; cursor:pointer; font-family:inherit; min-width:112px;
+            justify-content:space-between; }
+  .popbtn .chev { line-height:5px; font-size:7px; background:#0A84FF; border-radius:4px;
+                  padding:2px 3px; color:#fff; }
+  .popmenu { display:none; position:absolute; top:-4px; left:0; z-index:12; min-width:112px;
+             background:#3a3a3f; border:1px solid #ffffff20; border-radius:6px; padding:3px;
+             box-shadow:0 10px 26px rgba(0,0,0,.55); }
+  .popmenu.on { display:block; }
+  .popmenu div { padding:4px 10px 4px 20px; border-radius:4px; font-size:12px; color:#EDEDED;
+                 cursor:pointer; position:relative; }
+  .popmenu div:hover { background:#0A84FF; }
+  .popmenu div.sel::before { content:"\2713"; position:absolute; left:6px; font-size:10px; }
+
+  /* Mode detail: caption, then the topology sketch below the text, then that
+     mode's controls. */
+  .modecap { font-size:12px; color:#B5B5BA; line-height:1.5; margin:10px 0 8px; }
+  .topo { color:#8E8E93; margin:2px 0 10px; display:block; }
+  /* Confirm and Cancel belong to the mode popup, so they sit in its row and
+     the hint goes under it, indented to where the popup starts. */
+  #confirmbtns { display:inline-flex; gap:8px; align-items:center; margin-left:6px; }
+  .pendinghint { font-size:11px; color:#8E8E93; margin:3px 0 5px 76px; line-height:1.5; }
+
+  /* Logs tab. */
+  .pathrow { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+  .path { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11.5px; color:#D8D8DC;
+          background:#1d1d20; border:1px solid #ffffff14; border-radius:6px; padding:4px 9px;
+          cursor:pointer; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .path:hover { color:#0A84FF; border-color:#0A84FF55; }
+  .tail { background:#161619; border:1px solid #ffffff14; border-radius:6px; height:150px;
+          overflow:auto; padding:7px 10px; font-family:'SF Mono',ui-monospace,Menlo,monospace;
+          font-size:10.5px; line-height:1.65; color:#9a9aa0; white-space:pre; }
+  .tail .ts { color:#5e5e64; }
+  .tail .warnline { color:#FF9F0A; }
+  .toast { font-size:11px; color:#32D74B; min-height:16px; margin-top:5px; }
+
+  /* The jumplist footer, where the status light lives, plus its popover. */
+  .stagehead { color:#6E6E73; font-size:11px; margin:128px 0 58px; text-transform:uppercase;
+               letter-spacing:.06em; }
+  .jpanel { width:690px; background:#1e1e21; border:1px solid #ffffff22; border-radius:10px;
+            box-shadow:0 18px 50px rgba(0,0,0,.45); position:relative; }
+  .jbody { height:86px; display:flex; align-items:center; justify-content:center; color:#4a4a50;
+           font-size:12px; background:#1a1a1d; border-radius:10px 10px 0 0; }
+  .jfoot { border-top:1px solid #ffffff14; height:34px; display:flex; align-items:center;
+           color:#6E6E73; font-size:10.5px; gap:14px; padding:0 14px; }
+  .jfoot .keys { white-space:pre; flex:1; text-align:center; overflow:hidden; }
+  .jfoot .cog { color:#6E6E73; font-size:14px; line-height:1; cursor:pointer; }
+  .jlight { display:flex; align-items:center; gap:6px; font-size:10.5px; white-space:nowrap;
+            color:#8E8E93; cursor:pointer; padding:3px 6px; border-radius:5px; margin-left:-6px; }
+  .jlight:hover { color:#D8D8DC; background:#ffffff0d; }
+  .jlight.open { color:#D8D8DC; background:#ffffff14; }
+  .jlight .sdot { width:7px; height:7px; border-radius:50%; }
+  .jlight.warn { color:#FF9F0A; }
+
+  .pop { position:absolute; left:10px; bottom:40px; width:268px; background:#2e2e33;
+         border:1px solid #ffffff22; border-radius:9px; padding:11px 13px 9px;
+         box-shadow:0 14px 34px rgba(0,0,0,.6); display:none; z-index:20; }
+  .pop.on { display:block; }
+  .pop::after { content:""; position:absolute; left:16px; bottom:-6px; width:10px; height:10px;
+                background:#2e2e33; border-right:1px solid #ffffff22; border-bottom:1px solid #ffffff22;
+                transform:rotate(45deg); }
+  .pop .prow { display:flex; gap:8px; font-size:11.5px; line-height:1.7; }
+  .pop .prow .k { color:#8E8E93; width:78px; flex-shrink:0; }
+  .pop .prow .v { color:#EDEDED; font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px;
+                  user-select:text; }
+  .pop .prow.warn .v { color:#FF9F0A; }
+  .pop .plinks { border-top:1px solid #ffffff14; margin-top:8px; padding-top:7px; display:flex; gap:14px; }
+  .pop .plinks a { color:#0A84FF; font-size:11.5px; cursor:pointer; text-decoration:none; }
+
+  /* Spec-only chrome: not part of the window - preview the health states. */
+  .specstates { margin:0 0 10px; font-size:12px; color:#6E6E73; }
+  .specstates button { background:#28282c; border:1px solid #ffffff22; border-radius:6px; color:#B5B5BA;
+                       font-size:11px; padding:3px 9px; margin-left:5px; cursor:pointer; font-family:inherit; }
+  .specstates button.cur { background:#0A84FF; border-color:#0A84FF; color:#fff; }
 </style></head><body>
 
 <div class="page">
 <div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | settings | <a href="menubar.html">menu bar</a> | <a href="ios.html">ios</a> | <a href="architecture.html">architecture</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
 <h1>Specification: signalbox settings</h1>
 <div class="subtitle">Open from the menu bar (Settings…), or from the jumplist with <kbd>⌘</kbd><kbd>,</kbd> or its footer cog.</div>
-<div class="note-line"><b>Note:</b> the mockup below is the living specification for the signalbox settings window, a plain macOS preferences window.</div>
+<div class="note-line"><b>Note:</b> the mockup below is interactive and is the living specification
+for the signalbox settings window and the jumplist's hub status light. Switch tabs, change the hub
+mode (a change is pending until you press Confirm), and use the health buttons to preview the
+degraded and starting states. The jumplist footer fragment below the window follows the same state;
+click its light for the status popover.</div>
+
+<div class="specstates">Hub health (spec control, not part of the window):
+  <button data-h="healthy" class="cur">Healthy</button><button data-h="degraded">Degraded</button><button data-h="starting">Starting</button>
+</div>
 
 <div class="win">
   <div class="titlebar">
-    <div class="lights"><span style="background:#FF5F57"></span><span style="background:#FEBC2E"></span><span style="background:#28C840"></span></div>
-    <div class="title">Signalbox Settings</div>
+    <div class="lights"><span style="background:#FF5F57"></span><span style="background:#FEBC2E;opacity:.35"></span><span style="background:#28C840;opacity:.35"></span></div>
+    <div class="title" id="wintitle">Hub</div>
+  </div>
+  <div class="tabs">
+    <div class="tab" data-t="general" data-label="General">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#98989D" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.76l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.6 1.6 0 0 0-1.76-.32 1.6 1.6 0 0 0-.97 1.47V21a2 2 0 1 1-4 0v-.09a1.6 1.6 0 0 0-1.05-1.47 1.6 1.6 0 0 0-1.76.32l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.6 1.6 0 0 0 4.6 15a1.6 1.6 0 0 0-1.47-.97H3a2 2 0 1 1 0-4h.09A1.6 1.6 0 0 0 4.56 9a1.6 1.6 0 0 0-.32-1.76l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.6 1.6 0 0 0 8.83 4.7 1.6 1.6 0 0 0 9.8 3.23V3a2 2 0 1 1 4 0v.09c0 .64.38 1.22.97 1.47a1.6 1.6 0 0 0 1.76-.32l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.6 1.6 0 0 0-.32 1.76c.25.59.83.97 1.47.97H21a2 2 0 1 1 0 4h-.09a1.6 1.6 0 0 0-1.47.97z"/></svg>
+      General
+    </div>
+    <div class="tab" data-t="agents" data-label="Agents">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#98989D" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="M7 9.5 10 12l-3 2.5"/><line x1="12.5" y1="14.5" x2="17" y2="14.5"/></svg>
+      Agents
+    </div>
+    <div class="tab cur" data-t="hub" data-label="Hub">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#98989D" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="2.2" fill="#98989D" stroke="none"/><path d="M8.5 8.5 A 5 5 0 0 1 15.5 8.5"/><path d="M8.5 15.5 A 5 5 0 0 0 15.5 15.5"/><path d="M5.6 5.6 A 9 9 0 0 1 18.4 5.6" opacity=".55"/><path d="M5.6 18.4 A 9 9 0 0 0 18.4 18.4" opacity=".55"/></svg>
+      Hub
+    </div>
+    <div class="tab" data-t="logs" data-label="Logs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#98989D" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><line x1="8.5" y1="12.5" x2="15.5" y2="12.5"/><line x1="8.5" y1="16" x2="13" y2="16"/></svg>
+      Logs
+    </div>
   </div>
   <div class="content">
-    <div class="frow">
-      <span class="lbl">Menu bar icon:</span>
-      <span class="ctl"><span class="popup">
-        <svg width="16" height="16" viewBox="0 0 20 20" stroke="#E4E4E8" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#E4E4E8" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>
-        Beacon <span class="chev">⌃<br>⌄</span>
-      </span></span>
-    </div>
-    <div class="subnote">A colored dot appears on the icon when sessions wait: amber = needs your input, blue = output updated, red = failed.</div>
 
-    <div class="sect">Sessions</div>
-    <div class="frow">
-      <span class="ctl"><span class="check on">✓</span> Claude Code /clear removes the session from the board</span>
+    <div class="pane" id="pane-general">
+      <div class="frow">
+        <span class="lbl gcol">Menu bar icon:</span>
+        <span class="ctl"><span class="popbtn" style="cursor:default">
+          <span style="display:flex;align-items:center;gap:6px">
+          <svg width="16" height="16" viewBox="0 0 20 20" stroke="#E4E4E8" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#E4E4E8" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>
+          Beacon</span><span class="chev">&#8963;<br>&#8964;</span>
+        </span></span>
+      </div>
+      <div class="frow">
+        <span class="lbl gcol">Jumplist shortcut:</span>
+        <span class="ctl"><span class="recorder" title="Set with: defaults write com.dwmkerr.signalbox hotkey &quot;cmd+shift+space&quot;">&#8963;&#8997;J</span></span>
+      </div>
+      <div class="frow">
+        <span class="lbl gcol">Additional filters:</span>
+        <span class="ctl"><span class="field">#tag or name</span></span>
+      </div>
+      <div class="subnote" style="margin-left:128px">Always applied on the jumplist</div>
     </div>
-    <div class="subnote">Unchecked, a /clear keeps the old session listed (marked ready) until you hide or remove it - the exchange stays reviewable.</div>
 
-    <div class="frow">
-      <span class="ctl"><span class="check on">✓</span> Rename session on Claude Code /rename</span>
+    <div class="pane" id="pane-agents">
+      <div class="sect">Claude Code</div>
+      <div class="frow"><span class="ctl"><span class="check on">&#10003;</span> Remove the session on /clear</span></div>
+      <div class="frow"><span class="ctl"><span class="check on">&#10003;</span> Rename the session on /rename</span></div>
+      <div class="subnote">Off, a /clear keeps the old session listed until you hide or remove it. Your own rename always wins.</div>
+      <div class="sect">Codex</div>
+      <div class="frow"><span class="ctl"><span class="check on">&#10003;</span> Remove the session on /clear</span></div>
+      <div class="frow"><span class="ctl"><span class="check on">&#10003;</span> Rename the session on /rename</span></div>
     </div>
-    <div class="subnote">On, a Claude /rename shows on the board as the session name. Off keeps the folder name. Your own ⌃R rename always wins either way.</div>
-    <div class="row">
-      <span class="ctl"><span class="check on">✓</span> Codex clear removes the session from the board</span>
-    </div>
-    <div class="row">
-      <span class="ctl"><span class="check on">✓</span> Rename session on Codex /rename</span>
-    </div>
-    <div class="subnote">The Codex pair of the two toggles above. Agent settings stay flat until a third agent needs toggles, then they move to per-agent tabs.</div>
 
-    <div class="subnote" style="margin-top:12px">Jumplist shortcut: ⌃⌥J - override with defaults write com.dwmkerr.signalbox hotkey "cmd+shift+space"</div>
-
-    <div class="sect">Hub</div>
-    <div class="frow">
-      <span class="ctl"><span class="check"></span> Allow other devices to connect (requires token)</span>
+    <div class="pane cur" id="pane-hub">
+      <div class="sect">Hub</div>
+      <div class="frow">
+        <span class="lbl">Hub mode:</span>
+        <span class="ctl">
+          <span class="popwrap">
+            <button class="popbtn" id="modebtn"><span id="modebtnlabel">Local</span><span class="chev">&#8963;<br>&#8964;</span></button>
+            <div class="popmenu" id="modemenu">
+              <div data-m="local">Local</div>
+              <div data-m="lan">LAN</div>
+              <div data-m="remote">Remote</div>
+            </div>
+          </span>
+          <span id="confirmbtns"></span>
+        </span>
+      </div>
+      <div id="pendinghint"></div>
+      <div class="pill" id="pill"></div>
+      <div class="modecap" id="modecap"></div>
+      <div id="topo"></div>
+      <div id="modectl"></div>
     </div>
-    <div class="subnote">Devices reach this Mac at 192.168.1.24:8377. The token is created automatically.</div>
 
-    <div class="sect">Additional filters</div>
-    <div class="frow">
-      <span class="ctl"><span class="field">#tag or name</span></span>
+    <div class="pane" id="pane-logs">
+      <div class="sect">Hub log</div>
+      <div class="subnote" style="margin-top:0">The hub writes everything it does here. Click the path to reveal it in Finder.</div>
+      <div class="pathrow">
+        <span class="path" id="logpath">~/.local/state/signalbox/hub.log</span>
+        <button class="btn small" id="copypath">Copy path</button>
+      </div>
+      <div class="toast" id="logtoast"></div>
+      <div class="sect" style="margin-top:8px;display:flex;align-items:center;justify-content:space-between">
+        <span>Recent events</span>
+        <button class="btn small" id="refreshlog">Refresh</button>
+      </div>
+      <div class="tail" id="tail"></div>
     </div>
-    <div class="subnote">Always applied to the jumplist and menu bar. #tag matches a tag, plain text matches the session name or its last message, ! excludes - e.g. #work !project shows work and hides anything named or tagged project. Blank shows all.</div>
+
   </div>
+</div>
+
+<div class="stagehead">Jumplist footer, with the hub status light and its popover</div>
+<div class="jpanel">
+  <div class="jbody">the jumplist, sessions and preview omitted</div>
+  <div class="jfoot">
+    <span class="jlight" id="jlight" title="Hub status. Click for details."></span>
+    <span class="keys">type to search  -  &#8963;j/&#8963;k move  -  return jumps  -  esc clear/close</span>
+    <span class="cog" title="Settings (&#8984;,)">&#9881;</span>
+  </div>
+  <div class="pop" id="pop"></div>
 </div>
 
 <div class="prose">
   <h2>What this is</h2>
-  <p>The app's settings window, a plain macOS preferences window:</p>
+  <p>The settings window as four toolbar panes, plus the hub status light in the jumplist footer.
+  The window title tracks the pane.</p>
   <ul>
-    <li>A popup for the icon choice.</li>
-    <li>Checkboxes for toggles.</li>
-    <li>A text field for the filters.</li>
-    <li>A short grey caption under each control.</li>
+    <li><b>General</b> - three rows in one label column: the menu bar icon, the jumplist shortcut
+    (a recorder well showing standard key glyphs, <kbd>&#8963;&#8997;J</kbd>, never the
+    <code>ctrl+alt+j</code> config syntax), and the board filter field. No row carries a subtext:
+    the only caption is the filter's one-liner, and how to change the shortcut is a tooltip on the
+    well.</li>
+    <li><b>Agents</b> - one section per agent, identical verb-first toggles. Sections, not tabs:
+    agents are an open-ended list and the tab strip stays fixed.</li>
+    <li><b>Hub</b> - the mode control first, with Confirm and Cancel beside it while a change is
+    pending, the status pill under it, then the selected mode's caption, sketch and controls. A
+    mode change is pending until Confirm.</li>
+    <li><b>Logs</b> - the hub log path, Copy path, and a Recent events tail.</li>
   </ul>
-  <p>Keep it small; new settings are new rows.</p>
 
-  <h2>Additional filters</h2>
-  <p>The filter field narrows the board everywhere. The jumplist and the menu bar dropdown share it,
-  so the two stay in sync.</p>
+  <h2>The mental model</h2>
+  <p>Every mode configures the hub on this machine. That never changes, and the captions say so:</p>
   <ul>
-    <li>Tokens are space- or comma-separated.</li>
-    <li><code>#tag</code> matches a tag.</li>
-    <li>Plain text matches the session name or its last message.</li>
-    <li>A leading <code>!</code> excludes either.</li>
-    <li>A session shows when it matches every include token and no exclude token.</li>
+    <li><b>Local</b> - the hub runs here on loopback, and nothing else can reach it.</li>
+    <li><b>LAN</b> - the same hub, open on your local network, so your phone can connect to it.</li>
+    <li><b>Remote</b> - the same hub, still here, still what your agents report to, but it forwards
+    events to a remote hub. A remote hub can accept forwards from many machines at once, which is
+    why the sketch shows two machines side by side.</li>
   </ul>
-  <p>The field applies live as you type (no Save button) and persists across restarts
-  (<code>tagFilter</code> below). Set it at launch too:
-  <code>open Signalbox.app --args --filter demo</code> restarts straight into a filtered view, and
-  <code>--filter</code> with no value clears it back to all.</p>
+  <p>The sketches sit below the caption. Every one is built from the same labelled unit: the small
+  boxes are <b>agents</b> and they sit inside a <b>machine</b> frame, with the hub as the dot they
+  report to. One rule carries the rest: the filled dot is the board of record. In Local and LAN it
+  sits on this machine. In Remote each machine's dot goes hollow and the filled one moves to the
+  cloud that they all forward to. Dashed links cross a network, solid links do not.</p>
 
-  <h2>The jumplist shortcut</h2>
-  <p>The shortcut shows as a caption: <code>⌃⌥J</code> by default, overridden with
-  <code>defaults write com.dwmkerr.signalbox hotkey "cmd+shift+space"</code>. If another app holds the
-  combo, signalbox falls back and notifies.</p>
-  <p>macOS has a standard control for this: a recorder well, as in System Settings under Keyboard
-  Shortcuts. Click the well, it focuses; press a combination, it captures it and shows a clear button.
-  The <a href="https://github.com/sindresorhus/KeyboardShortcuts">KeyboardShortcuts</a> Swift package
-  provides the recorder control, persistence, and the global listener in one, replacing the Carbon
-  code and the defaults-write override.</p>
+  <h2>Changing mode: pending until Confirm</h2>
+  <p>Picking a different mode in the popup changes nothing by itself. The caption, sketch and
+  controls switch to the new mode so you can see what you are choosing, a Confirm and a Cancel
+  button appear <b>beside the popup</b> with the hint under it, and the status pill keeps showing
+  what is actually running. The buttons sit in the popup's row because that is the control that
+  caused the pending change; at the foot of the pane they read as a form submit for everything
+  above them. Confirm writes the settings file and restarts the hub; Cancel puts the popup back to
+  the running mode. This is the standard idiom for a change that interrupts a running service, and
+  it means the window can never half-apply a mode.</p>
+  <ul>
+    <li><b>To LAN or Local</b>: Confirm is enabled immediately.</li>
+    <li><b>To Remote</b>: the URL field opens pre-filled with the last address that was confirmed
+    (<code>hub.remoteUrl</code>, which no mode switch clears) and the token field with
+    <code>hub.token</code>; only <code>hub.upstream</code> empties when Local or LAN is confirmed,
+    because that key alone is what makes the hub a forwarder. Fill in the remote hub's URL and
+    token, then Test. Confirm stays disabled
+    until a test passes, so a forwarder is never pointed at an address that has not answered. The
+    test calls the remote hub's <code>/healthz</code> and checks the token against an authenticated
+    route; failures render under the field with the actual reason.</li>
+  </ul>
+  <p>While a change is pending, that mode's own controls are visible but anything that needs the
+  hub to already be in the mode is disabled: <b>Pair a device...</b> greys out under a pending LAN
+  selection, because pairing hands a device the running hub's LAN address and bearer and the hub is
+  still on loopback until Confirm. Its tooltip says why.</p>
+
+  <h2>The status pill</h2>
+  <p>One line of reality directly under the mode control: a dot, the running mode, and where the
+  hub is, with a short amber suffix when something is wrong. It renders
+  <code>GET /healthz</code> and nothing else - the settings file records what you asked for and is
+  never read to describe what is running. During a pending change or a restart the pill keeps
+  telling the truth about the running hub. The address is monospace and selectable, so it can be
+  copied straight out of the pill. The pill never narrates health in sentences and never counts
+  anything; the popover and the log carry the detail. When the hub does not answer at all, the pill
+  still has to name a mode, so it uses the last mode the hub reported this session, or the settings
+  file as a last resort - intent never describes a hub that IS answering.</p>
+
+  <h2>The Logs tab</h2>
+  <p>Karabiner-Elements and iTerm2 both put logging in a settings tab, and both are apps whose real
+  work happens in a process the user never sees. Signalbox has the same shape: the app spawns
+  <code>signalbox hub</code> as a child and its output lands in
+  <code>~/.local/state/signalbox/hub.log</code>. When a board is empty or a phone will not pair,
+  that file is the answer.</p>
+  <p>The tab is deliberately small. The path is clickable and reveals the file in Finder; Copy path
+  puts it on the clipboard. Recent events is a tail of the last 500 lines in a scrolling monospace
+  view, read when the tab opens and on Refresh - not a live follow, so nothing moves while you
+  read. It is a tail, not a viewer: no search, no level filter. Anything deeper is a job for
+  Console or <code>tail -f</code>, and the path is right there.</p>
+  <p><b>What this asks of the hub:</b> log lines gain a leading <code>YYYY-MM-DD HH:MM:SS</code>
+  timestamp. Bare untimestamped lines make a tail nearly useless, so that is a required change, not
+  a nice-to-have.</p>
+
+  <h2>The footer status light</h2>
+  <p>Everyday status does not live in Settings - it is a small light at the left of the jumplist
+  footer, opposite the cog. Three states: <b>Hub healthy</b> (green), <b>Hub warning</b> (amber),
+  <b>Hub starting</b> (grey). The light never names a mode - "Remote" as a status reads as a place,
+  not a health.</p>
+  <p>Clicking the light opens a popover of facts, not narrative: Mode, Address, Hub version, and in
+  Remote mode the Uplink row with the spool count when events are queuing. Values are monospace and
+  selectable. Two links close it out: <b>Open Settings</b> (the Hub tab) and <b>Open log</b> (the
+  Logs tab). Clicking elsewhere closes it. There are no menu bar menu items for any of this.</p>
 
   <h2>Where settings are stored</h2>
   <table>
     <tr><th>Store</th><th>What</th><th>Why</th></tr>
-    <tr><td><code>UserDefaults</code></td><td>menu bar icon (<code>menuBarIcon</code>), jumplist shortcut (<code>hotkey</code>), board tag filter (<code>tagFilter</code>), jumplist zoom (<code>uiScale</code>, 0.8-1.6, set with ⌘+/⌘−/⌘0), login-item one-shot (<code>didRegisterLoginItem</code> - the app registers itself as a login item once, on first launch from /Applications, and never re-adds it if you remove it in System Settings)</td><td>only the app needs these; the filter and zoom are local view preferences, not shared config</td></tr>
-    <tr><td><code>~/.config/signalbox/settings.json</code></td><td>toggles the CLI hooks must also see, currently <code>claudeClearEnds</code>, <code>claudeRenameTitle</code>, <code>codexClearEnds</code> and <code>codexRenameTitle</code>; plus a <code>hub</code> section for how the hub binds: <code>hub.bind</code> (a keyword or a literal - the keywords <code>loopback</code> (<code>127.0.0.1</code>) and <code>lan</code> (the <code>0.0.0.0</code> wildcard) still resolve, and any literal like <code>0.0.0.0</code> or an explicit IP is honored verbatim; default <code>loopback</code>, this Mac only) and <code>hub.token</code> (the bearer token; default empty). The Hub "Allow other devices" checkbox writes the literal <code>0.0.0.0</code>, and off writes <code>127.0.0.1</code>.</td><td>the app writes the file and the hook path reads it on every fire, so a change applies immediately with no IPC; the hub reads <code>hub.bind</code>/<code>hub.token</code> at start so the app-spawned hub (which passes no flags) can serve other devices on the network</td></tr>
+    <tr><td><code>UserDefaults</code></td><td>menu bar icon (<code>menuBarIcon</code>), jumplist shortcut (<code>hotkey</code>), board tag filter (<code>tagFilter</code>), jumplist zoom (<code>uiScale</code>), login-item one-shot (<code>didRegisterLoginItem</code>)</td><td>only the app needs these</td></tr>
+    <tr><td><code>~/.config/signalbox/settings.json</code></td><td>toggles the CLI hooks must also see (<code>claudeClearEnds</code>, <code>claudeRenameTitle</code>, <code>codexClearEnds</code>, <code>codexRenameTitle</code>); plus the <code>hub</code> keys Confirm writes: <code>hub.bind</code> (<code>127.0.0.1</code> for Local, <code>0.0.0.0</code> for LAN; keywords <code>loopback</code>/<code>lan</code> still resolve), <code>hub.token</code> (bearer token; auto-minted on a wide bind; the Remote token field also writes it), <code>hub.upstream</code> (the remote hub URL for Remote mode; empty otherwise), <code>hub.remoteUrl</code> (the same address, remembered: no mode switch clears it, so Remote comes back with its URL already filled in). These keys are intent - what is actually running is whatever <code>/healthz</code> says.</td><td>the app writes the file and the hook path reads it on every fire; the hub reads the <code>hub</code> keys at start so the app-spawned hub needs no flags</td></tr>
   </table>
-  <p>Writes to the shared file merge key by key, so unknown keys survive. A missing or broken file
-  falls back to defaults and keeps the hook path working.</p>
+  <p>Writes merge key by key, so unknown keys survive. A missing or broken file falls back to
+  defaults and keeps the hook path working.</p>
 
-  <h2>Hub network access</h2>
-  <p>The <b>Allow other devices to connect</b> checkbox controls who can reach the hub. Off (the
-  default), the hub answers only this Mac; on, it answers other devices on the network too. The
-  checkbox reflects <code>hub.bind</code> in the settings file, read live each time the window opens so
-  it stays right even when Connect Phone changed it. Toggling it rewrites that value and restarts the
-  hub (the same restart Connect Phone uses) so the new bind takes effect. The grey caption beneath shows
-  the address a phone dials, this Mac's LAN IP and the hub port, and notes the token is created
-  automatically.</p>
-  <p>The <code>hub</code> section is the persistent, file-backed equivalent of <code>signalbox hub</code>'s
-  <code>--bind</code> flag and <code>SIGNALBOX_TOKEN</code>. It exists so the hub the app spawns - which
-  passes only <code>--port</code> - can come up reachable with a token, with no flags and no env.</p>
-  <ul>
-    <li><code>hub.bind</code>: a keyword or a literal, and the two coexist with no normalization pass
-    rewriting one into the other. The keywords <code>loopback</code> and <code>lan</code> resolve to
-    <code>127.0.0.1</code> and the <code>0.0.0.0</code> wildcard; a literal (<code>127.0.0.1</code>,
-    <code>0.0.0.0</code>, or an explicit IP) is honored verbatim. The checkbox writes literals -
-    <code>0.0.0.0</code> to allow other devices (loopback stays served for local hooks and this app while
-    every interface is served too), <code>127.0.0.1</code> to restrict to this Mac; an absent value means
-    loopback. Set it from the CLI too: <code>signalbox config set hub.bind 0.0.0.0</code> (or
-    <code>lan</code>) then <code>signalbox config get</code>.</li>
-    <li><code>hub.token</code>: the bearer token non-loopback clients must send. When the hub starts on a
-    non-loopback bind with no token set, it <b>generates one and saves it here</b>, so a reachable hub is
-    on a stable auto-token across restarts. No control on this window edits the token; it is a CLI-only
-    value (<code>signalbox config set hub.token --generate</code>).</li>
-  </ul>
-  <p>Full resolution order, auth, and the auto-token are in the
-  <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">CLI spec</a> and the
-  <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a>.</p>
+  <h2>The /clear and /rename toggles</h2>
+  <p>Claude Code fires <code>SessionEnd</code> with reason <code>clear</code> on <code>/clear</code>.
+  Checked (default), the session ends and leaves the board. Unchecked, the hook maps it to
+  <code>done</code> so the old session stays listed until you hide it (<kbd>⌃X</kbd>), remove it
+  (<kbd>⌃⌫</kbd>), or it expires. The Codex pair behaves the same. For scripting,
+  <code>SIGNALBOX_CLEAR_ENDS=0|1</code> overrides the file. Rename toggles: on, the agent's /rename
+  shows on the board as the session name; off keeps the folder name; your own ⌃R rename always
+  wins.</p>
 
-  <h2>The /clear toggle</h2>
-  <p>Claude Code fires <code>SessionEnd</code> with reason <code>clear</code> when you type
-  <code>/clear</code>.</p>
-  <ul>
-    <li>Checked (default): the session ends and leaves the board, the same as quitting.</li>
-    <li>Unchecked: the hook maps it to <code>done</code> instead, so the old session stays listed with
-    its last exchange until you hide it (<kbd>⌃X</kbd>), remove it (<kbd>⌃⌫</kbd>), or it expires.
-    The fresh post-clear session appears as a new row alongside it.</li>
-  </ul>
-  <p>For scripting, <code>SIGNALBOX_CLEAR_ENDS=0|1</code> overrides the file.</p>
+  <h2>Every status string</h2>
+  <table>
+    <tr><th>String</th><th>Where</th><th>When it shows</th></tr>
+    <tr><td class="str">Always applied on the jumplist</td><td>General tab, under the filter field</td><td>Always; the only caption on the tab</td></tr>
+    <tr><td class="str">Set with: defaults write com.dwmkerr.signalbox hotkey "cmd+shift+space"</td><td>Tooltip on the shortcut well</td><td>On hover</td></tr>
+    <tr><td class="str">Remove the session on /clear</td><td>Agents tab, both agent sections</td><td>Always; the session leaves the board when checked</td></tr>
+    <tr><td class="str">Rename the session on /rename</td><td>Agents tab, both agent sections</td><td>Always</td></tr>
+    <tr><td class="str">Local - 127.0.0.1:8377</td><td>Status pill, green dot</td><td>Running mode is Local and the hub answers</td></tr>
+    <tr><td class="str">LAN - 192.168.1.24:8377</td><td>Status pill, green dot</td><td>Running mode is LAN and the hub answers</td></tr>
+    <tr><td class="str">LAN - port 8377, no Wi-Fi address yet</td><td>Status pill, green dot</td><td>Running mode is LAN and this Mac has no LAN IPv4 yet</td></tr>
+    <tr><td class="str">Remote - signalbox-hub.fly.dev</td><td>Status pill, green dot</td><td>Running mode is Remote, the hub answers and the uplink is up</td></tr>
+    <tr><td class="str">Local - 127.0.0.1:8377 - not responding</td><td>Status pill, amber dot</td><td>Running mode is Local and the hub does not answer</td></tr>
+    <tr><td class="str">LAN - 192.168.1.24:8377 - not responding</td><td>Status pill, amber dot</td><td>Running mode is LAN and the hub does not answer</td></tr>
+    <tr><td class="str">Remote - signalbox-hub.fly.dev - uplink down</td><td>Status pill, amber dot</td><td>Running mode is Remote, the local hub answers and the uplink does not</td></tr>
+    <tr><td class="str">Local - 127.0.0.1:8377 - starting</td><td>Status pill, grey dot</td><td>The hub is not answering yet, on launch or after Confirm</td></tr>
+    <tr><td class="str">The hub runs on this machine and only this machine can reach it.</td><td>Hub tab, mode caption</td><td>Local is selected</td></tr>
+    <tr><td class="str">The hub runs on this machine and is open on your local network so your phone can connect to it.</td><td>Hub tab, mode caption</td><td>LAN is selected</td></tr>
+    <tr><td class="str">The hub on your machine forwards to a remote hub. A remote hub can accept forwards from many machines at once.</td><td>Hub tab, mode caption</td><td>Remote is selected</td></tr>
+    <tr><td class="str">Pair a device...</td><td>Hub tab, LAN control</td><td>LAN is selected; disabled while the LAN selection is still pending</td></tr>
+    <tr><td class="str">Confirm LAN first. Pairing needs the hub already running in LAN mode.</td><td>Tooltip on a disabled Pair a device...</td><td>On hover, while a change to LAN is pending</td></tr>
+    <tr><td class="str">Remote hub URL</td><td>Hub tab, Remote field label</td><td>Remote is selected</td></tr>
+    <tr><td class="str">Token</td><td>Hub tab, Remote field label</td><td>Remote is selected</td></tr>
+    <tr><td class="str">Test</td><td>Hub tab, Remote control</td><td>Remote is selected</td></tr>
+    <tr><td class="str">Testing the address.</td><td>Hub tab, under the fields</td><td>While a test is in flight</td></tr>
+    <tr><td class="str">Reached the hub. It is running signalbox 0.9.2.</td><td>Hub tab, green</td><td>The test got a healthy, authenticated answer</td></tr>
+    <tr><td class="str">No answer from that address.</td><td>Hub tab, amber</td><td>The test got no answer, or an answer that was not a signalbox hub</td></tr>
+    <tr><td class="str">The hub rejected the token.</td><td>Hub tab, amber</td><td>The test reached a hub but the token failed</td></tr>
+    <tr><td class="str">Confirm</td><td>Hub tab, beside the mode popup, primary</td><td>A mode change is pending; disabled for Remote until a test passes</td></tr>
+    <tr><td class="str">Cancel</td><td>Hub tab, beside the mode popup</td><td>A mode change is pending</td></tr>
+    <tr><td class="str">Confirming restarts the hub.</td><td>Hub tab, under the mode row</td><td>A mode change is pending</td></tr>
+    <tr><td class="str">Test the address before confirming.</td><td>Hub tab, under the mode row</td><td>Pending change to Remote, no passing test yet</td></tr>
+    <tr><td class="str">Hub healthy</td><td>Footer light, green dot</td><td>The hub answers; in Remote, the uplink is also up</td></tr>
+    <tr><td class="str">Hub warning</td><td>Footer light, amber dot</td><td>The hub does not answer, or the uplink is down in Remote</td></tr>
+    <tr><td class="str">Hub starting</td><td>Footer light, grey dot</td><td>The hub is not answering yet, on launch or after Confirm</td></tr>
+    <tr><td class="str">Hub status. Click for details.</td><td>Tooltip on the footer light</td><td>On hover</td></tr>
+    <tr><td class="str">Mode / Address / Hub version / Uplink</td><td>Popover row labels</td><td>Uplink only in Remote</td></tr>
+    <tr><td class="str">not answering</td><td>Popover, Address value, amber</td><td>The hub does not answer</td></tr>
+    <tr><td class="str">connected</td><td>Popover, Uplink value</td><td>Remote, uplink up</td></tr>
+    <tr><td class="str">down, 12 events spooled</td><td>Popover, Uplink value, amber</td><td>Remote, uplink down (count from the spool)</td></tr>
+    <tr><td class="str">Open Settings / Open log</td><td>Popover links</td><td>Always</td></tr>
+    <tr><td class="str">The hub writes everything it does here. Click the path to reveal it in Finder.</td><td>Logs tab caption</td><td>Always</td></tr>
+    <tr><td class="str">Recent events</td><td>Logs tab, tail heading</td><td>Always; the tail holds the last 500 lines</td></tr>
+    <tr><td class="str">Copy path</td><td>Logs tab</td><td>Always</td></tr>
+    <tr><td class="str">Copied the path.</td><td>Logs tab, under the path</td><td>For a few seconds after Copy path</td></tr>
+    <tr><td class="str">Revealed hub.log in Finder.</td><td>Logs tab, under the path</td><td>For a few seconds after clicking the path</td></tr>
+  </table>
 </div>
 </div>
+
+<script>
+// Spec-only interactivity. The real window shows one (running mode, selected
+// mode, health) combination at a time; every status string renders GET /healthz
+// alone, and a mode change is pending until Confirm.
+var state = { running: "local", sel: "local", health: "healthy", testPassed: false, popOpen: false };
+
+var GREEN = "#32D74B", AMBER = "#FF9F0A", GREY = "#5a5a60", STARTING = "#98989D";
+var VERSION = "0.9.2";
+var ADDR = { local: "127.0.0.1:8377", lan: "192.168.1.24:8377", remote: "signalbox-hub.fly.dev" };
+var NAME = { local: "Local", lan: "LAN", remote: "Remote" };
+var CAPTION = {
+  local: "The hub runs on this machine and only this machine can reach it.",
+  lan: "The hub runs on this machine and is open on your local network so your phone can connect to it.",
+  remote: "The hub on your machine forwards to a remote hub. A remote hub can accept forwards from many machines at once."
+};
+
+function starting() { return state.health === "starting"; }
+function degraded() { return state.health === "degraded"; }
+function pending() { return state.sel !== state.running; }
+
+/* Topology sketches below the caption, one grey. The small boxes are agents
+   and they sit inside a labelled machine frame - the nesting alone did not
+   read at this size, so both parts are named. The filled dot is the board of
+   record: in Remote it moves to the cloud and every machine's dot goes hollow.
+   Remote draws two machines side by side because a remote hub takes forwards
+   from many machines. Dashed links cross a network. */
+function topo(mode) {
+  var S = 'stroke="currentColor" stroke-width="1.05" fill="none" stroke-linecap="round"';
+  /* y is the top of the text box, matching AppKit's draw(at:) origin. */
+  function label(t, x, y) {
+    return '<text x="' + x + '" y="' + (y + 8) + '" font-size="9" fill="#A0A0A6">' + t + '</text>';
+  }
+  /* y is the top of the "agents" caption; the frame sits below it. */
+  function machine(x, y, filled) {
+    var top = y + 12, hx = x + 32, hy = top + 11.5;
+    return label("agents", x + 4, y) +
+      '<g ' + S + '>' +
+      '<rect x="' + x + '" y="' + top + '" width="44" height="23" rx="3"/>' +
+      '<rect x="' + (x + 5) + '" y="' + (top + 3.5) + '" width="9" height="6.5" rx="1.5"/>' +
+      '<rect x="' + (x + 5) + '" y="' + (top + 13) + '" width="9" height="6.5" rx="1.5"/>' +
+      '<path d="M' + (x + 14) + ' ' + (top + 6.75) + ' L' + (hx - 5.5) + ' ' + hy +
+      ' M' + (x + 14) + ' ' + (top + 16.25) + ' L' + (hx - 5.5) + ' ' + hy + '"/>' +
+      '<circle cx="' + hx + '" cy="' + hy + '" r="3.4"' +
+      (filled ? ' fill="currentColor" stroke="none"' : '') + '/></g>' +
+      label("machine", x + 4, y + 37);
+  }
+  function phone(x, y, h) {
+    return '<g ' + S + '><rect x="' + x + '" y="' + y + '" width="9" height="' + h + '" rx="2"/>' +
+      '<path d="M' + (x + 2.6) + ' ' + (y + h - 2.6) + ' h3.8"/></g>';
+  }
+  function cloud(cx, cy) {
+    return '<g fill="currentColor" stroke="none" opacity=".28">' +
+      '<circle cx="' + (cx - 8) + '" cy="' + (cy + 1) + '" r="4.6"/>' +
+      '<circle cx="' + cx + '" cy="' + (cy - 2) + '" r="6"/>' +
+      '<circle cx="' + (cx + 8) + '" cy="' + (cy + 1) + '" r="4.2"/>' +
+      '<rect x="' + (cx - 12.5) + '" y="' + cy + '" width="25" height="5.5" rx="2.7"/></g>' +
+      '<circle cx="' + cx + '" cy="' + (cy + 1) + '" r="2.7" fill="currentColor"/>';
+  }
+  function dash(d) { return '<path d="' + d + '" ' + S + ' stroke-dasharray="2.4 2.4"/>'; }
+  /* Each mode is sized to what it draws, so the labels can stay at a readable
+     9px rather than the canvas being padded out to the widest sketch. */
+  var w = mode === "remote" ? 116 : mode === "lan" ? 80 : 60;
+  var h = mode === "remote" ? 79 : 48;
+  var s = '<svg class="topo" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h +
+          '" aria-hidden="true">';
+  if (mode === "local") {
+    s += machine(1, 0, true);
+  } else if (mode === "lan") {
+    s += machine(1, 0, true) + dash("M47 23.5 H64") + phone(64, 13.5, 20);
+  } else {
+    s += machine(1, 30, false) + machine(68, 30, false) +
+         cloud(57, 14) +
+         dash("M23 42 L48 20") + dash("M90 42 L66 20") +
+         dash("M69.5 14 L82 14") + phone(82, 4, 20);
+  }
+  return s + "</svg>";
+}
+
+/* The pill states the RUNNING mode and where the hub is - it does not follow a
+   pending selection. A suffix appears only when the hub is not doing what the
+   mode says it should. */
+function pillParts() {
+  if (starting()) return { dot: STARTING, suffix: " - starting", warn: false };
+  if (degraded()) {
+    return state.running === "remote"
+      ? { dot: AMBER, suffix: " - uplink down", warn: true }
+      : { dot: AMBER, suffix: " - not responding", warn: true };
+  }
+  return { dot: GREEN, suffix: "", warn: false };
+}
+
+function renderPill() {
+  var p = pillParts();
+  var el = document.getElementById("pill");
+  el.className = "pill" + (p.warn ? " warn" : "");
+  el.innerHTML = '<span class="pdot" style="background:' + p.dot + '"></span>' +
+    NAME[state.running] + ' - <span class="addr">' + ADDR[state.running] + '</span>' +
+    (p.suffix ? '<span class="suffix">' + p.suffix + '</span>' : "");
+}
+
+function renderMode() {
+  document.getElementById("modebtnlabel").textContent = NAME[state.sel];
+  document.getElementById("modecap").textContent = CAPTION[state.sel];
+  document.getElementById("topo").innerHTML = topo(state.sel);
+  var menu = document.getElementById("modemenu").children;
+  for (var i = 0; i < menu.length; i++) {
+    menu[i].className = menu[i].dataset.m === state.sel ? "sel" : "";
+  }
+
+  var ctl = document.getElementById("modectl");
+  if (state.sel === "local") {
+    ctl.innerHTML = "";
+  } else if (state.sel === "lan") {
+    // Pairing hands over the running hub's LAN address and bearer, so it is
+    // dead until LAN is actually running - a selection is not a hub.
+    ctl.innerHTML = '<button class="btn small"' +
+      (pending()
+        ? ' disabled title="Confirm LAN first. Pairing needs the hub already running in LAN mode."'
+        : "") +
+      '>Pair a device...</button>';
+  } else {
+    ctl.innerHTML =
+      '<div class="frow"><span class="lbl" style="font-size:12px;width:104px">Remote hub URL:</span>' +
+      '<input class="inp" id="url" value="https://signalbox-hub.fly.dev"></div>' +
+      '<div class="frow"><span class="lbl" style="font-size:12px;width:104px">Token:</span>' +
+      '<input class="inp" id="token" type="password" value="p3remote-token">' +
+      '<button class="btn small" id="testbtn">Test</button></div>' +
+      '<div class="testline" id="testline"></div>';
+    document.getElementById("testbtn").onclick = function () {
+      var line = document.getElementById("testline");
+      line.className = "testline";
+      line.textContent = "Testing the address.";
+      setTimeout(function () {
+        if (degraded()) {
+          line.className = "testline bad";
+          line.textContent = "No answer from that address.";
+          state.testPassed = false;
+        } else {
+          line.className = "testline ok";
+          line.textContent = "Reached the hub. It is running signalbox " + VERSION + ".";
+          state.testPassed = true;
+        }
+        renderConfirm();
+      }, 500);
+    };
+  }
+  renderConfirm();
+}
+
+/* A mode change is pending until Confirm. The buttons sit beside the mode
+   popup that caused the change; the hint goes under it, indented to the popup.
+   Confirm writes the settings file and restarts the hub; a pending change to
+   Remote needs a passing test first. */
+function renderConfirm() {
+  var btns = document.getElementById("confirmbtns");
+  var hint = document.getElementById("pendinghint");
+  if (!pending()) { btns.innerHTML = ""; hint.innerHTML = ""; return; }
+  var needTest = state.sel === "remote" && !state.testPassed;
+  btns.innerHTML =
+    '<button class="btn primary" id="confirmbtn"' + (needTest ? " disabled" : "") + '>Confirm</button>' +
+    '<button class="btn" id="cancelbtn">Cancel</button>';
+  hint.innerHTML = '<div class="pendinghint">' +
+    (needTest ? "Test the address before confirming." : "Confirming restarts the hub.") +
+    '</div>';
+  document.getElementById("cancelbtn").onclick = function () {
+    state.sel = state.running; state.testPassed = false; render();
+  };
+  var cb = document.getElementById("confirmbtn");
+  if (!needTest) cb.onclick = function () {
+    state.running = state.sel; state.testPassed = false;
+    state.health = "starting"; syncHealthButtons();
+    render();
+    setTimeout(function () {
+      if (state.health === "starting") { state.health = "healthy"; syncHealthButtons(); render(); }
+    }, 1400);
+  };
+}
+
+/* The footer light: three health states, never a mode name. */
+function lightParts() {
+  if (starting()) return { dot: STARTING, text: "Hub starting", warn: false };
+  if (degraded()) return { dot: AMBER, text: "Hub warning", warn: true };
+  return { dot: GREEN, text: "Hub healthy", warn: false };
+}
+
+function renderLight() {
+  var p = lightParts();
+  var el = document.getElementById("jlight");
+  el.className = "jlight" + (p.warn ? " warn" : "") + (state.popOpen ? " open" : "");
+  el.innerHTML = '<span class="sdot" style="background:' + p.dot + '"></span>' + p.text;
+}
+
+/* The popover is facts, not narrative: a label and a value per row. */
+function renderPop() {
+  var rows = [["Mode", NAME[state.running], false]];
+  var addrWarn = degraded() && state.running !== "remote";
+  rows.push(["Address", addrWarn ? "not answering" : ADDR[state.running], addrWarn]);
+  rows.push(["Hub version", VERSION, false]);
+  if (state.running === "remote") {
+    var v = starting() ? "starting" : degraded() ? "down, 12 events spooled" : "connected";
+    rows.push(["Uplink", v, degraded()]);
+  }
+  var html = "";
+  for (var i = 0; i < rows.length; i++) {
+    html += '<div class="prow' + (rows[i][2] ? " warn" : "") + '">' +
+      '<span class="k">' + rows[i][0] + '</span><span class="v">' + rows[i][1] + '</span></div>';
+  }
+  html += '<div class="plinks"><a id="popset">Open Settings</a><a id="poplog">Open log</a></div>';
+  var pop = document.getElementById("pop");
+  pop.innerHTML = html;
+  pop.className = "pop" + (state.popOpen ? " on" : "");
+  if (!state.popOpen) return;
+  document.getElementById("popset").onclick = function () { closePop(); goTab("hub"); };
+  document.getElementById("poplog").onclick = function () { closePop(); goTab("logs"); };
+}
+
+function closePop() { state.popOpen = false; renderLight(); renderPop(); }
+
+/* Plausible hub.log output for the running mode and health. The timestamp
+   prefix is the one thing the tab asks of the hub, which writes bare lines
+   today. The real tail holds the last 500 lines; the mock shows a screenful. */
+function logLines() {
+  var d = "2026-07-30 09:1";
+  var head = [
+    [d + "4:02", "signalbox hub " + VERSION + " listening on http://127.0.0.1:8377 (state: /Users/dave/.local/state/signalbox, expire: 24h)"],
+    [d + "4:02", "replayed 412 events from events.jsonl (seq 412)"]
+  ];
+  if (state.running === "lan") {
+    head.push([d + "4:02", "LAN listener https://0.0.0.0:8378 (pinned self-signed, fp 9f2c41ab7d0e5a63...)"]);
+    head.push([d + "4:02", "non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN"]);
+  }
+  if (state.running === "remote") {
+    head.push([d + "4:02", "forwarder: upstream https://signalbox-hub.fly.dev, spool /Users/dave/.local/state/signalbox/spool"]);
+    head.push([d + "4:03", "forwarder: machine id mac-7f3a9c, handshake accepted by upstream " + VERSION]);
+  }
+  var body = [
+    [d + "4:03", "GET /healthz 200 0ms"],
+    [d + "5:11", "POST /events 202 session=claude-signalbox type=session.start"],
+    [d + "5:11", "POST /events 202 session=claude-signalbox type=turn.start"],
+    [d + "6:44", "POST /events 202 session=claude-signalbox type=tool.use tool=Bash"],
+    [d + "7:02", "POST /events 202 session=codex-remote-hub type=session.start"],
+    [d + "7:19", "GET /events?since=418 200 (stream opened, 2 clients)"],
+    [d + "8:30", "POST /events 202 session=claude-signalbox type=turn.end"],
+    [d + "8:31", "expiry sweep: 0 sessions expired, 6 live"],
+    [d + "9:05", "GET /healthz 200 0ms"]
+  ];
+  if (state.running === "remote") {
+    body.push([d + "9:06", degraded()
+      ? "forwarder: upstream POST failed (connect ETIMEDOUT), 12 events spooled, retrying in 30s"
+      : "forwarder: flushed 14 events to upstream, spool empty", degraded()]);
+  }
+  if (starting()) {
+    body = [
+      [d + "9:41", "SIGTERM received, closing event log"],
+      [d + "9:41", "hub stopped (pid 40122)"],
+      [d + "9:42", "Signalbox: started hub (pid 40318, port 8377)"],
+      [d + "9:42", "hub not answering yet, waiting for listener", true]
+    ];
+  }
+  if (degraded() && state.running !== "remote") {
+    body.push([d + "9:07", "GET /healthz failed: connection refused on 127.0.0.1:8377", true]);
+  }
+  return head.concat(body).slice(-15);
+}
+
+function renderTail() {
+  var lines = logLines(), html = "";
+  for (var i = 0; i < lines.length; i++) {
+    var warn = lines[i][2] ? ' class="warnline"' : "";
+    html += '<div' + warn + '><span class="ts">' + lines[i][0] + '</span>  ' + esc(lines[i][1]) + "</div>";
+  }
+  document.getElementById("tail").innerHTML = html;
+  tailToBottom();
+}
+
+// A hidden pane has no scroll height, so the newest line has to be brought into
+// view again whenever the Logs tab is actually shown.
+function tailToBottom() {
+  var t = document.getElementById("tail");
+  t.scrollTop = t.scrollHeight;
+}
+
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function toast(msg) {
+  var el = document.getElementById("logtoast");
+  el.textContent = msg;
+  clearTimeout(toast.t);
+  toast.t = setTimeout(function () { el.textContent = ""; }, 2500);
+}
+
+function goTab(name) {
+  var tabs = document.querySelectorAll(".tab");
+  for (var i = 0; i < tabs.length; i++) {
+    if (tabs[i].dataset.t === name) { tabs[i].click(); break; }
+  }
+  document.querySelector(".win").scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function syncHealthButtons() {
+  var hb = document.querySelectorAll(".specstates button");
+  for (var k = 0; k < hb.length; k++) hb[k].classList.toggle("cur", hb[k].dataset.h === state.health);
+}
+
+function render() { renderPill(); renderMode(); renderLight(); renderPop(); renderTail(); }
+
+document.getElementById("modebtn").onclick = function (e) {
+  e.stopPropagation();
+  document.getElementById("modemenu").classList.toggle("on");
+};
+var menuItems = document.querySelectorAll("#modemenu div");
+for (var i = 0; i < menuItems.length; i++) {
+  menuItems[i].onclick = function (e) {
+    e.stopPropagation();
+    // Picking a mode is pending until Confirm - nothing restarts yet.
+    state.sel = this.dataset.m;
+    state.testPassed = false;
+    document.getElementById("modemenu").classList.remove("on");
+    render();
+  };
+}
+
+document.getElementById("jlight").onclick = function (e) {
+  e.stopPropagation();
+  state.popOpen = !state.popOpen;
+  renderLight(); renderPop();
+};
+document.getElementById("pop").onclick = function (e) { e.stopPropagation(); };
+document.body.onclick = function () {
+  document.getElementById("modemenu").classList.remove("on");
+  if (state.popOpen) closePop();
+};
+
+document.getElementById("logpath").onclick = function () { toast("Revealed hub.log in Finder."); };
+document.getElementById("copypath").onclick = function () { toast("Copied the path."); };
+document.getElementById("refreshlog").onclick = function () { renderTail(); };
+
+var hb = document.querySelectorAll(".specstates button");
+for (var j = 0; j < hb.length; j++) {
+  hb[j].onclick = function () {
+    state.health = this.dataset.h;
+    syncHealthButtons();
+    render();
+  };
+}
+
+var tabEls = document.querySelectorAll(".tab");
+for (var n = 0; n < tabEls.length; n++) {
+  tabEls[n].onclick = function () {
+    for (var k = 0; k < tabEls.length; k++) tabEls[k].classList.toggle("cur", tabEls[k] === this);
+    var panes = document.querySelectorAll(".pane");
+    for (var p = 0; p < panes.length; p++) {
+      panes[p].classList.toggle("cur", panes[p].id === "pane-" + this.dataset.t);
+    }
+    document.getElementById("wintitle").textContent = this.dataset.label;
+    if (this.dataset.t === "logs") tailToBottom();
+  };
+}
+
+render();
+</script>
 </body></html>

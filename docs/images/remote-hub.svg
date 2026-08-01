@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 270" width="640" height="270" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" role="img" aria-label="Two machines, each running two agents, forward events to a remote hub which holds all four sessions; a phone connects to the remote hub.">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M2,2 L7,5 L2,8" fill="none" stroke="#A3AECF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <g id="ses" stroke="#6E7781" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="0" y="0" width="16" height="12" rx="2.5" stroke-width="1.2"/>
+      <path d="M4,4.5 L6.5,6 L4,7.5" stroke-width="1.1"/>
+      <line x1="8.5" y1="8" x2="12" y2="8" stroke-width="1.1"/>
+    </g>
+  </defs>
+  <rect x="0" y="0" width="640" height="270" rx="16" fill="#F7F5F3"/>
+
+  <g stroke="#A3AECF" stroke-width="1.6" fill="none" stroke-linecap="round">
+    <line x1="196" y1="112" x2="220" y2="112" marker-end="url(#arr)"/>
+    <line x1="444" y1="112" x2="420" y2="112" marker-end="url(#arr)"/>
+    <line x1="320" y1="142" x2="320" y2="192" marker-end="url(#arr)"/>
+  </g>
+
+  <rect x="60" y="86" width="136" height="52" rx="10" fill="#E9E7E4"/>
+  <use href="#ses" x="74" y="93"/>
+  <use href="#ses" x="74" y="111"/>
+  <g stroke="#1F2328" stroke-width="1.6" fill="none">
+    <rect x="102" y="105" width="18" height="12" rx="2"/>
+    <line x1="99" y1="120" x2="123" y2="120"/>
+  </g>
+  <text x="132" y="117" fill="#1F2328" font-size="14">Machine</text>
+  <text x="128" y="158" fill="#6E7781" font-size="11" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" text-anchor="middle">2 agents</text>
+
+  <rect x="444" y="86" width="136" height="52" rx="10" fill="#E9E7E4"/>
+  <use href="#ses" x="458" y="93"/>
+  <use href="#ses" x="458" y="111"/>
+  <g stroke="#1F2328" stroke-width="1.6" fill="none">
+    <rect x="486" y="105" width="18" height="12" rx="2"/>
+    <line x1="483" y1="120" x2="507" y2="120"/>
+  </g>
+  <text x="516" y="117" fill="#1F2328" font-size="14">Machine</text>
+  <text x="512" y="158" fill="#6E7781" font-size="11" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" text-anchor="middle">2 agents</text>
+
+  <rect x="224" y="86" width="192" height="52" rx="10" fill="#E9E7E4"/>
+  <use href="#ses" x="240" y="93"/>
+  <use href="#ses" x="240" y="111"/>
+  <use href="#ses" x="260" y="93"/>
+  <use href="#ses" x="260" y="111"/>
+  <g stroke="#1F2328" stroke-width="1.6" fill="none" stroke-linejoin="round">
+    <path d="M290,117 a5,5 0 0 1 0,-10 a7,7 0 0 1 13.5,-2 a5.5,5.5 0 0 1 -0.5,12 z"/>
+  </g>
+  <text x="316" y="117" fill="#1F2328" font-size="14" font-weight="600">Remote hub</text>
+  <text x="332" y="165" fill="#6E7781" font-size="11" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">4 agents</text>
+
+  <rect x="270" y="196" width="100" height="44" rx="10" fill="#E9E7E4"/>
+  <g stroke="#1F2328" stroke-width="1.6" fill="none">
+    <rect x="286" y="207" width="13" height="22" rx="3"/>
+    <line x1="290" y1="225" x2="295" y2="225"/>
+  </g>
+  <text x="308" y="223" fill="#1F2328" font-size="14">Phone</text>
+</svg>

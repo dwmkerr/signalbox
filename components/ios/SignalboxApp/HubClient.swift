@@ -5,10 +5,12 @@ import Security
 
 // CertPinner verifies a hub's self-signed TLS cert by pinning the SHA-256 of its
 // DER encoding - the fingerprint the pairing QR carried (#25). A self-signed cert
-// has no CA to chain to, so this pin IS the trust: match it or refuse. Without a
-// pin set, a server-trust challenge is refused outright, so the app never falls
-// back to unpinned TLS. Plain http (loopback dev, or a hand-entered hub) raises
-// no such challenge, so the delegate simply never fires for it.
+// has no CA to chain to, so this pin IS the trust: match it or refuse - the app
+// never falls back from a configured pin to unpinned TLS. Without a pin the
+// challenge goes to system CA validation, which trusts remote platform TLS but
+// still rejects a self-signed LAN MITM. Plain http (loopback dev, or a
+// hand-entered hub) raises no such challenge, so the delegate simply never
+// fires for it.
 //
 // The fingerprint is read on URLSession's delegate queue, not the main actor, so
 // it is guarded by a lock and updated whenever the active hub changes.
@@ -36,12 +38,14 @@ final class CertPinner: NSObject, URLSessionDelegate {
             completionHandler(.performDefaultHandling, nil)
             return
         }
-        guard let pin = fingerprint, !pin.isEmpty,
-              let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
+        guard let pin = fingerprint, !pin.isEmpty else {
+            // System validation is the trust boundary when no explicit pin was
+            // supplied, so an untrusted self-signed certificate still fails.
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
               let leaf = chain.first else {
-            // A TLS server with no pin configured is exactly the MITM we refuse
-            // to trust: cancel rather than fall through to default validation,
-            // which would reject a self-signed cert anyway but less explicitly.
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
@@ -89,9 +93,8 @@ struct HubConfig: Equatable {
     // reply on the hub and can forge events (see components/specs/ios.html).
     // Nil when the hub has no auth, which sends no Authorization header.
     var token: String?
-    // The SHA-256 pin for an https hub (#25); nil for a plain-http hub, which
-    // needs no pinning. Set from the pairing QR and carried into the URLSession's
-    // CertPinner so every request to this hub verifies the cert.
+    // The SHA-256 pin for a self-signed https hub (#25). Nil delegates https to
+    // system CA validation and is also used for plain http, which has no TLS.
     var fingerprint: String?
 
     // The name to show in the nav bar. Calling a hub "local" was a lie on a
@@ -127,9 +130,8 @@ final class HubClient: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var lastSeen: Date?
 
-    // Pins the hub's self-signed cert on every request (#25). Its fingerprint
-    // tracks the active hub: set here from config, updated on reconfigure and
-    // pairing, cleared on disconnect.
+    // Enforces a self-signed certificate pin when configured (#25), otherwise
+    // preserving system CA validation. Its fingerprint tracks the active hub.
     private let pinner: CertPinner
     private let urlSession: URLSession
     // A short-timeout session for the one-shot /state probe and the pairing
@@ -187,10 +189,10 @@ final class HubClient: ObservableObject {
     /// as a new hub too: a fresh token is exactly what turns a rejected hub live
     /// again without the url moving, and .rejected otherwise stops retrying.
     ///
-    /// fingerprint is the cert pin for an https hub, nil for plain http. It is
-    /// persisted here (not by the caller) so it always tracks the active url: a
-    /// scan sets it, a hand-entered http hub clears it, and a relaunch reads it
-    /// back alongside the url.
+    /// fingerprint is the cert pin for a self-signed https hub. Nil preserves
+    /// system trust for https and is also used for plain http. It is persisted
+    /// here so it always tracks the active url across scans, manual changes and
+    /// relaunches.
     func reconfigure(url: URL, token: String?, fingerprint: String?) {
         let token = (token?.isEmpty ?? true) ? nil : token
         let fingerprint = (fingerprint?.isEmpty ?? true) ? nil : fingerprint
@@ -224,10 +226,8 @@ final class HubClient: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["code": code])
 
-        // The redeem rides the hub's own https, so it must be pinned to the new
-        // hub's fingerprint - which the app has not adopted yet. Use a throwaway
-        // session pinned to exactly that fingerprint rather than the live one,
-        // whose pin still belongs to the previous hub (or is nil).
+        // The live session may still carry the previous hub's pin, so redeem
+        // through a throwaway session configured with the new hub's trust mode.
         // Short timeout: a reachable hub redeems instantly, so a phone that
         // cannot see the hub fails fast into the pairing error rather than
         // leaving the "Pairing..." spinner up for a minute.
@@ -249,8 +249,12 @@ final class HubClient: ObservableObject {
             // A transport failure here is almost always the phone and the
             // computer being on different networks, so name the host. A pin
             // mismatch also lands here (the TLS handshake is cancelled), which is
-            // the same "could not reach it safely" story to a person.
-            throw PairError.unreachable(url.host ?? "the hub")
+            // the same "could not reach it safely" story to a person. A pin
+            // mismatch is a LAN case, so the LAN advice is still the right advice.
+            throw PairError.unreachable(
+                host: url.host ?? "the hub",
+                target: .of(url: url, fingerprint: fingerprint)
+            )
         }
         guard let http = response as? HTTPURLResponse else { throw PairError.rejected }
         // Any 4xx means the code is bad, expired or already spent - all of

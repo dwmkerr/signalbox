@@ -307,6 +307,56 @@ events are delayed rather than lost, and the hook path never blocks a calling ag
 read while offline. This is a documented contract. Local-first stays available to anyone who does not
 opt in.</p>
 
+<h2 id="remote-hub">Remote hub: self-deployed <span class="chip built">built</span></h2>
+<p>This is the same binary on a routable host: run <code>signalbox hub --remote</code> and point every
+client at it. It is self-deploy only. Signalbox does not run a hosted multi-tenant service.</p>
+
+<h3>One switch, four inseparable effects</h3>
+<p><code>--remote</code>, or <code>SIGNALBOX_REMOTE=1</code> / <code>true</code>, is one security mode.
+It does all four of these together:</p>
+<ul>
+  <li>The default bind becomes <code>0.0.0.0</code>.</li>
+  <li><code>SIGNALBOX_TOKEN</code> must come from the environment. A missing or empty token is fatal at boot;
+  the hub never generates one on an ephemeral container filesystem.</li>
+  <li>The self-signed TLS listener is disabled. The deployment platform terminates TLS.</li>
+  <li>The loopback auth exemption disappears. Every request needs the bearer except the two routes
+  named below.</li>
+</ul>
+
+<h3>Peer addresses prove nothing</h3>
+<p>There is no trust-proxy knob. Behind a proxy the peer address belongs to the proxy, not the client,
+so it cannot establish trust. Forwarded headers do not fix that unless every hop is trusted, because a
+client can forge them. Remote mode instead stops believing peer addresses at all.</p>
+<p>Only <code>GET /healthz</code> and <code>POST /pair</code> remain unauthenticated. The first exists
+for platform health checks. The second accepts a one-time pairing code, and that code is the
+credential.</p>
+
+<h3>Deployment shape</h3>
+<p>The Dockerfile, its per-Dockerfile ignore file, and the Fly template live under
+<code>components/deploy/</code>. The repository root is the Docker build context because the image compiles
+the CLI source, but the Dockerfile copies only the CLI files needed to build. The image runs remote mode,
+keeps state on a mounted <code>/data</code> volume, and is deployed as one instance because the hub is the
+single source of truth. Image publishing is a standalone workflow that a release calls directly and a
+human can dispatch with a version.</p>
+
+<h3>Pair against the public URL</h3>
+<p>Minting a pairing code needs the bearer from <code>SIGNALBOX_TOKEN</code>. The QR carries the remote
+hub's HTTPS URL with no certificate pin, and the phone validates its certificate against system CAs.
+Redeeming the code at <code>POST /pair</code> remains unauthenticated because the code itself authorizes
+that one exchange.</p>
+
+<h3>Machine identity</h3>
+<p>Events carry <code>machine</code>, a stable <code>&lt;hostname&gt;-&lt;6 hex&gt;</code> identifier persisted
+per machine, while <code>host</code> remains the display name. The distinction matters because two
+laptops on one remote hub can share a hostname. The stable value is groundwork for unambiguous command
+routing, but routing still keys on <code>host</code> today. Command routing by <code>machine</code> is a
+separate, later piece of work.</p>
+
+<h3>Direct clients remain supported</h3>
+<p><a href="#local-proxy">The local forwarder</a> now closes the credential gap without adding a
+second source of state. Direct access remains the simple option for a machine that does not run a
+forwarder: its adapters point at the remote hub and carry the token themselves.</p>
+
 <h2 id="risk">Security tiers <span class="chip proposed">proposed</span></h2>
 
 <div class="banner">
@@ -329,7 +379,7 @@ opt in.</p>
       tailnet - it needs an HTTPS origin and outbound reach to the push service, not inbound.</td></tr>
   <tr><td><b>Public + token</b><br><span style="color:#6E6E73">Fly.io, a VPS</span></td>
       <td>One shared bearer token. TLS from the platform.</td>
-      <td>Small. The work described above.</td></tr>
+      <td>Small. Built; see <a href="#remote-hub">the remote hub tier above</a>.</td></tr>
   <tr><td><b>Public + identity</b><br><span style="color:#6E6E73">GitHub device flow</span></td>
       <td>A GitHub identity checked against an allowlist. No shared secret on the hub.</td>
       <td>Real, and additive. See below.</td></tr>
@@ -404,11 +454,13 @@ distributed system for a list of terminal sessions.</p>
 <p>If shared state ever needs to survive a partition, the reducer becomes a real CRDT first, as its own
 piece of work.</p>
 
-<h2>Accepted: a local proxy <span class="chip proposed">proposed</span></h2>
-<p>The safe version of the same instinct. A local <code>signalbox hub --upstream &lt;url&gt;</code>
-keeps <b>no state of its own</b>: it forwards POSTs upstream with the token attached and relays the
-upstream stream back down. Every other client on the machine keeps talking to loopback, unchanged and
-unaware.</p>
+<h2 id="local-proxy">The local forwarder <span class="chip built">built</span></h2>
+<p>Run <code>signalbox hub --upstream &lt;url&gt;</code> to put a forwarder on loopback. The upstream resolves
+from <code>--upstream</code>, then <code>SIGNALBOX_UPSTREAM</code>, then persisted
+<code>hub.upstream</code>. That persisted key is what turns the app-spawned
+<code>signalbox hub --port &lt;port&gt;</code> into a forwarder even though the app passes no upstream flag.
+Local clients stay unauthenticated and unaware; the forwarder alone attaches the upstream bearer,
+resolved from <code>SIGNALBOX_TOKEN</code> and then persisted <code>hub.token</code>.</p>
 
 <div class="diagram">
   <div class="dcap">Optional. The truth stays remote; nothing is replicated.</div>
@@ -445,9 +497,41 @@ unaware.</p>
   <li><b>Nothing else on the machine changes.</b> No client edits, no migration.</li>
   <li><b>No conflicts are possible</b>, because the proxy never originates state.</li>
 </ul>
-<p>It may hold a read-through cache of upstream state so surfaces still render when the uplink drops.
-A cache fed by the upstream stream is a materialised view that originates nothing, so there is nothing
-to reconcile. Writes go up, come back down, and apply.</p>
+
+<h3>Writes are store-and-forward</h3>
+<p><code>POST /events</code> appends the event to <code>forward-spool.jsonl</code> in the state directory,
+returns <code>202 {"spooled": true}</code> immediately, and kicks an asynchronous drain. The hook path
+has a 200 ms POST timeout. Awaiting a WAN round trip would make the hook spool the same event that the
+forwarder is already delivering, so the drain is the only sender.</p>
+<p>The spool holds at most 10,000 events or 16 MiB, whichever comes first. It drops the oldest events
+at the bound and drains oldest-first when the uplink recovers, so a wifi drop delays events rather than
+losing them under normal pressure. Spooled events carry no <code>seq</code>; the upstream assigns the
+only sequence when it ingests them.</p>
+
+<h3>One source of state</h3>
+<p>The read cache is an in-memory <code>Store</code> fed only by the upstream downlink stream. The local
+<code>GET /state</code> response comes from that cache, so surfaces retain their last view through an
+uplink drop. The local write path never applies an event to it: the event goes up, comes back with its
+upstream <code>seq</code>, and applies exactly once. A downlink echo therefore cannot loop. The
+forwarder originates nothing, so there is no conflict to reconcile and nothing to dedupe by event id.
+That is precisely what separates it from <b>Rejected: two hubs replicating</b> above, where both sides
+originate state.</p>
+
+<h3>Commands stay live</h3>
+<p><code>POST /command</code> goes upstream synchronously and is never spooled because a stale command
+has no value. <code>command</code> frames come back down and are re-broadcast on the local stream. That
+is how the menu bar app's executor still receives a jump requested from a phone.</p>
+
+<h3>The uplink is visible</h3>
+<p><code>GET /healthz</code> reports <code>url</code>, <code>connected</code>, <code>lastSeq</code> and
+<code>spooled</code> under <code>upstream</code>, so a local surface can show whether the link is up.</p>
+
+<h3>Pair with the hub that owns the credential</h3>
+<p>A forwarder returns <code>409</code> from <code>POST /pair/new</code>,
+<code>GET /pair/status</code> and <code>POST /pair</code>, pointing the user to
+<code>signalbox pair --url &lt;upstream&gt;</code>. Pairing trades a code for the hub's own bearer token. A
+forwarder holds neither the pairing slot nor the authority to hand out the upstream credential from an
+unauthenticated local endpoint.</p>
 
 </div>
 </div>

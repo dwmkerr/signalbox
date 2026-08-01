@@ -2,13 +2,11 @@
 // short POST timeout, spool to disk on failure, drain opportunistically on
 // the next invocation.
 
-import {
-  appendFileSync, mkdirSync, openSync, closeSync, unlinkSync, readFileSync,
-  writeFileSync, renameSync, existsSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import type { Event, StateDoc } from "./event";
+import { PermanentError, Spool } from "./spool";
 
 export const DefaultURL = "http://127.0.0.1:8377";
 
@@ -46,64 +44,20 @@ export function logTo(dir: string, message: string): void {
   }
 }
 
-// ---- lock ------------------------------------------------------------------
-
-// Spool access is serialised across concurrent hook invocations with an
-// O_EXCL lockfile (Bun has no flock; the spike verified this pattern intact
-// under 5-way contention). The holder's pid is written inside so a lock
-// whose holder died can be broken instead of wedging every future hook.
-function acquireLock(path: string, blocking: boolean): (() => void) | null {
-  const deadline = Date.now() + (blocking ? 2000 : 0);
-  for (;;) {
-    try {
-      const fd = openSync(path, "wx");
-      writeFileSync(fd, String(process.pid));
-      closeSync(fd);
-      return () => {
-        try {
-          unlinkSync(path);
-        } catch {}
-      };
-    } catch (err: any) {
-      if (err?.code !== "EEXIST") return null;
-      // Stale lock: holder gone → break it and retry immediately.
-      try {
-        const holder = parseInt(readFileSync(path, "utf8"), 10);
-        if (holder > 0) {
-          try {
-            process.kill(holder, 0);
-          } catch (probeErr: any) {
-            if (probeErr?.code === "ESRCH") {
-              unlinkSync(path);
-              continue;
-            }
-          }
-        }
-      } catch {}
-      if (Date.now() >= deadline) return null;
-      Bun.sleepSync(5);
-    }
-  }
-}
-
 // ---- client ----------------------------------------------------------------
 
-// permanentError marks an HTTP 4xx: the hub saw the event and said no, so
-// retrying forever would just wedge the spool.
-class PermanentError extends Error {}
-
 export class Client {
+  private spoolFile: Spool;
+
   constructor(
     private url: string,
     private dir: string
-  ) {}
+  ) {
+    this.spoolFile = new Spool(this.dir, "spool.jsonl", {}, (message) => this.logf(message));
+  }
 
   logf(message: string): void {
     logTo(this.dir, message);
-  }
-
-  private spoolPath(): string {
-    return join(this.dir, "spool.jsonl");
   }
 
   private async post(line: string): Promise<void> {
@@ -121,16 +75,8 @@ export class Client {
     throw new Error(`hub returned ${res.status}`);
   }
 
-  private spool(line: string): void {
-    mkdirSync(this.dir, { recursive: true });
-    // Block on the lock: appends are instant, and losing an event to a
-    // concurrent drain's rewrite would defeat the spool's purpose.
-    const unlock = acquireLock(this.spoolPath() + ".lock", true);
-    try {
-      appendFileSync(this.spoolPath(), line + "\n");
-    } finally {
-      unlock?.();
-    }
+  private spool(line: string): Promise<void> {
+    return this.spoolFile.append(line);
   }
 
   // deliver drains the spool then posts e. A thrown error means the hub did
@@ -146,13 +92,13 @@ export class Client {
     if (drainErr) {
       // The hub just refused a spooled event; a fresh POST would only burn
       // another timeout.
-      this.spool(line);
+      await this.spool(line);
       throw new Error(`hub unreachable, event spooled: ${drainErr}`);
     }
     try {
       await this.post(line);
     } catch (err) {
-      this.spool(line);
+      await this.spool(line);
       throw new Error(`post failed, event spooled: ${err}`);
     }
   }
@@ -162,63 +108,10 @@ export class Client {
   // stopped it (remainder stays spooled). 4xx-rejected events are dropped so
   // a poisoned line cannot wedge the spool.
   async drain(): Promise<number> {
-    const spoolPath = this.spoolPath();
-    const unlock = acquireLock(spoolPath + ".lock", false);
-    // Another invocation is already draining; ours is not needed.
-    if (!unlock) return 0;
-    try {
-      if (!existsSync(spoolPath)) return 0;
-      const lines = readFileSync(spoolPath, "utf8")
-        .split("\n")
-        .map((l) => l.trim())
-        .filter(Boolean);
-      if (lines.length === 0) {
-        try {
-          unlinkSync(spoolPath);
-        } catch {}
-        return 0;
-      }
-
-      const deadline = Date.now() + drainBudgetMs;
-      const kept: string[] = [];
-      let sent = 0;
-      let attempts = 0;
-      let stopErr: unknown = null;
-      for (const line of lines) {
-        if (stopErr || attempts >= maxDrainEvents || Date.now() > deadline) {
-          kept.push(line);
-          continue;
-        }
-        attempts++;
-        try {
-          await this.post(line);
-          sent++;
-        } catch (err) {
-          if (err instanceof PermanentError) {
-            this.logf(`drain: dropping event rejected by hub: ${err.message}`);
-            continue;
-          }
-          stopErr = err;
-          kept.push(line);
-        }
-      }
-
-      if (kept.length === 0) {
-        try {
-          unlinkSync(spoolPath);
-        } catch {}
-        if (stopErr) throw stopErr;
-        return sent;
-      }
-      // Rewrite via rename so a crash mid-drain can never lose the remainder.
-      const tmp = spoolPath + ".tmp";
-      writeFileSync(tmp, kept.join("\n") + "\n");
-      renameSync(tmp, spoolPath);
-      if (stopErr) throw stopErr;
-      return sent;
-    } finally {
-      unlock();
-    }
+    return this.spoolFile.drain((line) => this.post(line), {
+      maxEvents: maxDrainEvents,
+      budgetMs: drainBudgetMs,
+    });
   }
 }
 

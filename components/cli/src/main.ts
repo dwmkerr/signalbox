@@ -8,6 +8,9 @@ import * as ev from "./event";
 import type { Event, Origin, Proc } from "./event";
 import { Client, fetchState, hubURL, stateDir, logTo, DefaultURL } from "./client";
 import { Hub, listen, validateBindConfig, isLoopbackAddress } from "./hub";
+import { Forwarder } from "./forwarder";
+import { versionString } from "./build";
+import { hubLog } from "./log";
 import { ensureCert, type HubTLS } from "./tls";
 import * as tmux from "./tmux";
 import { jump } from "./jump";
@@ -18,7 +21,7 @@ import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle
 import { mapCodexHook, codexReply, codexSessionName, type CodexHook } from "./codex";
 import {
   loadSettings, saveSettings, settingsPath, normalizeBindInput, lanHint,
-  shouldGenerateToken, generateToken,
+  normalizeUpstreamInput, shouldGenerateToken, generateToken,
 } from "./config";
 import { runSetup } from "./setup";
 import {
@@ -31,12 +34,13 @@ import {
 // too (see .github/workflows) - and release-please only watches components/cli,
 // so an app/iOS-only release is cut with a `Release-As:` commit under this path.
 const version = "0.1.5"; // x-release-please-version
+const displayVersion = versionString(version);
 
 // The short help: what a person types. Plumbing (hooks, tmux glue, drain)
 // and env vars live in `signalbox help` - the first screen a new user sees
 // should fit in one glance.
 function shortUsage(): string {
-  return `signalbox ${version} - one board for everything you run
+  return `signalbox ${displayVersion} - one board for everything you run
 
 usage: signalbox <command> [flags]
 
@@ -52,7 +56,7 @@ usage: signalbox <command> [flags]
 }
 
 function usage(): string {
-  return `signalbox ${version} - one board for everything you run
+  return `signalbox ${displayVersion} - one board for everything you run
 
 usage: signalbox <command> [flags]
 
@@ -62,22 +66,32 @@ usage: signalbox <command> [flags]
                --status shows the checklist without the interactive picker
   hub          run the hub in the foreground [--port 8377] [--bind 127.0.0.1]
                (the menu bar app runs one for you; use this headless or in dev)
+               --upstream <url> runs a forwarder instead: local clients keep
+               talking to loopback with no token, writes go up with the bearer
+               (spooled and replayed across drops), the board is a read cache
                --bind wide (e.g. 0.0.0.0) needs SIGNALBOX_TOKEN; non-loopback
                clients must then send Authorization: Bearer <token>
+               --remote (or SIGNALBOX_REMOTE=1): container/PaaS mode - plain
+               http behind platform TLS, SIGNALBOX_TOKEN required, EVERY
+               request authenticated except GET /healthz and POST /pair
   pair         show a QR a phone scans to pair: it carries this hub's LAN URL
                and a one-time code the phone trades for the token [--host <ip>]
                (run on the hub machine; needs --bind wide + SIGNALBOX_TOKEN)
+               --url <https://hub> pairs against a remote hub instead: mints
+               there with SIGNALBOX_TOKEN, QR carries that URL (no pin)
   config       persist how the hub binds so it needs no flags to let other
                devices connect:
                config get                       show the effective hub config
                config set hub.bind <loopback|any|IP>  (loopback = this Mac only;
                                                 any = every interface, incl. VPN)
                config set hub.token <value>     ("" or --generate mints one)
+               config set hub.upstream <url|"">   forward to a remote hub (empty clears)
   state        show the board [--json] [--all] [--tag T] [--exclude-tag T]
   jump <key>   jump to a session's origin (tmux pane or URL) and mark it seen
   pick         pick a waiting session interactively and jump to it
   fire         fire an event: --agent A --event E [--reason R] [--title T]
                [--prompt P] [--reply R] [--session-key K] [--origin-url U]
+               [--tag T] (repeatable)
                [--pid P [--pid-name N]] (pid = the agent process, for the
                hub's liveness sweep; name resolved from the pid when omitted)
 
@@ -109,6 +123,8 @@ env: SIGNALBOX_URL (default ${DefaultURL})
      SIGNALBOX_EXPIRE (hub: end sessions with no agent event for this long, default 24h)
      SIGNALBOX_BIND (hub: bind address, default 127.0.0.1; --bind wins)
      SIGNALBOX_TOKEN (bearer token; required to bind non-loopback, sent by clients)
+     SIGNALBOX_UPSTREAM (hub: forward to this remote hub instead of owning state; --upstream wins)
+     SIGNALBOX_REMOTE (hub: 1/true = remote mode, same as --remote)
 `;
 }
 
@@ -144,6 +160,19 @@ function parseFlags(args: string[], boolFlags: string[] = []): { flags: Record<s
     }
   }
   return { flags, rest };
+}
+
+// Repeatable flags need every occurrence, which parseFlags deliberately
+// does not keep; scanning the raw argv is cheaper than teaching it a
+// second return shape used by exactly one flag.
+function collectFlag(args: string[], name: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== `--${name}`) continue;
+    const value = (args[++i] ?? "").trim();
+    if (value && !out.includes(value)) out.push(value);
+  }
+  return out;
 }
 
 // ---- fire ------------------------------------------------------------------
@@ -194,6 +223,7 @@ async function buildEvent(opts: {
     id: crypto.randomUUID(),
     ts: ev.nowTS(),
     host: ev.shortHostname(),
+    machine: ev.machineID(),
     agent: opts.agent,
     event: opts.eventType,
     session_key: sessionKey,
@@ -237,7 +267,14 @@ async function runFire(args: string[]): Promise<void> {
   const agent = flags["agent"] ?? "";
   const eventType = flags["event"] ?? "";
   if (!agent || !ev.validType(eventType)) {
+    // A bad flag is a caller bug, and dropping the event with no signal hides
+    // it forever - but fire is also called from agent adapters and user hooks,
+    // where a non-zero exit surfaces as warnings (or kills set -e glue). So:
+    // loud on stderr, still exit 0.
     logTo(stateDir(), `fire: --agent and a valid --event are required (agent="${agent}" event="${eventType}")`);
+    console.error(
+      `signalbox: fire needs --agent and a valid --event (got agent="${agent}", event="${eventType}"); valid events: attention, error, done, busy, ended, seen, hide, show, pin, unpin, label, tag, untag`
+    );
     return;
   }
   let proc: Proc | null = null;
@@ -245,19 +282,23 @@ async function runFire(args: string[]): Promise<void> {
   if (pid > 0) {
     proc = flags["pid-name"] ? { pid, name: flags["pid-name"] } : captureProc(pid);
   }
-  await fireEvent(
-    await buildEvent({
-      agent,
-      eventType,
-      reason: flags["reason"],
-      title: flags["title"],
-      prompt: flags["prompt"] ?? flags["detail"],
-      reply: flags["reply"],
-      sessionKey: flags["session-key"],
-      originURL: flags["origin-url"],
-      proc,
-    })
-  );
+  const built = await buildEvent({
+    agent,
+    eventType,
+    reason: flags["reason"],
+    title: flags["title"],
+    prompt: flags["prompt"] ?? flags["detail"],
+    reply: flags["reply"],
+    sessionKey: flags["session-key"],
+    originURL: flags["origin-url"],
+    proc,
+  });
+  await fireEvent(built);
+  const tags = collectFlag(args, "tag");
+  // After the session event, never before: a tag for a session the board has
+  // not seen yet would apply to nothing. Both go through the same client, so
+  // a hub that is down spools them in this order and replays them in it.
+  if (tags.length > 0) await deliver(ev.newTags(built.session_key, tags));
 }
 
 // ---- user actions ------------------------------------------------------------
@@ -549,22 +590,75 @@ function expireAgeMs(): number {
 }
 
 function runHub(args: string[]): void {
-  const { flags } = parseFlags(args);
+  const { flags } = parseFlags(args, ["remote"]);
   const port = parseInt(flags["port"] ?? "8377", 10);
   const settings = loadSettings();
+  // Remote mode: this hub runs on a routable host behind a platform proxy that
+  // terminates TLS (Fly, a container). One deliberate switch flips the whole
+  // posture - wide bind, mandatory token, no self-signed TLS, no loopback auth
+  // exemption - so there is no combination of knobs that is half-safe.
+  const remoteEnv = (process.env.SIGNALBOX_REMOTE ?? "").toLowerCase();
+  const remote = flags["remote"] === "true" || remoteEnv === "1" || remoteEnv === "true";
+  // The menu bar app spawns `signalbox hub --port <n>` with no other flags, so
+  // the persisted key is the only way its own hub can become a forwarder.
+  const upstreamInput =
+    flags["upstream"] || process.env.SIGNALBOX_UPSTREAM || settings.hub.upstream || "";
+  const upstreamNorm = normalizeUpstreamInput(upstreamInput);
+  if (upstreamNorm.error) fatal(upstreamNorm.error);
+  const upstream = upstreamNorm.value!;
+  if (upstream) {
+    if (remote) {
+      fatal("--remote and --upstream are different jobs: --remote owns state on a routable host, --upstream forwards to one");
+    }
+    if (Object.prototype.hasOwnProperty.call(flags, "bind") || (process.env.SIGNALBOX_BIND ?? "") !== "") {
+      fatal(`a forwarder serves loopback only: drop --bind (it forwards to ${upstream}, it does not serve the network)`);
+    }
+    // A user who allowed devices in Phase 1 must not get an app-spawned hub
+    // that refuses to boot after choosing an upstream.
+    if (settings.hub.bind && !isLoopbackAddress(settings.hub.bind)) {
+      hubLog(
+        `signalbox: hub.upstream is set, so hub.bind (${settings.hub.bind}) is ignored; a forwarder serves 127.0.0.1 only - silence this with: signalbox config set hub.bind loopback`
+      );
+    }
+    const token = process.env.SIGNALBOX_TOKEN || settings.hub.token || "";
+    if (!token) {
+      hubLog(
+        "signalbox: no upstream token found in SIGNALBOX_TOKEN or hub.token; the upstream will reject requests unless it is unauthenticated"
+      );
+    }
+    const fwdStateDir = stateDir();
+    const fwd = new Forwarder({ upstream, token, stateDir: fwdStateDir, version, port });
+    listen(fwd, port, "127.0.0.1");
+    fwd.start();
+    // PID 1 has no default SIGTERM disposition, so stop the uplink and spool
+    // work before the platform stops the container.
+    process.on("SIGTERM", () => { fwd.close(); process.exit(0); });
+    hubLog(
+      `signalbox hub ${displayVersion} (forwarder) listening on http://127.0.0.1:${port} -> upstream ${upstream}; local clients need no token (state: ${fwdStateDir})`
+    );
+    return;
+  }
   // Bind resolution order: --bind flag, then SIGNALBOX_BIND, then the persisted
   // config.hub.bind, then loopback. The persisted value is what lets the
   // app-spawned hub (which passes no --bind) come up reachable by other devices
   // with zero flags. The same normalizer runs whichever source wins, so a
   // friendly word ("any", "loopback") works identically from the flag, the env,
   // or the file, and the result is always the literal address we bind.
-  const bindInput = flags["bind"] || process.env.SIGNALBOX_BIND || settings.hub.bind || "127.0.0.1";
+  // Remote mode skips the persisted setting and defaults wide: a container has
+  // no settings file, and a loopback default would make it unreachable.
+  const bindInput =
+    flags["bind"] || process.env.SIGNALBOX_BIND || (remote ? "0.0.0.0" : settings.hub.bind || "127.0.0.1");
   const norm = normalizeBindInput(bindInput);
   if (norm.error) fatal(norm.error);
   const bind = norm.value!;
-  // Token: env wins over the persisted config token. The token is the only way
-  // a non-loopback client authenticates.
-  let token = process.env.SIGNALBOX_TOKEN || settings.hub.token || "";
+  let token = remote
+    ? process.env.SIGNALBOX_TOKEN ?? ""
+    : process.env.SIGNALBOX_TOKEN || settings.hub.token || "";
+  // An ephemeral container has no settings file, and silently using a local
+  // token would make the same remote command behave differently across hosts.
+  if (remote && !token) {
+    fatal("remote mode requires SIGNALBOX_TOKEN (set it as a secret in your deploy platform)");
+  }
   // A non-loopback bind with no token would be refused below. Rather than fail,
   // mint a stable token and persist it, so a bind other devices can reach plus a
   // bare `signalbox hub` Just Works and stays reachable across restarts on one
@@ -573,11 +667,11 @@ function runHub(args: string[]): void {
     token = generateToken();
     try {
       saveSettings({ hub: { token } });
-      console.error(`signalbox: generated a hub token and saved it to ${settingsPath()}`);
+      hubLog(`signalbox: generated a hub token and saved it to ${settingsPath()}`);
     } catch (err) {
       // Persisting failed (read-only home?); still boot with the token for this
       // run, but warn that it will not survive a restart.
-      console.error(`signalbox: generated a hub token but could not save it (${err}); it will not persist`);
+      hubLog(`signalbox: generated a hub token but could not save it (${err}); it will not persist`);
     }
   }
   // Backstop: still refuse a non-loopback bind with no token. The auto-generate
@@ -597,11 +691,13 @@ function runHub(args: string[]): void {
   // itself binds every interface, so a DHCP address change needs no restart.
   const tlsPort = port + 1;
   let tls: HubTLS | null = null;
-  if (!isLoopbackAddress(bind)) {
+  // Remote mode never mints a cert: the platform terminates real TLS in front
+  // of the hub, so a self-signed listener would be a second, worse door.
+  if (!remote && !isLoopbackAddress(bind)) {
     const lanIP = bind === "0.0.0.0" || bind === "::" ? (lanIPv4() ?? "") : bind;
     tls = ensureCert(stateDir(), lanIP ? [lanIP] : []);
     if (!tls)
-      console.error(
+      hubLog(
         "signalbox: could not create a TLS cert (is openssl installed?); the LAN listener will be plain http"
       );
   }
@@ -612,7 +708,9 @@ function runHub(args: string[]): void {
     token,
     bind,
     tls?.fingerprint ?? "",
-    tls ? tlsPort : 0
+    tls ? tlsPort : 0,
+    remote,
+    port
   );
   const expire = expireAgeMs();
   hub.startExpiry(10 * 60 * 1000, expire);
@@ -620,21 +718,35 @@ function runHub(args: string[]): void {
   // until the sweep catches it.
   hub.startLiveness(30 * 1000);
 
+  // PID 1 has no default SIGTERM disposition, so close the append fd before the platform stops the container.
+  process.on("SIGTERM", () => { hub.close(); process.exit(0); });
+
+  if (remote) {
+    // One plain-http listener on the wide bind; it covers loopback too, and
+    // even a loopback peer must present the bearer (the proxy may connect
+    // from a loopback-looking sidecar address, so peer address proves nothing).
+    listen(hub, port, bind);
+    hubLog(
+      `signalbox hub ${displayVersion} (remote mode) listening on http://${bind}:${port} - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: ${stateDir()}, expire: ${expire / 3600000}h)`
+    );
+    return;
+  }
+
   // Loopback http always: the menu bar app, CLI, and adapters speak to this and
   // are entirely unchanged by the LAN TLS work.
   listen(hub, port, "127.0.0.1");
-  console.error(
-    `signalbox hub ${version} listening on http://127.0.0.1:${port} (state: ${stateDir()}, expire: ${expire / 3600000}h)`
+  hubLog(
+    `signalbox hub ${displayVersion} listening on http://127.0.0.1:${port} (state: ${stateDir()}, expire: ${expire / 3600000}h)`
   );
   if (!isLoopbackAddress(bind)) {
     if (tls) {
       listen(hub, tlsPort, "0.0.0.0", { cert: tls.cert, key: tls.key });
-      console.error(
+      hubLog(
         `signalbox: LAN listener https://0.0.0.0:${tlsPort} (pinned self-signed, fp ${tls.fingerprint.slice(0, 16)}...); non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN`
       );
     } else {
       listen(hub, port, bind);
-      console.error(
+      hubLog(
         `signalbox: bound to http://${bind}:${port}; non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN (loopback clients need no token)`
       );
     }
@@ -644,9 +756,8 @@ function runHub(args: string[]): void {
 // ---- config ----------------------------------------------------------------
 
 // runConfig reads and writes the persistent hub network settings that runHub
-// (and the app-spawned hub) honor. A deliberately tiny two-key surface
-// (hub.bind, hub.token), not a general config editor: the app owns everything
-// else in settings.json.
+// (and the app-spawned hub) honor. A deliberately tiny three-key surface, not
+// a general config editor: the app owns everything else in settings.json.
 function runConfig(args: string[]): void {
   const { flags, rest } = parseFlags(args, ["generate"]);
   const sub = rest[0] ?? "get";
@@ -672,6 +783,7 @@ function runConfig(args: string[]): void {
     }
     console.log(`hub.bind:  ${bind} (${reach})`);
     console.log(`hub.token: ${s.hub.token ? "set" : "none"}`);
+    console.log(`hub.upstream: ${s.hub.upstream || "none (this hub owns its state)"}`);
     return;
   }
   if (sub === "set") {
@@ -694,9 +806,16 @@ function runConfig(args: string[]): void {
       console.log("token saved");
       return;
     }
-    fatal(`unknown config key ${JSON.stringify(key)} (settable: hub.bind, hub.token)`);
+    if (key === "hub.upstream") {
+      const norm = normalizeUpstreamInput(value);
+      if (norm.error) fatal(norm.error);
+      saveSettings({ hub: { upstream: norm.value! } });
+      console.log(norm.value ? `hub.upstream set to ${norm.value}` : "hub.upstream cleared");
+      return;
+    }
+    fatal(`unknown config key ${JSON.stringify(key)} (settable: hub.bind, hub.token, hub.upstream)`);
   }
-  fatal(`unknown config subcommand ${JSON.stringify(sub)} (try: config get, config set hub.bind <value>, config set hub.token <value|--generate>)`);
+  fatal(`unknown config subcommand ${JSON.stringify(sub)} (try: config get, config set hub.bind <value>, config set hub.token <value|--generate>, config set hub.upstream <url|"">)`);
 }
 
 // ---- state / pick / tmux-status / drain -------------------------------------------
@@ -927,7 +1046,7 @@ switch (cmd) {
     break;
   case "version":
   case "--version":
-    console.log(version);
+    console.log(displayVersion);
     break;
   case "help":
     process.stdout.write(usage());

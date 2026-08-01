@@ -10,8 +10,10 @@ CONTENTS := $(BUNDLE)/Contents
 CLI_BIN ?= ../cli/bin/signalbox
 
 # Stamp the bundle version at packaging time (the source Info.plist stays at a
-# dev placeholder). CI passes VERSION from the release tag.
-VERSION ?=
+# dev placeholder). CI passes VERSION from the release tag; otherwise default
+# to the release-please-managed CLI version, so a dev build never reports the
+# placeholder and version-skew debugging stays honest.
+VERSION ?= $(shell sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' ../cli/package.json | head -1)
 
 # Extra swift build flags - CI passes "--arch arm64 --arch x86_64" for a
 # universal binary.

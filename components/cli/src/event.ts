@@ -3,7 +3,11 @@
 // implementation - the Swift app, adapters, and persisted logs must not
 // notice the runtime change.
 
+import { linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
+import { join } from "node:path";
+// This creates no runtime import cycle because client.ts imports Event as a type only.
+import { stateDir } from "./client";
 
 // Event types, ordered as they rank for display urgency. Seen, Hide, Show,
 // Pin, Unpin and Label are user actions, not agent lifecycle - none touches
@@ -73,6 +77,12 @@ export interface Event {
   id: string;
   ts: string; // RFC3339 UTC, second precision (matches the Go emitter)
   host: string;
+  // A stable id for the machine that fired this, persisted at
+  // ${stateDir}/machine-id. `host` is the display name and can collide
+  // between two laptops on one remote hub; this cannot. Optional on read:
+  // pre-upgrade logs and older emitters have none, and normalizeInbound
+  // backfills it from host so they keep behaving exactly as before.
+  machine?: string;
   agent: string;
   event: string;
   reason?: string;
@@ -140,6 +150,58 @@ export function shortHostname(): string {
   return hostname().split(".")[0] ?? "";
 }
 
+const machineIDs = new Map<string, string>();
+
+export function machineID(dir: string = stateDir()): string {
+  const cached = machineIDs.get(dir);
+  if (cached) return cached;
+
+  const path = join(dir, "machine-id");
+  try {
+    const persisted = readFileSync(path, "utf8").trim();
+    if (persisted) {
+      machineIDs.set(dir, persisted);
+      return persisted;
+    }
+  } catch {
+    // A missing or unreadable id is regenerated so firing an event never fails.
+  }
+
+  const bytes = crypto.getRandomValues(new Uint8Array(3));
+  const suffix = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const id = `${shortHostname()}-${suffix}`;
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    // Persistence is best-effort on the hook path.
+  }
+  const tmp = `${path}.${process.pid}.${suffix}.tmp`;
+  let resolved = id;
+  try {
+    writeFileSync(tmp, `${id}\n`, { flag: "wx" });
+    try {
+      // POSIX rename replaces an existing destination, so publishing through
+      // a hard link gives the complete temp file create-only semantics.
+      linkSync(tmp, path);
+    } catch {
+      // A concurrent hook may have published first; every process must cache
+      // that winner or events disagree about this machine until restart.
+      const persisted = readFileSync(path, "utf8").trim();
+      if (persisted) resolved = persisted;
+    }
+  } catch {
+    // Keep the process-cached id when the state directory is not writable.
+  } finally {
+    try {
+      unlinkSync(tmp);
+    } catch {
+      // A failed or already-cleaned temp file needs no recovery on the hook path.
+    }
+  }
+  machineIDs.set(dir, resolved);
+  return resolved;
+}
+
 // agentFamily is the base agent that anchors session identity, stripping any
 // editor-host display prefix: "vscode/claude" and "cursor/claude" both key on
 // "claude", so one session keeps a single identity whether it runs in a plain
@@ -169,6 +231,7 @@ function newUserEvent(eventType: string, sessionKey: string, reason: string): Ev
     id: crypto.randomUUID(),
     ts: nowTS(),
     host: shortHostname(),
+    machine: machineID(),
     agent,
     event: eventType,
     session_key: sessionKey,
@@ -217,11 +280,17 @@ export function newEnded(sessionKey: string, reason: string): Event {
   return newUserEvent(Ended, sessionKey, reason);
 }
 
+// One event carries every tag: the reducer already unions e.tags into the
+// session, so N tags cost one round trip and one spool line instead of N.
+export function newTags(sessionKey: string, tags: string[]): Event {
+  const e = newUserEvent(Tag, sessionKey, "");
+  e.tags = tags;
+  return e;
+}
+
 // newTag / newUntag add or remove a discreet tag on a session.
 export function newTag(sessionKey: string, tag: string): Event {
-  const e = newUserEvent(Tag, sessionKey, "");
-  e.tags = [tag];
-  return e;
+  return newTags(sessionKey, [tag]);
 }
 
 export function newUntag(sessionKey: string, tag: string): Event {
@@ -240,6 +309,8 @@ export function normalizeInbound(e: Event): void {
   const legacy = e as Event & { detail?: string };
   if (legacy.detail !== undefined && e.prompt === undefined) e.prompt = legacy.detail;
   delete legacy.detail;
+  // Old log lines and emitters must keep grouping and routing by hostname as before.
+  if (!e.machine && e.host) e.machine = e.host;
   if (e.origin && !e.origin.kind) {
     if (e.origin.tmux) e.origin.kind = "tmux";
     else if (e.origin.url) e.origin.kind = "url";
@@ -266,6 +337,7 @@ export function validate(e: Event): string | null {
 // redact keeps the signal but strips anything that names the work - for corp
 // hosts where paths, titles and exchange text must not leave the machine.
 export async function redact(e: Event): Promise<void> {
+  // machine is hostname plus random hex; host is retained, so it discloses nothing new and preserves redacted identity.
   delete e.cwd;
   delete e.title;
   delete e.prompt;
