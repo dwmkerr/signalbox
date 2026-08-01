@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/dwmkerr/signalbox/compare/v0.1.5...v0.1.6) (2026-08-01)
+
+
+### Features
+
+* remote hub - forwarder mode, hub settings redesign, and status surfaces ([#47](https://github.com/dwmkerr/signalbox/issues/47)) ([8634cce](https://github.com/dwmkerr/signalbox/commit/8634cce5b56b87337474e1eb18abf5d7b863bb3f))
+
 ## [0.1.5](https://github.com/dwmkerr/signalbox/compare/v0.1.4...v0.1.5) (2026-07-28)
 
 
