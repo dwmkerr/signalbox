@@ -206,9 +206,9 @@ struct SessionsView: View {
                 // repo page (Pages publishes only hero + specs, not docs/*.md).
                 unreachableMessage(host).tint(Theme.blue)
             } actions: {
-                // hub.start() cancels the backoff wait and retries now, rather
+                // hub.restart() cancels the backoff wait and retries now, rather
                 // than leaving the user to wait out the loop's own timer.
-                Button { hub.start() } label: {
+                Button { hub.restart() } label: {
                     Label("Reconnect", systemImage: "arrow.clockwise")
                         .font(.system(size: 15, weight: .semibold))
                         .padding(.horizontal, 6)
@@ -315,7 +315,7 @@ struct SessionsView: View {
             // be fixed by a retry, so it leads with re-pairing in the menu;
             // connecting is already trying, so it offers no action.
             if kind == .offline {
-                Button { hub.start() } label: {
+                Button { hub.restart() } label: {
                     Text("Reconnect")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.blue)

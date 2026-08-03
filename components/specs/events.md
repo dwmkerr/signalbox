@@ -136,6 +136,11 @@ What `GET /state` returns: an event plus the five fields the hub derives.
 `seq` is ingest order; `acked`, `hidden`, `pinned`, and `engaged_ts` come from
 the rules below. A fired event that tries to set them is ignored.
 
+`/state` and `/stream` are served with `Cache-Control: no-store`: both double
+as liveness signals for clients, and a cached answer makes a dead hub look
+alive (the iOS board once showed stale rows with a fresh last-seen while every
+real connection failed).
+
 ## How events become sessions
 
 The hub keeps one row per `session_key`, following these rules:

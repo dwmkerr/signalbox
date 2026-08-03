@@ -51,6 +51,7 @@ change. Treat "code and spec disagree" as a failing state.
 make build                     # compile the CLI to components/cli/bin/signalbox
 make -C components/app app     # build the menu bar app bundle (embeds the CLI;
                                # plain `build` compiles Swift only - stale bundle)
+make -C components/ios device  # cable deploy: stamped build -> USB iPhone
 cd components/cli && bun test  # CLI + reducer tests
 cd components/cli && bunx tsc --noEmit   # typecheck
 ```
@@ -62,6 +63,10 @@ build, hub modes, forwarder + spool, hooks, the macOS app, and the iOS app in
 the Simulator end to end, and writes a self-contained HTML report with
 screenshots to `scratch/integration/`. Note the pass/warn/fail counts in the
 PR description.
+
+Cable deploys must use the `device` recipe, never bare `xcodebuild` - it
+stamps the build so Settings proves what the phone runs (why: see the
+`components/ios/Makefile` header).
 
 `~/.local/bin/signalbox` is symlinked to `components/cli/bin/signalbox`, so
 `make build` deploys the CLI. The app supervises the hub: `make install` kills

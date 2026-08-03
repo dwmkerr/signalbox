@@ -240,7 +240,11 @@ export class Hub {
     if (req.method === "POST" && url.pathname === "/events") return this.handleEvents(req);
     if (req.method === "POST" && url.pathname === "/command") return this.handleCommand(req);
     if (req.method === "GET" && url.pathname === "/state") {
-      return Response.json({ sessions: this.sessions() });
+      // no-store: /state doubles as the clients' liveness probe, and a
+      // cached answer makes a dead hub look alive.
+      return Response.json({ sessions: this.sessions() }, {
+        headers: { "Cache-Control": "no-store" },
+      });
     }
     if (req.method === "GET" && url.pathname === "/stream") {
       return this.handleStream(req, url, server);
@@ -475,7 +479,8 @@ export class Hub {
     return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        // no-store, matching /state: liveness surfaces must never be cached.
+        "Cache-Control": "no-store",
         Connection: "keep-alive",
       },
     });

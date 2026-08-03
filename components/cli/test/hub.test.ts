@@ -281,6 +281,8 @@ describe("bind and bearer auth", () => {
     const hub = tokenHub();
     const state = (await hub.handle(lanReq("/state", { bearer: TOKEN }), lan))!;
     expect(state.status).toBe(200);
+    // /state doubles as the clients' liveness probe - it must never be cached.
+    expect(state.headers.get("Cache-Control")).toBe("no-store");
 
     const events = (await hub.handle(
       lanReq("/events", { bearer: TOKEN, method: "POST", body: wireEvent("a", ev.Busy) }),
