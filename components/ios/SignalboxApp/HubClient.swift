@@ -12,20 +12,27 @@ import Security
 // hand-entered hub) raises no such challenge, so the delegate simply never
 // fires for it.
 //
-// The fingerprint is read on URLSession's delegate queue, not the main actor, so
-// it is guarded by a lock and updated whenever the active hub changes.
-final class CertPinner: NSObject, URLSessionDelegate {
-    private let lock = NSLock()
-    private var pin: String?
+// The pin is immutable: a pinner is built per connection attempt from the
+// config that attempt is for, so a session can never carry a stale pin from a
+// previous pairing and there is no cross-thread mutation to guard. (Long-lived
+// sessions built once at init are also the configuration under which TLS
+// server-trust challenges were observed never reaching this delegate at all -
+// see the connection-state section of specs/ios.html.)
+final class CertPinner: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
+    private let pin: String?
 
     init(fingerprint: String?) { pin = fingerprint?.lowercased() }
 
-    func setFingerprint(_ fingerprint: String?) {
-        lock.lock(); pin = fingerprint?.lowercased(); lock.unlock()
-    }
-
-    private var fingerprint: String? {
-        lock.lock(); defer { lock.unlock() }; return pin
+    // Challenges arrive at the task level for tasks created by the Swift
+    // async conveniences, and at the session level otherwise - answer both
+    // with the same verdict.
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        urlSession(session, didReceive: challenge, completionHandler: completionHandler)
     }
 
     func urlSession(
@@ -38,7 +45,7 @@ final class CertPinner: NSObject, URLSessionDelegate {
             completionHandler(.performDefaultHandling, nil)
             return
         }
-        guard let pin = fingerprint, !pin.isEmpty else {
+        guard let pin, !pin.isEmpty else {
             // System validation is the trust boundary when no explicit pin was
             // supplied, so an untrusted self-signed certificate still fails.
             completionHandler(.performDefaultHandling, nil)
@@ -130,37 +137,56 @@ final class HubClient: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var lastSeen: Date?
 
-    // Enforces a self-signed certificate pin when configured (#25), otherwise
-    // preserving system CA validation. Its fingerprint tracks the active hub.
-    private let pinner: CertPinner
-    private let urlSession: URLSession
-    // A short-timeout session for the one-shot /state probe and the pairing
-    // redeem. A reachable hub answers these in well under a second, so a tight
-    // deadline turns an unreachable hub (a phone on a network that cannot see
-    // the hub) into a fast, surfaced failure instead of a 60-90s hang with no
-    // feedback. The long-lived stream deliberately does NOT use this - a quiet
-    // but live stream must not be killed for being idle.
-    private let probeSession: URLSession
-
     init(config: HubConfig) {
         self.config = config
-        self.pinner = CertPinner(fingerprint: config.fingerprint)
-        // The stream idles between events; the hub's 15s heartbeat keeps it under
-        // this. The macOS app solved this already - 90s is its verified value, and
-        // URLSession's 60s default would kill a quiet stream.
-        let sessionConfig = URLSessionConfiguration.default
-        sessionConfig.timeoutIntervalForRequest = 90
-        sessionConfig.waitsForConnectivity = false
-        self.urlSession = URLSession(configuration: sessionConfig, delegate: pinner, delegateQueue: nil)
-        let probeConfig = URLSessionConfiguration.ephemeral
-        probeConfig.timeoutIntervalForRequest = 10
-        probeConfig.waitsForConnectivity = false
-        self.probeSession = URLSession(configuration: probeConfig, delegate: pinner, delegateQueue: nil)
     }
 
+    // Sessions are built per connection attempt from the config that attempt is
+    // for - never once at init. Two reasons, both load-bearing:
+    // - Trust: server-trust challenges were observed never reaching the delegate
+    //   of sessions constructed at init (every pinned LAN handshake failed as if
+    //   unpinned - the live/offline flap), while call-time sessions verify
+    //   correctly every time. The pairing redeem always worked because it
+    //   already built its session this way.
+    // - Atomicity: url, token and fingerprint travel together into the session,
+    //   so no connection can mix one pairing's URL with another's pin.
+    //
+    // probe: a tight deadline turns an unreachable hub into a fast, surfaced
+    // failure instead of a 60-90s hang. The stream deliberately does NOT use
+    // this deadline - it idles between events, and the hub's 15s heartbeat
+    // keeps a quiet-but-live stream under the 90s ceiling (the macOS app's
+    // verified value; URLSession's 60s default would kill it). Ephemeral
+    // configs throughout: a liveness probe answered from URLCache is not a
+    // probe, and it is exactly what kept a dead board looking alive.
+    private func makeSession(timeout: TimeInterval) -> URLSession {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = timeout
+        cfg.waitsForConnectivity = false
+        return URLSession(configuration: cfg, delegate: CertPinner(fingerprint: config.fingerprint), delegateQueue: nil)
+    }
+
+    /// Ensure the stream loop is running. Idempotent: onAppear and the
+    /// scenePhase observer both call this on launch, and a live loop is left
+    /// alone - cancelling one mid-TLS-handshake to start its twin is pure
+    /// churn. An explicit user retry is restart().
     func start() {
-        streamTask?.cancel()
-        streamTask = Task { await self.runStreamLoop() }
+        if let task = streamTask, !task.isCancelled { return }
+        streamTask = Task {
+            await self.runStreamLoop()
+            // The loop can finish without being cancelled (the .rejected
+            // early return). Clear the handle so the next lifecycle start()
+            // spawns a fresh loop instead of guarding on a finished task -
+            // unless this task was cancelled, in which case stop()/restart()
+            // own the handle and may already have installed a successor.
+            if !Task.isCancelled { self.streamTask = nil }
+        }
+    }
+
+    /// Cancel any backoff wait and reconnect now - the Reconnect button's
+    /// semantics, distinct from the lifecycle-driven start().
+    func restart() {
+        stop()
+        start()
     }
 
     func stop() {
@@ -176,7 +202,6 @@ final class HubClient: ObservableObject {
         config.url = URL(string: "http://127.0.0.1:8377")!
         config.token = nil
         config.fingerprint = nil
-        pinner.setFingerprint(nil)
         Keychain.delete(Keychain.hubFPAccount)
         sessions = []
         hosts = []
@@ -201,7 +226,6 @@ final class HubClient: ObservableObject {
         config.url = url
         config.token = token
         config.fingerprint = fingerprint
-        pinner.setFingerprint(fingerprint)
         Keychain.set(fingerprint ?? "", account: Keychain.hubFPAccount)
         sessions = []
         hosts = []
@@ -289,6 +313,20 @@ final class HubClient: ObservableObject {
     // for background execution is what push is for.
     private func runStreamLoop() async {
         var backoff: UInt64 = 1
+        // Failures inside the grace window after a (re)start do not earn the
+        // offline verdict: right after launch or foreground the network path
+        // is often still waking, and waitsForConnectivity is off so the first
+        // probes fail instantly. Without this the sessions page flashes
+        // "Hub offline" for a second on every open. A genuinely dead hub still
+        // reads offline a beat after the window closes.
+        //
+        // The constant is a deliberate guess at how long the wake takes -
+        // wrong-short brings the flash back, wrong-long delays an honest
+        // offline. If a device shows the flash persisting, the principled
+        // replacement is NWPathMonitor: no failure counts until the path is
+        // .satisfied, and the window disappears.
+        let started = Date()
+        let grace: TimeInterval = 2.5
         while !Task.isCancelled {
             do {
                 try await resyncState()
@@ -297,14 +335,23 @@ final class HubClient: ObservableObject {
                 try await readStream()
                 // A clean close is still a drop - reconnect.
                 connection = .connecting
-            } catch is CancellationError {
-                return
             } catch {
+                // Cancellation reaches here in two shapes (CancellationError,
+                // URLError .cancelled) - the task's own flag is the one truth.
+                if Task.isCancelled || error is CancellationError { return }
                 if case .rejected = connection {
                     // A bad token will not fix itself by retrying: stop and say so.
                     return
                 }
-                connection = .offline(since: lastSeen)
+                if Date().timeIntervalSince(started) > grace {
+                    connection = .offline(since: lastSeen)
+                } else if case .offline = connection {
+                    // A stale offline verdict stands until a probe succeeds -
+                    // flipping to connecting here would fake progress (and trip
+                    // the reconnect banner on every foreground).
+                } else {
+                    connection = .connecting
+                }
             }
             if Task.isCancelled { return }
             try? await Task.sleep(nanoseconds: backoff * 1_000_000_000)
@@ -313,11 +360,16 @@ final class HubClient: ObservableObject {
     }
 
     func resyncState() async throws {
-        guard let request = request("state") else { throw URLError(.badURL) }
-        // Probe on the short-timeout session so an unreachable hub fails in ~10s
-        // and the offline state (with its message) comes back promptly, instead
-        // of the reconnect appearing to do nothing for a minute.
-        let (data, response) = try await probeSession.data(for: request)
+        guard var request = request("state") else { throw URLError(.badURL) }
+        // A probe that can be answered from a cache is not a probe. The hub
+        // also sends no-store, but this client may be talking to an older hub.
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        // Short-timeout session so an unreachable hub fails in ~10s and the
+        // offline state (with its message) comes back promptly, instead of the
+        // reconnect appearing to do nothing for a minute.
+        let session = makeSession(timeout: 10)
+        defer { session.finishTasksAndInvalidate() }
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         if http.statusCode == 401 || http.statusCode == 403 {
             connection = .rejected
@@ -330,9 +382,15 @@ final class HubClient: ObservableObject {
     }
 
     private func readStream() async throws {
-        guard let request = request("stream", query: [URLQueryItem(name: "since", value: String(lastSeq))])
+        guard var request = request("stream", query: [URLQueryItem(name: "since", value: String(lastSeq))])
         else { throw URLError(.badURL) }
-        let (bytes, response) = try await urlSession.bytes(for: request)
+        // Same reasoning as the probe: liveness signals must never be cached.
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        // 90s ceiling: the hub heartbeats every 15s, so only a genuinely dead
+        // stream trips it (the macOS app's verified value).
+        let session = makeSession(timeout: 90)
+        defer { session.finishTasksAndInvalidate() }
+        let (bytes, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw URLError(.badServerResponse)
         }
@@ -464,7 +522,9 @@ final class HubClient: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         do {
-            let (data, response) = try await urlSession.data(for: request)
+            let net = makeSession(timeout: 10)
+            defer { net.finishTasksAndInvalidate() }
+            let (data, response) = try await net.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 say(session.key, "Hub refused the jump", ok: false)
                 return
@@ -502,7 +562,9 @@ final class HubClient: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        _ = try? await urlSession.data(for: request)
+        let session = makeSession(timeout: 10)
+        defer { session.finishTasksAndInvalidate() }
+        _ = try? await session.data(for: request)
         try? await resyncState()
     }
 

@@ -193,7 +193,7 @@ struct SettingsView: View {
         // user who accepts an unpinned endpoint). Passing nil clears any pin left
         // from a previous scan so it cannot mismatch the new url.
         if hub.config.url == parsed && (hub.config.token ?? "") == token {
-            hub.start()
+            hub.restart()
         } else {
             hub.reconfigure(url: parsed, token: token, fingerprint: nil)
         }
