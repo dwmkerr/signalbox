@@ -27,7 +27,7 @@ function authHeaders(): Record<string, string> {
 }
 
 export function stateDir(): string {
-  if (process.env.SIGNALBOX_STATE_DIR) return process.env.SIGNALBOX_STATE_DIR;
+  if (process.env.SIGNALBOX_DATA_DIR) return process.env.SIGNALBOX_DATA_DIR;
   const home = homedir();
   if (!home) return join(tmpdir(), "signalbox");
   return join(home, ".local", "state", "signalbox");
