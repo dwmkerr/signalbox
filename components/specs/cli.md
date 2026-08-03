@@ -288,7 +288,7 @@ the copyable `signalbox pair --url <upstream>` command with the reason.
 
 ## config
 
-Persist how the hub binds or which upstream it forwards to, so it needs no flags or env. Values live in `~/.config/signalbox/settings.json` under a `hub` section and are read by every `signalbox hub` start (the [hub](#hub) section covers the resolution orders and the auto-token). A tiny three-key surface (`hub.bind`, `hub.token`, `hub.upstream`); the app owns everything else in that file.
+Persist how the hub binds or which upstream it forwards to, so it needs no flags or env. Values live in the settings file (`$XDG_CONFIG_HOME/signalbox/settings.json`, else `~/.config/signalbox/settings.json`; `SIGNALBOX_CONFIG` or the global `--config <path>` flag point at a different file) under a `hub` section and are read by every `signalbox hub` start (the [hub](#hub) section covers the resolution orders and the auto-token). A tiny three-key surface (`hub.bind`, `hub.token`, `hub.upstream`); the app owns everything else in that file.
 
 ```bash
 signalbox config get                          # the effective hub config
@@ -352,7 +352,8 @@ answer everywhere.
 | Variable | Default | Meaning |
 |---|---|---|
 | `SIGNALBOX_URL` | `http://127.0.0.1:8377` | hub address |
-| `SIGNALBOX_STATE_DIR` | `~/.local/state/signalbox` | spool, log, events.jsonl |
+| `SIGNALBOX_DATA_DIR` | `~/.local/state/signalbox` | spool, log, events.jsonl |
+| `SIGNALBOX_CONFIG` | `$XDG_CONFIG_HOME/signalbox/settings.json`, else `~/.config/signalbox/settings.json` | path to the settings FILE (not a directory); the global `--config <path>` flag wins over it |
 | `SIGNALBOX_PROFILE` | `full` | `redacted` drops cwd, title, prompt and reply, and hashes the session id |
 | `SIGNALBOX_EXPIRE` | `24h` | hub: end sessions with no agent event for this long |
 | `SIGNALBOX_BIND` | `127.0.0.1` | hub: bind address (`signalbox hub --bind` wins over it) |

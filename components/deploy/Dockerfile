@@ -14,7 +14,7 @@ RUN apt-get update \
 COPY --from=build /out/signalbox /usr/local/bin/signalbox
 
 # events.jsonl lives here - mount a volume so the board survives restarts.
-ENV SIGNALBOX_STATE_DIR=/data
+ENV SIGNALBOX_DATA_DIR=/data
 ENV SIGNALBOX_REMOTE=1
 VOLUME /data
 

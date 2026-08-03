@@ -57,8 +57,15 @@ const defaults: Settings = {
   hub: { bind: "127.0.0.1", token: "", upstream: "" },
 };
 
+// Resolution order mirrors kubectl/gh style: explicit file (--config sets
+// SIGNALBOX_CONFIG) > XDG base dir > ~/.config. SIGNALBOX_CONFIG names the
+// settings FILE, not a directory, so a test or a second profile can point at
+// any path without touching HOME.
 export function settingsPath(): string {
-  return join(homedir(), ".config", "signalbox", "settings.json");
+  const file = process.env.SIGNALBOX_CONFIG;
+  if (file) return file;
+  const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  return join(base, "signalbox", "settings.json");
 }
 
 export function loadSettings(): Settings {

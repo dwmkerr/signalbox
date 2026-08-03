@@ -10,7 +10,7 @@ primary_region = 'lhr'
   dockerfile = '../Dockerfile'
 
 [env]
-  SIGNALBOX_STATE_DIR = '/data'
+  SIGNALBOX_DATA_DIR = '/data'
 
 [[mounts]]
   source = 'signalbox_data'

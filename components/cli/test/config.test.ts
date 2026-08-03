@@ -14,7 +14,7 @@ function loadIn(env: Record<string, string>, settings?: unknown): boolean {
   const home = freshHome(settings);
   const proc = Bun.spawnSync(
     ["bun", "-e", `import { loadSettings } from ${JSON.stringify(configSrc)}; process.stdout.write(String(loadSettings().claudeRenameTitle));`],
-    { env: { ...process.env, HOME: home, SIGNALBOX_CLAUDE_RENAME: "", ...env } }
+    { env: { ...process.env, HOME: home, SIGNALBOX_CLAUDE_RENAME: "", SIGNALBOX_CONFIG: "", XDG_CONFIG_HOME: "", ...env } }
   );
   return proc.stdout.toString().trim() === "true";
 }
@@ -37,7 +37,7 @@ function freshHome(settings?: unknown): string {
 function inHome(home: string, expr: string, env: Record<string, string> = {}): string {
   const proc = Bun.spawnSync(
     ["bun", "-e", `import * as c from ${JSON.stringify(configSrc)}; ${expr}`],
-    { env: { ...process.env, HOME: home, SIGNALBOX_CLAUDE_RENAME: "", SIGNALBOX_BIND: "", SIGNALBOX_TOKEN: "", ...env } }
+    { env: { ...process.env, HOME: home, SIGNALBOX_CLAUDE_RENAME: "", SIGNALBOX_BIND: "", SIGNALBOX_TOKEN: "", SIGNALBOX_CONFIG: "", XDG_CONFIG_HOME: "", ...env } }
   );
   return proc.stdout.toString();
 }
@@ -241,5 +241,37 @@ describe("generateToken", () => {
     expect(t).toMatch(/^[A-Za-z0-9_-]+$/);
     expect(t.length).toBeGreaterThanOrEqual(20);
     expect(generateToken()).not.toBe(t);
+  });
+});
+
+// settingsPath resolves SIGNALBOX_CONFIG > XDG_CONFIG_HOME > ~/.config. Run in
+// a child process like the cases above so HOME and the env vars are isolated.
+describe("settingsPath resolution", () => {
+  function pathIn(env: Record<string, string>): string {
+    const proc = Bun.spawnSync(
+      ["bun", "-e", `import { settingsPath } from ${JSON.stringify(configSrc)}; process.stdout.write(settingsPath());`],
+      { env: { ...process.env, HOME: "/home/sb-test", SIGNALBOX_CONFIG: "", XDG_CONFIG_HOME: "", ...env } }
+    );
+    return proc.stdout.toString().trim();
+  }
+
+  test("defaults to ~/.config/signalbox/settings.json", () => {
+    expect(pathIn({})).toBe("/home/sb-test/.config/signalbox/settings.json");
+  });
+
+  test("XDG_CONFIG_HOME replaces the ~/.config base", () => {
+    expect(pathIn({ XDG_CONFIG_HOME: "/xdg" })).toBe("/xdg/signalbox/settings.json");
+  });
+
+  test("SIGNALBOX_CONFIG names the file and beats XDG", () => {
+    expect(pathIn({ XDG_CONFIG_HOME: "/xdg", SIGNALBOX_CONFIG: "/etc/sb.json" })).toBe("/etc/sb.json");
+  });
+
+  test("loadSettings reads the SIGNALBOX_CONFIG file", () => {
+    const home = mkdtempSync(join(tmpdir(), "sb-config-"));
+    const file = join(home, "custom.json");
+    writeFileSync(file, JSON.stringify({ hub: { upstream: "https://custom.example" } }));
+    const out = inHome(home, "process.stdout.write(c.loadSettings().hub.upstream);", { SIGNALBOX_CONFIG: file });
+    expect(out).toBe("https://custom.example");
   });
 });

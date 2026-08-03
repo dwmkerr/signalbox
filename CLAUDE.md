@@ -37,7 +37,8 @@ change. Treat "code and spec disagree" as a failing state.
   keeps it alive, and stops it on quit (Hub.swift) - there is no LaunchAgent.
   The bundle embeds the CLI at Contents/Resources/signalbox. Built via
   `components/app/Makefile` (it works around a CommandLineTools SPM manifest
-  bug - use `make -C components/app build`, not bare `swift build`).
+  bug - use `make -C components/app app`, not bare `swift build`; the `build`
+  target only compiles Swift and leaves a stale CLI in the bundle).
 - `components/cli/adapters/` - per-agent hooks/plugins (claude, opencode, pi) and
   tmux.
 - `components/scripts/` - dev helpers (e.g. `demo.sh` seeds a board via `fire`).
@@ -48,10 +49,19 @@ change. Treat "code and spec disagree" as a failing state.
 
 ```bash
 make build                     # compile the CLI to components/cli/bin/signalbox
-make -C components/app build   # build the menu bar app
+make -C components/app app     # build the menu bar app bundle (embeds the CLI;
+                               # plain `build` compiles Swift only - stale bundle)
 cd components/cli && bun test  # CLI + reducer tests
 cd components/cli && bunx tsc --noEmit   # typecheck
 ```
+
+Larger PRs - anything that changes behaviour across the hub, forwarder,
+adapters, or either app - should include an integration evidence run: the
+`/integration-test` skill (`.claude/skills/integration-test/`) drives the
+build, hub modes, forwarder + spool, hooks, the macOS app, and the iOS app in
+the Simulator end to end, and writes a self-contained HTML report with
+screenshots to `scratch/integration/`. Note the pass/warn/fail counts in the
+PR description.
 
 `~/.local/bin/signalbox` is symlinked to `components/cli/bin/signalbox`, so
 `make build` deploys the CLI. The app supervises the hub: `make install` kills

@@ -17,7 +17,7 @@ What the config pins down, and why:
   machine as soon as one exists, which is why `SIGNALBOX_TOKEN` must be set as
   a secret BEFORE the first deploy: a hub with no token exits immediately and
   burns the machine's restart budget.
-- `[[mounts]]` on `/data` with `SIGNALBOX_STATE_DIR = '/data'` - the event log
+- `[[mounts]]` on `/data` with `SIGNALBOX_DATA_DIR = '/data'` - the event log
   lives on the volume and survives deploys. One machine, one volume: the hub
   is the single source of truth, so always deploy with `--ha=false`.
 - `[[vm]]` shared 1 CPU / 1GB - plenty; the hub is a small single process.

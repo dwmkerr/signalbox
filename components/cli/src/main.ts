@@ -117,8 +117,13 @@ usage: signalbox <command> [flags]
 
   drain        flush the offline spool to the hub
 
+every command also accepts --config <path>: use that settings.json instead of
+the default (equivalent to SIGNALBOX_CONFIG)
+
 env: SIGNALBOX_URL (default ${DefaultURL})
-     SIGNALBOX_STATE_DIR (default ~/.local/state/signalbox)
+     SIGNALBOX_DATA_DIR (default ~/.local/state/signalbox)
+     SIGNALBOX_CONFIG (settings file; default $XDG_CONFIG_HOME/signalbox/settings.json,
+                       falling back to ~/.config/signalbox/settings.json; --config wins)
      SIGNALBOX_PROFILE=full|redacted
      SIGNALBOX_EXPIRE (hub: end sessions with no agent event for this long, default 24h)
      SIGNALBOX_BIND (hub: bind address, default 127.0.0.1; --bind wins)
@@ -963,7 +968,23 @@ function normalize(rawCmd: string | undefined, rawArgs: string[]): { cmd: string
   return { cmd: rawCmd, args: rawArgs };
 }
 
-const { cmd, args } = normalize(process.argv[2], process.argv.slice(3));
+// --config <path> is a global flag: strip it before dispatch and carry it as
+// SIGNALBOX_CONFIG so every settingsPath() call resolves the same file,
+// whichever command (hub, config, hooks) ends up reading settings.
+function stripConfigFlag(argv: string[]): string[] {
+  const i = argv.indexOf("--config");
+  if (i === -1) return argv;
+  const path = argv[i + 1];
+  if (!path || path.startsWith("--")) {
+    console.error("signalbox: --config needs a path to a settings.json");
+    process.exit(2);
+  }
+  process.env.SIGNALBOX_CONFIG = path;
+  return [...argv.slice(0, i), ...argv.slice(i + 2)];
+}
+
+const argv = stripConfigFlag(process.argv.slice(2));
+const { cmd, args } = normalize(argv[0], argv.slice(1));
 
 switch (cmd) {
   case "fire":

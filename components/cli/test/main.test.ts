@@ -121,7 +121,7 @@ describe("fire usage errors", () => {
 describe("fire tags", () => {
   function spooledEvents(args: string[]): Record<string, unknown>[] {
     const dir = mkdtempSync(join(tmpdir(), "signalbox-fire-tags-test-"));
-    run(args, { SIGNALBOX_STATE_DIR: dir });
+    run(args, { SIGNALBOX_DATA_DIR: dir });
     return readFileSync(join(dir, "spool.jsonl"), "utf8")
       .trim()
       .split("\n")
