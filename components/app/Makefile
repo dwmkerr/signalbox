@@ -55,6 +55,9 @@ app: build
 	rm -rf "$(BUNDLE)"
 	mkdir -p "$(CONTENTS)/MacOS" "$(CONTENTS)/Resources"
 	cp "$$(swift build -c release $(SWIFT_FLAGS) --show-bin-path)/$(APP)" "$(CONTENTS)/MacOS/$(APP)"
+	# KeyboardShortcuts resolves localized strings via Bundle.module; SPM's generated
+	# accessor fatalErrors when the resource bundle is missing.
+	cp -R "$$(swift build -c release $(SWIFT_FLAGS) --show-bin-path)"/*.bundle "$(CONTENTS)/Resources/"
 	cp Info.plist "$(CONTENTS)/Info.plist"
 	cp Resources/AppIcon.icns "$(CONTENTS)/Resources/AppIcon.icns"
 	printf 'APPL????' > "$(CONTENTS)/PkgInfo"

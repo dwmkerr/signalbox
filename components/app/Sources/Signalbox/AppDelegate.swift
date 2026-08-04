@@ -1,5 +1,12 @@
 import AppKit
+import KeyboardShortcuts
 import UserNotifications
+
+extension KeyboardShortcuts.Name {
+    // Do not pass initial: here: lazy seeding could race migration and stamp
+    // ctrl-alt-j over a user's legacy custom shortcut.
+    @MainActor static let openJumplist = Self("openJumplist")
+}
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -66,7 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notificationsAvailable = false
     // Retained so Foundation reaps the children; pruned on the next spawn.
     private var runningProcesses: [Process] = []
-    private var hotkey: GlobalHotkey?
     private var palette: PaletteController?
     private var settings: SettingsController?
     private var connectPhone: ConnectPhoneController?
@@ -128,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettingsHubTab: { [weak self] in self?.settings?.show(tab: .hub) }
         )
         setupNotifications()
+        migrateJumplistShortcut()
         setupPalette()
 
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -506,6 +513,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Palette
 
+    private func migrateJumplistShortcut() {
+        let defaults = UserDefaults.standard
+        let shortcutKey = "KeyboardShortcuts_openJumplist"
+        guard defaults.object(forKey: shortcutKey) == nil else { return }
+
+        // Seed before registering the handler: KeyboardShortcuts claims the
+        // stored shortcut when the handler is registered, so migration wins.
+        if let raw = defaults.string(forKey: "hotkey"),
+           let spec = GlobalHotkey.parse(raw) {
+            let shortcut = KeyboardShortcuts.Shortcut(
+                carbonKeyCode: Int(spec.keyCode),
+                carbonModifiers: Int(spec.modifiers)
+            )
+            KeyboardShortcuts.setShortcut(shortcut, for: .openJumplist)
+        } else {
+            let spec = GlobalHotkey.defaultSpec
+            let shortcut = KeyboardShortcuts.Shortcut(
+                carbonKeyCode: Int(spec.keyCode),
+                carbonModifiers: Int(spec.modifiers)
+            )
+            KeyboardShortcuts.setShortcut(shortcut, for: .openJumplist)
+        }
+
+        // Leave the legacy key in place so a downgrade still has the user's
+        // previous choice to migrate again.
+    }
+
     private func setupPalette() {
         palette = PaletteController(
             monitor: hubHealthMonitor,
@@ -518,38 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onPin: { [weak self] key, pinned in self?.setPinned(sessionKey: key, pinned: pinned) },
             onSettings: { [weak self] tab in self?.settings?.show(tab: tab) }
         )
-        let spec: GlobalHotkey.Spec
-        if let raw = UserDefaults.standard.string(forKey: "hotkey"), !raw.isEmpty {
-            if let parsed = GlobalHotkey.parse(raw) {
-                spec = parsed
-            } else {
-                NSLog("Signalbox: cannot parse hotkey '\(raw)', using \(GlobalHotkey.defaultSpec.display)")
-                spec = GlobalHotkey.defaultSpec
-            }
-        } else {
-            spec = GlobalHotkey.defaultSpec
-        }
-        hotkey = GlobalHotkey(spec: spec) { [weak self] in self?.palette?.toggle() }
-        if hotkey?.register() != true {
-            // Another app owns the combo (Carbon is first-come-first-served).
-            // A jumplist you cannot summon is a broken app, so fall back to
-            // the previous default and say so.
-            let fallback = GlobalHotkey.fallbackSpec
-            guard spec.display != fallback.display else { return }
-            hotkey = GlobalHotkey(spec: fallback) { [weak self] in self?.palette?.toggle() }
-            let recovered = hotkey?.register() == true
-            NSLog("Signalbox: \(spec.display) is taken by another app; \(recovered ? "using \(fallback.display)" : "no hotkey available")")
-            guard notificationsAvailable else { return }
-            let content = UNMutableNotificationContent()
-            content.title = "Jumplist shortcut unavailable"
-            content.body = recovered
-                ? "\(spec.display) is taken by another app - using \(fallback.display) instead. Free the combo there or pick another in Settings."
-                : "\(spec.display) and \(fallback.display) are both taken by other apps - set one in Settings."
-            let request = UNNotificationRequest(
-                identifier: "signalbox-hotkey-conflict", content: content, trigger: nil
-            )
-            UNUserNotificationCenter.current().add(request)
-        }
+        KeyboardShortcuts.onKeyDown(for: .openJumplist) { [weak self] in self?.palette?.toggle() }
     }
 
     // Only hidden rows drop out (contract: hide suppresses until the next

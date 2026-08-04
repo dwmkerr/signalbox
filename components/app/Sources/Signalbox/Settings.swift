@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 
 // SharedSettings reads/writes ~/.config/signalbox/settings.json - the flat
 // file the CLI hooks also read (cli/src/config.ts), so a toggle flipped here
@@ -335,7 +336,12 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         let iconRow = horizontalRow([iconLabel, popup])
 
         let shortcutLabel = rowLabel("Jumplist shortcut:")
-        let shortcutRow = horizontalRow([shortcutLabel, shortcutWell()])
+        let recorder = KeyboardShortcuts.RecorderCocoa(for: .openJumplist)
+        recorder.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        let shortcutRow = horizontalRow([shortcutLabel, recorder])
+        let shortcutCaption = caption("Press the field to record a global shortcut")
+        let shortcutCaptionIndent = NSView()
+        let shortcutCaptionRow = horizontalRow([shortcutCaptionIndent, shortcutCaption])
 
         let filterLabel = rowLabel("Additional filters:")
         let filterField = NSTextField(
@@ -358,14 +364,16 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         let captionIndent = NSView()
         let captionRow = horizontalRow([captionIndent, filterCaption])
 
-        let stack = verticalStack([iconRow, shortcutRow, filterRow, captionRow])
+        let stack = verticalStack([
+            iconRow, shortcutRow, shortcutCaptionRow, filterRow, captionRow,
+        ])
         stack.setCustomSpacing(2, after: filterRow)
         // One label column, right aligned, so the three controls line up the
         // way every other settings window on macOS lays a form out. Activated
         // only now: cross-row constraints need the shared stack ancestor, and
         // activating them earlier throws (AppKit catches it, which silently
         // killed this window).
-        for view in [shortcutLabel, filterLabel, captionIndent] {
+        for view in [shortcutLabel, filterLabel, shortcutCaptionIndent, captionIndent] {
             view.widthAnchor.constraint(equalTo: iconLabel.widthAnchor).isActive = true
         }
         return pane(containing: stack)
@@ -682,45 +690,6 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         label.textColor = .secondaryLabelColor
         label.preferredMaxLayoutWidth = Self.paneWidth
         return label
-    }
-
-    // A recorder-style capsule holding the key glyphs, not the config string
-    // that produced them. It is not a recorder yet - the combination is still
-    // set with `defaults write`, which the tooltip carries.
-    private func shortcutWell() -> NSView {
-        let spec: GlobalHotkey.Spec
-        if let raw = UserDefaults.standard.string(forKey: "hotkey"),
-           let parsed = GlobalHotkey.parse(raw) {
-            spec = parsed
-        } else {
-            spec = GlobalHotkey.defaultSpec
-        }
-
-        let glyphs = NSTextField(labelWithString: spec.glyphs)
-        glyphs.font = .systemFont(ofSize: 13)
-        glyphs.alignment = .center
-        glyphs.translatesAutoresizingMaskIntoConstraints = false
-
-        let capsule = NSView()
-        capsule.wantsLayer = true
-        capsule.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
-        capsule.layer?.borderColor = NSColor.separatorColor.cgColor
-        capsule.layer?.borderWidth = 1
-        capsule.layer?.cornerRadius = 6
-        capsule.translatesAutoresizingMaskIntoConstraints = false
-        capsule.toolTip =
-            "Set with: defaults write com.dwmkerr.signalbox hotkey \"cmd+shift+space\""
-        capsule.addSubview(glyphs)
-        NSLayoutConstraint.activate([
-            capsule.heightAnchor.constraint(equalToConstant: 24),
-            capsule.widthAnchor.constraint(greaterThanOrEqualToConstant: 62),
-            glyphs.centerXAnchor.constraint(equalTo: capsule.centerXAnchor),
-            glyphs.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
-            glyphs.leadingAnchor.constraint(
-                greaterThanOrEqualTo: capsule.leadingAnchor, constant: 12
-            ),
-        ])
-        return capsule
     }
 
     private func select(tab: SettingsTab) {
