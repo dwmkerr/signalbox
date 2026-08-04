@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }()
 
     private var statusItem: NSStatusItem!
+    private static let maxInlineMenuRows = 10
     // True while the status menu is open (tracking). Rebuilding then would
     // dismiss it under the pointer; see rebuildMenu.
     private var menuIsTracking = false
@@ -835,7 +836,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (marks + weight), not filtering, says what needs you - the working
         // set stays spatially stable; hidden rows drop out, as do sessions
         // outside the additional filters (Settings) so the menu matches the
-        // jumplist.
+        // jumplist. A dropdown taller than the screen scrolls under the mouse
+        // and loses the spatial contract; the overflow keeps board order in a
+        // submenu.
         let tokens = activeFilters()
         let visible = orderedSessions().filter {
             !$0.hidden && passesFilters($0, tokens)
@@ -848,24 +851,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         let now = Date()
-        for session in visible {
-            let event = session.event
-            let item = NSMenuItem(title: "", action: #selector(jumpMenuItem(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = event.sessionKey
-            let mark = statusMark(event: event.event, acked: session.acked)
-            // Status is carried by the mark, same as palette rows - no words.
-            item.image = menuSymbol(for: mark, word: statusWord(event.event))
-            item.attributedTitle = menuTitle(
-                agent: event.agent,
-                name: displayName(for: event, label: session.label),
-                tags: session.tags ?? [],
-                age: ageString(from: sessionAgeStart(session), to: now),
-                unread: !session.acked && needsCheck(event.event),
-                read: session.acked && event.event != "busy",
-                pinned: session.pinned
+        for session in visible.prefix(Self.maxInlineMenuRows) {
+            menu.addItem(sessionMenuItem(session, now: now))
+        }
+        let overflow = visible.dropFirst(Self.maxInlineMenuRows)
+        if !overflow.isEmpty {
+            let item = NSMenuItem(
+                title: "Show More (\(overflow.count))", action: nil, keyEquivalent: ""
             )
-            // No "?" badge: the amber mark alone says asking (amber scheme).
+            let sub = NSMenu()
+            for session in overflow {
+                sub.addItem(sessionMenuItem(session, now: now))
+            }
+            menu.setSubmenu(sub, for: item)
             menu.addItem(item)
         }
         menu.addItem(.separator())
@@ -887,6 +885,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         ))
+    }
+
+    private func sessionMenuItem(_ session: Session, now: Date) -> NSMenuItem {
+        let event = session.event
+        let item = NSMenuItem(title: "", action: #selector(jumpMenuItem(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = event.sessionKey
+        let mark = statusMark(event: event.event, acked: session.acked)
+        // Status is carried by the mark, same as palette rows - no words.
+        item.image = menuSymbol(for: mark, word: statusWord(event.event))
+        item.attributedTitle = menuTitle(
+            agent: event.agent,
+            name: displayName(for: event, label: session.label),
+            tags: session.tags ?? [],
+            age: ageString(from: sessionAgeStart(session), to: now),
+            unread: !session.acked && needsCheck(event.event),
+            read: session.acked && event.event != "busy",
+            pinned: session.pinned
+        )
+        // No "?" badge: the amber mark alone says asking (amber scheme).
+        return item
     }
 
     // A small phone glyph on the Connect Phone item. Template-rendered so it
@@ -1111,6 +1130,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
+        // Only the root menu drives tracking: if AppKit ever routes a Show More
+        // submenu event here, rebuilding would dismiss the open dropdown.
+        guard menu === self.menu else { return }
         // Ages are rendered into the titles, so recompute them at open time -
         // before the tracking flag goes up, so this rebuild still runs.
         rebuildMenu()
@@ -1118,6 +1140,7 @@ extension AppDelegate: NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) {
+        guard menu === self.menu else { return }
         menuIsTracking = false
         if menuRebuildDeferred {
             menuRebuildDeferred = false
