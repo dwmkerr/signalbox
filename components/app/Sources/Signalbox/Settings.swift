@@ -170,6 +170,16 @@ enum SettingsTab: String, CaseIterable {
     }
 }
 
+@MainActor
+private final class LogsAppearanceStack: NSStackView {
+    var onAppearanceChange: ((NSAppearance) -> Void)?
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onAppearanceChange?(effectiveAppearance)
+    }
+}
+
 // One preferences window owns the app-only settings, the shared agent toggles
 // and the hub's live status. Its toolbar stays fixed as agent types and hub
 // controls grow independently.
@@ -521,12 +531,12 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
             string: "~/.local/state/signalbox/hub.log",
             attributes: [
                 .font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular),
-                .foregroundColor: NSColor(calibratedWhite: 0.85, alpha: 1),
+                .foregroundColor: NSColor.labelColor,
             ]
         )
         pathButton.wantsLayer = true
-        pathButton.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1).cgColor
-        pathButton.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
+        pathButton.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        pathButton.layer?.borderColor = NSColor.separatorColor.cgColor
         pathButton.layer?.borderWidth = 1
         pathButton.layer?.cornerRadius = 6
         pathButton.heightAnchor.constraint(equalToConstant: 27).isActive = true
@@ -563,12 +573,12 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         let scrollView = NSScrollView()
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
-        scrollView.backgroundColor = NSColor(calibratedWhite: 0.085, alpha: 1)
+        scrollView.backgroundColor = NSColor.textBackgroundColor
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.wantsLayer = true
-        scrollView.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
+        scrollView.layer?.borderColor = NSColor.separatorColor.cgColor
         scrollView.layer?.borderWidth = 1
         scrollView.layer?.cornerRadius = 6
         scrollView.widthAnchor.constraint(equalToConstant: Self.paneWidth).isActive = true
@@ -580,7 +590,7 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         textView.isRichText = false
         textView.drawsBackground = true
         textView.backgroundColor = scrollView.backgroundColor
-        textView.textColor = NSColor(calibratedWhite: 0.60, alpha: 1)
+        textView.textColor = NSColor.secondaryLabelColor
         textView.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
         textView.textContainerInset = NSSize(width: 10, height: 7)
         textView.textContainer?.lineFragmentPadding = 0
@@ -600,7 +610,21 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         scrollView.documentView = textView
         self.logTextView = textView
 
-        let stack = verticalStack([heading, note, pathRow, toast, recentRow, scrollView])
+        let stack = LogsAppearanceStack(
+            views: [heading, note, pathRow, toast, recentRow, scrollView]
+        )
+        // cgColor is a resolved snapshot, so refresh the layer colors when the
+        // Logs view changes appearance.
+        stack.onAppearanceChange = { appearance in
+            appearance.performAsCurrentDrawingAppearance {
+                pathButton.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+                pathButton.layer?.borderColor = NSColor.separatorColor.cgColor
+                scrollView.layer?.borderColor = NSColor.separatorColor.cgColor
+            }
+        }
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
         stack.setCustomSpacing(4, after: heading)
         stack.setCustomSpacing(8, after: note)
         stack.setCustomSpacing(5, after: pathRow)
@@ -828,6 +852,12 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
             guard let self, let textView = self.logTextView else { return }
             self.window?.contentView?.layoutSubtreeIfNeeded()
             textView.scrollToEndOfDocument(nil)
+            // scrollToEndOfDocument lands on the END of the last line, so a long
+            // line opens scrolled past its timestamp; a log is read left to right.
+            guard let scroll = textView.enclosingScrollView else { return }
+            let clip = scroll.contentView
+            clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y))
+            scroll.reflectScrolledClipView(clip)
         }
     }
 

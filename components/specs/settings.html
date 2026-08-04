@@ -118,14 +118,16 @@
 
   /* Logs tab. */
   .pathrow { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
-  .path { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11.5px; color:#D8D8DC;
-          background:#1d1d20; border:1px solid #ffffff14; border-radius:6px; padding:4px 9px;
+  .path { color-scheme:light dark; font-family:'SF Mono',ui-monospace,Menlo,monospace;
+          font-size:11.5px; color:CanvasText; background:Canvas; border:1px solid ButtonBorder;
+          border-radius:6px; padding:4px 9px;
           cursor:pointer; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .path:hover { color:#0A84FF; border-color:#0A84FF55; }
-  .tail { background:#161619; border:1px solid #ffffff14; border-radius:6px; height:150px;
-          overflow:auto; padding:7px 10px; font-family:'SF Mono',ui-monospace,Menlo,monospace;
-          font-size:10.5px; line-height:1.65; color:#9a9aa0; white-space:pre; }
-  .tail .ts { color:#5e5e64; }
+  .tail { color-scheme:light dark; background:Canvas; border:1px solid ButtonBorder;
+          border-radius:6px; height:150px; overflow:auto; padding:7px 10px;
+          font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:10.5px;
+          line-height:1.65; color:GrayText; white-space:pre; }
+  .tail .ts { color:GrayText; }
   .tail .warnline { color:#FF9F0A; }
   .toast { font-size:11px; color:#32D74B; min-height:16px; margin-top:5px; }
 
@@ -368,8 +370,10 @@ click its light for the status popover.</div>
   <p>The tab is deliberately small. The path is clickable and reveals the file in Finder; Copy path
   puts it on the clipboard. Recent events is a tail of the last 500 lines in a scrolling monospace
   view, read when the tab opens and on Refresh - not a live follow, so nothing moves while you
-  read. It is a tail, not a viewer: no search, no level filter. Anything deeper is a job for
-  Console or <code>tail -f</code>, and the path is right there.</p>
+  read. The tail uses system text colors and follows the light or dark appearance, like Console.app,
+  and it opens scrolled to the newest lines with the start of the line visible, never mid-line. It is
+  a tail, not a viewer: no search, no level filter. Anything deeper is a job for Console or
+  <code>tail -f</code>, and the path is right there.</p>
   <p><b>What this asks of the hub:</b> log lines gain a leading <code>YYYY-MM-DD HH:MM:SS</code>
   timestamp. Bare untimestamped lines make a tail nearly useless, so that is a required change, not
   a nice-to-have.</p>
