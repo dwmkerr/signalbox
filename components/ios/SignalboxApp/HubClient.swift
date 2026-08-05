@@ -425,6 +425,7 @@ final class HubClient: ObservableObject {
         // verbatim. Never re-sort: the ordering rules live in the reducer.
         var rows: [Session] = []
         var seenHosts: [String] = []
+        var snapshotSeq = 0
         for event in events {
             // Hidden rows are kept, not dropped: the view renders the main list
             // from the non-hidden rows and collapses these into the Hidden
@@ -452,10 +453,12 @@ final class HubClient: ObservableObject {
                 // no origin at all cannot be jumped to either.
                 jumpable: event.origin?.tmux != nil || event.origin?.cursor != nil
             ))
-            if let seq = event.seq { lastSeq = max(lastSeq, seq) }
+            if let seq = event.seq { snapshotSeq = max(snapshotSeq, seq) }
         }
         sessions = rows
         hosts = seenHosts
+        // /state is hub-authoritative, so its seq domain wins after a resync.
+        lastSeq = snapshotSeq
     }
 
     // label beats title beats the cwd folder name.

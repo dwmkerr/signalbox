@@ -262,6 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let old = sessions
         var fresh: [String: Session] = [:]
         var freshOrder: [String] = []
+        var snapshotSeq = 0
         for event in events {
             let date = EventDate.parse(event.ts) ?? Date()
             let prev = old[event.sessionKey]
@@ -287,7 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             if fresh[event.sessionKey] == nil { freshOrder.append(event.sessionKey) }
             fresh[event.sessionKey] = session
-            if let seq = event.seq { lastSeq = max(lastSeq, seq) }
+            if let seq = event.seq { snapshotSeq = max(snapshotSeq, seq) }
             if didInitialLoad {
                 maybeNotify(new: event, date: date, prev: prev, acked: session.acked, hidden: session.hidden)
             }
@@ -295,6 +296,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessions = fresh
         order = freshOrder
         didInitialLoad = true
+        // A mode switch or replaced upstream can put the client in a different
+        // seq universe; /state is hub-authoritative, so its domain wins.
+        lastSeq = snapshotSeq
         refreshUI()
     }
 
