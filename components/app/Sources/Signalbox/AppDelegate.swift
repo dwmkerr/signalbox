@@ -1,5 +1,12 @@
 import AppKit
+import KeyboardShortcuts
 import UserNotifications
+
+extension KeyboardShortcuts.Name {
+    // Do not pass initial: here: lazy seeding could race migration and stamp
+    // ctrl-alt-j over a user's legacy custom shortcut.
+    @MainActor static let openJumplist = Self("openJumplist")
+}
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -48,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }()
 
     private var statusItem: NSStatusItem!
+    private static let maxInlineMenuRows = 10
     // True while the status menu is open (tracking). Rebuilding then would
     // dismiss it under the pointer; see rebuildMenu.
     private var menuIsTracking = false
@@ -65,7 +73,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notificationsAvailable = false
     // Retained so Foundation reaps the children; pruned on the next spawn.
     private var runningProcesses: [Process] = []
-    private var hotkey: GlobalHotkey?
     private var palette: PaletteController?
     private var settings: SettingsController?
     private var connectPhone: ConnectPhoneController?
@@ -127,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openSettingsHubTab: { [weak self] in self?.settings?.show(tab: .hub) }
         )
         setupNotifications()
+        migrateJumplistShortcut()
         setupPalette()
 
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -254,6 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let old = sessions
         var fresh: [String: Session] = [:]
         var freshOrder: [String] = []
+        var snapshotSeq = 0
         for event in events {
             let date = EventDate.parse(event.ts) ?? Date()
             let prev = old[event.sessionKey]
@@ -279,7 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             if fresh[event.sessionKey] == nil { freshOrder.append(event.sessionKey) }
             fresh[event.sessionKey] = session
-            if let seq = event.seq { lastSeq = max(lastSeq, seq) }
+            if let seq = event.seq { snapshotSeq = max(snapshotSeq, seq) }
             if didInitialLoad {
                 maybeNotify(new: event, date: date, prev: prev, acked: session.acked, hidden: session.hidden)
             }
@@ -287,6 +296,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessions = fresh
         order = freshOrder
         didInitialLoad = true
+        // A mode switch or replaced upstream can put the client in a different
+        // seq universe; /state is hub-authoritative, so its domain wins.
+        lastSeq = snapshotSeq
         refreshUI()
     }
 
@@ -505,6 +517,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Palette
 
+    private func migrateJumplistShortcut() {
+        let defaults = UserDefaults.standard
+        let shortcutKey = "KeyboardShortcuts_openJumplist"
+        guard defaults.object(forKey: shortcutKey) == nil else { return }
+
+        // Seed before registering the handler: KeyboardShortcuts claims the
+        // stored shortcut when the handler is registered, so migration wins.
+        if let raw = defaults.string(forKey: "hotkey"),
+           let spec = GlobalHotkey.parse(raw) {
+            let shortcut = KeyboardShortcuts.Shortcut(
+                carbonKeyCode: Int(spec.keyCode),
+                carbonModifiers: Int(spec.modifiers)
+            )
+            KeyboardShortcuts.setShortcut(shortcut, for: .openJumplist)
+        } else {
+            let spec = GlobalHotkey.defaultSpec
+            let shortcut = KeyboardShortcuts.Shortcut(
+                carbonKeyCode: Int(spec.keyCode),
+                carbonModifiers: Int(spec.modifiers)
+            )
+            KeyboardShortcuts.setShortcut(shortcut, for: .openJumplist)
+        }
+
+        // Leave the legacy key in place so a downgrade still has the user's
+        // previous choice to migrate again.
+    }
+
     private func setupPalette() {
         palette = PaletteController(
             monitor: hubHealthMonitor,
@@ -517,38 +556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onPin: { [weak self] key, pinned in self?.setPinned(sessionKey: key, pinned: pinned) },
             onSettings: { [weak self] tab in self?.settings?.show(tab: tab) }
         )
-        let spec: GlobalHotkey.Spec
-        if let raw = UserDefaults.standard.string(forKey: "hotkey"), !raw.isEmpty {
-            if let parsed = GlobalHotkey.parse(raw) {
-                spec = parsed
-            } else {
-                NSLog("Signalbox: cannot parse hotkey '\(raw)', using \(GlobalHotkey.defaultSpec.display)")
-                spec = GlobalHotkey.defaultSpec
-            }
-        } else {
-            spec = GlobalHotkey.defaultSpec
-        }
-        hotkey = GlobalHotkey(spec: spec) { [weak self] in self?.palette?.toggle() }
-        if hotkey?.register() != true {
-            // Another app owns the combo (Carbon is first-come-first-served).
-            // A jumplist you cannot summon is a broken app, so fall back to
-            // the previous default and say so.
-            let fallback = GlobalHotkey.fallbackSpec
-            guard spec.display != fallback.display else { return }
-            hotkey = GlobalHotkey(spec: fallback) { [weak self] in self?.palette?.toggle() }
-            let recovered = hotkey?.register() == true
-            NSLog("Signalbox: \(spec.display) is taken by another app; \(recovered ? "using \(fallback.display)" : "no hotkey available")")
-            guard notificationsAvailable else { return }
-            let content = UNMutableNotificationContent()
-            content.title = "Jumplist shortcut unavailable"
-            content.body = recovered
-                ? "\(spec.display) is taken by another app - using \(fallback.display) instead. Free the combo there or pick another in Settings."
-                : "\(spec.display) and \(fallback.display) are both taken by other apps - set one in Settings."
-            let request = UNNotificationRequest(
-                identifier: "signalbox-hotkey-conflict", content: content, trigger: nil
-            )
-            UNUserNotificationCenter.current().add(request)
-        }
+        KeyboardShortcuts.onKeyDown(for: .openJumplist) { [weak self] in self?.palette?.toggle() }
     }
 
     // Only hidden rows drop out (contract: hide suppresses until the next
@@ -835,7 +843,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (marks + weight), not filtering, says what needs you - the working
         // set stays spatially stable; hidden rows drop out, as do sessions
         // outside the additional filters (Settings) so the menu matches the
-        // jumplist.
+        // jumplist. A dropdown taller than the screen scrolls under the mouse
+        // and loses the spatial contract; the overflow keeps board order in a
+        // submenu.
         let tokens = activeFilters()
         let visible = orderedSessions().filter {
             !$0.hidden && passesFilters($0, tokens)
@@ -848,24 +858,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         let now = Date()
-        for session in visible {
-            let event = session.event
-            let item = NSMenuItem(title: "", action: #selector(jumpMenuItem(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = event.sessionKey
-            let mark = statusMark(event: event.event, acked: session.acked)
-            // Status is carried by the mark, same as palette rows - no words.
-            item.image = menuSymbol(for: mark, word: statusWord(event.event))
-            item.attributedTitle = menuTitle(
-                agent: event.agent,
-                name: displayName(for: event, label: session.label),
-                tags: session.tags ?? [],
-                age: ageString(from: sessionAgeStart(session), to: now),
-                unread: !session.acked && needsCheck(event.event),
-                read: session.acked && event.event != "busy",
-                pinned: session.pinned
+        for session in visible.prefix(Self.maxInlineMenuRows) {
+            menu.addItem(sessionMenuItem(session, now: now))
+        }
+        let overflow = visible.dropFirst(Self.maxInlineMenuRows)
+        if !overflow.isEmpty {
+            let item = NSMenuItem(
+                title: "Show More (\(overflow.count))", action: nil, keyEquivalent: ""
             )
-            // No "?" badge: the amber mark alone says asking (amber scheme).
+            let sub = NSMenu()
+            for session in overflow {
+                sub.addItem(sessionMenuItem(session, now: now))
+            }
+            menu.setSubmenu(sub, for: item)
             menu.addItem(item)
         }
         menu.addItem(.separator())
@@ -887,6 +892,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         ))
+    }
+
+    private func sessionMenuItem(_ session: Session, now: Date) -> NSMenuItem {
+        let event = session.event
+        let item = NSMenuItem(title: "", action: #selector(jumpMenuItem(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = event.sessionKey
+        let mark = statusMark(event: event.event, acked: session.acked)
+        // Status is carried by the mark, same as palette rows - no words.
+        item.image = menuSymbol(for: mark, word: statusWord(event.event))
+        item.attributedTitle = menuTitle(
+            agent: event.agent,
+            name: displayName(for: event, label: session.label),
+            tags: session.tags ?? [],
+            age: ageString(from: sessionAgeStart(session), to: now),
+            unread: !session.acked && needsCheck(event.event),
+            read: session.acked && event.event != "busy",
+            pinned: session.pinned
+        )
+        // No "?" badge: the amber mark alone says asking (amber scheme).
+        return item
     }
 
     // A small phone glyph on the Connect Phone item. Template-rendered so it
@@ -1111,6 +1137,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
+        // Only the root menu drives tracking: if AppKit ever routes a Show More
+        // submenu event here, rebuilding would dismiss the open dropdown.
+        guard menu === self.menu else { return }
         // Ages are rendered into the titles, so recompute them at open time -
         // before the tracking flag goes up, so this rebuild still runs.
         rebuildMenu()
@@ -1118,6 +1147,7 @@ extension AppDelegate: NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) {
+        guard menu === self.menu else { return }
         menuIsTracking = false
         if menuRebuildDeferred {
             menuRebuildDeferred = false

@@ -356,6 +356,65 @@ describe("forwarder uplink", () => {
     expect(upstream.received.map((received) => received.body.session_key)).toEqual(["script:a", "script:b"]);
   });
 
+  test("subscriber streams close when the uplink reconnects", async () => {
+    const upstream = trackFake(new FakeUpstream());
+    const upstreamPort = listenerPort(upstream.server);
+    const { url } = startForwarder(upstream.url);
+    const res = await fetch(`${url}/stream?since=0`);
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    try {
+      await waitForConnection(url, true);
+      await upstream.stop();
+      await waitForConnection(url, false);
+      // The stream must survive the DROP itself - only the reconnect may close
+      // it. A close-at-drop implementation would queue EOF here and pass the
+      // final assertion spuriously, so pin the midpoint: while the uplink is
+      // down a read may deliver buffered pre-drop bytes (still open) or stay
+      // pending (still open) - it must not resolve done.
+      const midpoint = await Promise.race([
+        reader.read().then((r) => (r.done ? "closed" : "still-open")),
+        Bun.sleep(250).then(() => "still-open"),
+      ]);
+      expect(midpoint).toBe("still-open");
+      trackFake(new FakeUpstream(upstreamPort));
+      await waitForConnection(url, true);
+
+      const eof = await Promise.race([
+        (async () => {
+          for (;;) {
+            const result = await reader.read();
+            if (result.done) return result;
+          }
+        })(),
+        Bun.sleep(3_000).then(() => {
+          throw new Error("timed out waiting for subscriber stream to close");
+        }),
+      ]);
+      expect(eof.done).toBe(true);
+    } finally {
+      await reader.cancel();
+    }
+  });
+
+  test("the first uplink connect does not close subscriber streams", async () => {
+    const port = await unusedPort();
+    const { url } = startForwarder(`http://127.0.0.1:${port}`);
+    const res = await fetch(`${url}/stream?since=0`);
+    expect(res.status).toBe(200);
+    const reader = res.body!.getReader();
+    try {
+      const upstream = trackFake(new FakeUpstream(port));
+      await waitForConnection(url, true);
+      const signal = wireEvent("script:first-connect", { seq: 1 });
+      upstream.pushSignal(signal);
+      const frames = await readFrames(reader, 1);
+      expect(frames).toEqual([{ event: "signal", data: signal }]);
+    } finally {
+      await reader.cancel();
+    }
+  });
+
   test("downlink feeds state and preserves it while the uplink is down", async () => {
     const upstream = trackFake(new FakeUpstream());
     const { url } = startForwarder(upstream.url);

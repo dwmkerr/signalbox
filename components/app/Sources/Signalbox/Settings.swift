@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 
 // SharedSettings reads/writes ~/.config/signalbox/settings.json - the flat
 // file the CLI hooks also read (cli/src/config.ts), so a toggle flipped here
@@ -170,6 +171,16 @@ enum SettingsTab: String, CaseIterable {
     }
 }
 
+@MainActor
+private final class LogsAppearanceStack: NSStackView {
+    var onAppearanceChange: ((NSAppearance) -> Void)?
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onAppearanceChange?(effectiveAppearance)
+    }
+}
+
 // One preferences window owns the app-only settings, the shared agent toggles
 // and the hub's live status. Its toolbar stays fixed as agent types and hub
 // controls grow independently.
@@ -325,7 +336,12 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         let iconRow = horizontalRow([iconLabel, popup])
 
         let shortcutLabel = rowLabel("Jumplist shortcut:")
-        let shortcutRow = horizontalRow([shortcutLabel, shortcutWell()])
+        let recorder = KeyboardShortcuts.RecorderCocoa(for: .openJumplist)
+        recorder.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        let shortcutRow = horizontalRow([shortcutLabel, recorder])
+        let shortcutCaption = caption("Press the field to record a global shortcut")
+        let shortcutCaptionIndent = NSView()
+        let shortcutCaptionRow = horizontalRow([shortcutCaptionIndent, shortcutCaption])
 
         let filterLabel = rowLabel("Additional filters:")
         let filterField = NSTextField(
@@ -348,14 +364,16 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         let captionIndent = NSView()
         let captionRow = horizontalRow([captionIndent, filterCaption])
 
-        let stack = verticalStack([iconRow, shortcutRow, filterRow, captionRow])
+        let stack = verticalStack([
+            iconRow, shortcutRow, shortcutCaptionRow, filterRow, captionRow,
+        ])
         stack.setCustomSpacing(2, after: filterRow)
         // One label column, right aligned, so the three controls line up the
         // way every other settings window on macOS lays a form out. Activated
         // only now: cross-row constraints need the shared stack ancestor, and
         // activating them earlier throws (AppKit catches it, which silently
         // killed this window).
-        for view in [shortcutLabel, filterLabel, captionIndent] {
+        for view in [shortcutLabel, filterLabel, shortcutCaptionIndent, captionIndent] {
             view.widthAnchor.constraint(equalTo: iconLabel.widthAnchor).isActive = true
         }
         return pane(containing: stack)
@@ -521,12 +539,12 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
             string: "~/.local/state/signalbox/hub.log",
             attributes: [
                 .font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular),
-                .foregroundColor: NSColor(calibratedWhite: 0.85, alpha: 1),
+                .foregroundColor: NSColor.labelColor,
             ]
         )
         pathButton.wantsLayer = true
-        pathButton.layer?.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1).cgColor
-        pathButton.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
+        pathButton.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        pathButton.layer?.borderColor = NSColor.separatorColor.cgColor
         pathButton.layer?.borderWidth = 1
         pathButton.layer?.cornerRadius = 6
         pathButton.heightAnchor.constraint(equalToConstant: 27).isActive = true
@@ -563,12 +581,12 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         let scrollView = NSScrollView()
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
-        scrollView.backgroundColor = NSColor(calibratedWhite: 0.085, alpha: 1)
+        scrollView.backgroundColor = NSColor.textBackgroundColor
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.wantsLayer = true
-        scrollView.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
+        scrollView.layer?.borderColor = NSColor.separatorColor.cgColor
         scrollView.layer?.borderWidth = 1
         scrollView.layer?.cornerRadius = 6
         scrollView.widthAnchor.constraint(equalToConstant: Self.paneWidth).isActive = true
@@ -580,7 +598,7 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         textView.isRichText = false
         textView.drawsBackground = true
         textView.backgroundColor = scrollView.backgroundColor
-        textView.textColor = NSColor(calibratedWhite: 0.60, alpha: 1)
+        textView.textColor = NSColor.secondaryLabelColor
         textView.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
         textView.textContainerInset = NSSize(width: 10, height: 7)
         textView.textContainer?.lineFragmentPadding = 0
@@ -600,7 +618,21 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         scrollView.documentView = textView
         self.logTextView = textView
 
-        let stack = verticalStack([heading, note, pathRow, toast, recentRow, scrollView])
+        let stack = LogsAppearanceStack(
+            views: [heading, note, pathRow, toast, recentRow, scrollView]
+        )
+        // cgColor is a resolved snapshot, so refresh the layer colors when the
+        // Logs view changes appearance.
+        stack.onAppearanceChange = { appearance in
+            appearance.performAsCurrentDrawingAppearance {
+                pathButton.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+                pathButton.layer?.borderColor = NSColor.separatorColor.cgColor
+                scrollView.layer?.borderColor = NSColor.separatorColor.cgColor
+            }
+        }
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
         stack.setCustomSpacing(4, after: heading)
         stack.setCustomSpacing(8, after: note)
         stack.setCustomSpacing(5, after: pathRow)
@@ -658,45 +690,6 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         label.textColor = .secondaryLabelColor
         label.preferredMaxLayoutWidth = Self.paneWidth
         return label
-    }
-
-    // A recorder-style capsule holding the key glyphs, not the config string
-    // that produced them. It is not a recorder yet - the combination is still
-    // set with `defaults write`, which the tooltip carries.
-    private func shortcutWell() -> NSView {
-        let spec: GlobalHotkey.Spec
-        if let raw = UserDefaults.standard.string(forKey: "hotkey"),
-           let parsed = GlobalHotkey.parse(raw) {
-            spec = parsed
-        } else {
-            spec = GlobalHotkey.defaultSpec
-        }
-
-        let glyphs = NSTextField(labelWithString: spec.glyphs)
-        glyphs.font = .systemFont(ofSize: 13)
-        glyphs.alignment = .center
-        glyphs.translatesAutoresizingMaskIntoConstraints = false
-
-        let capsule = NSView()
-        capsule.wantsLayer = true
-        capsule.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
-        capsule.layer?.borderColor = NSColor.separatorColor.cgColor
-        capsule.layer?.borderWidth = 1
-        capsule.layer?.cornerRadius = 6
-        capsule.translatesAutoresizingMaskIntoConstraints = false
-        capsule.toolTip =
-            "Set with: defaults write com.dwmkerr.signalbox hotkey \"cmd+shift+space\""
-        capsule.addSubview(glyphs)
-        NSLayoutConstraint.activate([
-            capsule.heightAnchor.constraint(equalToConstant: 24),
-            capsule.widthAnchor.constraint(greaterThanOrEqualToConstant: 62),
-            glyphs.centerXAnchor.constraint(equalTo: capsule.centerXAnchor),
-            glyphs.centerYAnchor.constraint(equalTo: capsule.centerYAnchor),
-            glyphs.leadingAnchor.constraint(
-                greaterThanOrEqualTo: capsule.leadingAnchor, constant: 12
-            ),
-        ])
-        return capsule
     }
 
     private func select(tab: SettingsTab) {
@@ -828,6 +821,12 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
             guard let self, let textView = self.logTextView else { return }
             self.window?.contentView?.layoutSubtreeIfNeeded()
             textView.scrollToEndOfDocument(nil)
+            // scrollToEndOfDocument lands on the END of the last line, so a long
+            // line opens scrolled past its timestamp; a log is read left to right.
+            guard let scroll = textView.enclosingScrollView else { return }
+            let clip = scroll.contentView
+            clip.scroll(to: NSPoint(x: 0, y: clip.bounds.origin.y))
+            scroll.reflectScrolledClipView(clip)
         }
     }
 

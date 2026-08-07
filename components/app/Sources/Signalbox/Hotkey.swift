@@ -1,67 +1,21 @@
 import AppKit
 import Carbon
 
-// Carbon RegisterEventHotKey rather than an NSEvent global monitor: it needs
-// no accessibility permission prompt and it consumes the keystroke, so the
-// frontmost app never sees it - the Spotlight/Raycast summoning mechanism.
+// Parses the legacy hotkey defaults string for migration to KeyboardShortcuts.
 @MainActor
 final class GlobalHotkey {
     struct Spec {
         let keyCode: UInt32
         let modifiers: UInt32
         let display: String
-
-        // Modifier glyphs in Apple's canonical order, which is the order every
-        // menu and shortcut field on macOS renders them in - independent of
-        // the order the combination was typed in the config string.
-        private static let modifierGlyphs: [(mask: Int, glyph: String)] = [
-            (controlKey, "\u{2303}"), (optionKey, "\u{2325}"),
-            (shiftKey, "\u{21E7}"), (cmdKey, "\u{2318}"),
-        ]
-
-        // Keys with no single-character glyph in menus keep their name; macOS
-        // itself spells Space out rather than drawing it.
-        private static let keyGlyphs: [String: String] = [
-            "space": "Space", "return": "\u{21A9}", "enter": "\u{21A9}", "tab": "\u{21E5}",
-        ]
-
-        // "⌃⌥J" - how a shortcut reads in every menu and shortcut field on
-        // macOS. `display` is the config syntax the user types into defaults,
-        // which is not something to put in front of them.
-        var glyphs: String {
-            let mods = Self.modifierGlyphs
-                .filter { modifiers & UInt32($0.mask) != 0 }
-                .map(\.glyph)
-                .joined()
-            let key = display.split(separator: "+").last.map(String.init) ?? ""
-            return mods + (Self.keyGlyphs[key] ?? key.uppercased())
-        }
     }
 
-    // ⌃⌥J. Carbon registrations are first-come-first-served across the whole
-    // machine (and success is reported even for contended combos), so a
-    // broken user override falls back here rather than failing silently.
+    // ⌃⌥J, the default used for new installs and malformed legacy values.
     static let defaultSpec = Spec(
         keyCode: UInt32(kVK_ANSI_J),
         modifiers: UInt32(controlKey | optionKey),
         display: "ctrl+alt+j"
     )
-
-    static let fallbackSpec = defaultSpec
-
-    // Modifier glyphs in Apple's canonical order, which is the order every
-    // menu and shortcut field on macOS renders them in - independent of the
-    // order the combination was typed in the config string.
-    private static let modifierGlyphs: [(mask: Int, glyph: String)] = [
-        (controlKey, "\u{2303}"), (optionKey, "\u{2325}"),
-        (shiftKey, "\u{21E7}"), (cmdKey, "\u{2318}"),
-    ]
-
-    // Keys with no single-character glyph in menus keep their name; macOS
-    // itself spells Space out rather than drawing it.
-    private static let keyGlyphs: [String: String] = [
-        "space": "Space", "return": "\u{21A9}", "enter": "\u{21A9}", "tab": "\u{21E5}",
-    ]
 
     /// Parses "ctrl+alt+j" / "cmd+shift+space" style strings. Returns nil on
     /// anything unrecognised so the caller can log and fall back to the default.
@@ -103,95 +57,4 @@ final class GlobalHotkey {
         "return": UInt32(kVK_Return), "enter": UInt32(kVK_Return),
         "tab": UInt32(kVK_Tab),
     ]
-
-    private static let signature: OSType = {
-        var result: OSType = 0
-        for scalar in "SGBX".unicodeScalars { result = (result << 8) + OSType(scalar.value) }
-        return result
-    }()
-
-    private let spec: Spec
-    private let onPress: @MainActor () -> Void
-    private var hotKeyRef: EventHotKeyRef?
-    private var handlerRef: EventHandlerRef?
-
-    init(spec: Spec, onPress: @escaping @MainActor () -> Void) {
-        self.spec = spec
-        self.onPress = onPress
-    }
-
-    private static let hotKeyNumber: UInt32 = 1
-
-    // Returns false when the combo could not be claimed (usually because
-    // another app registered it first) so the caller can fall back.
-    @discardableResult
-    func register() -> Bool {
-        // Registering again would orphan the previous Carbon refs (there is no
-        // unregister path - see the deinit note below), so refuse a second call.
-        guard handlerRef == nil, hotKeyRef == nil else { return hotKeyRef != nil }
-        var eventSpec = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
-        // The Carbon handler is a C function pointer and cannot capture, so
-        // `self` rides along as userData (unretained: this object lives for
-        // the app's lifetime in the AppDelegate).
-        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        let installStatus = InstallEventHandler(
-            GetApplicationEventTarget(),
-            { _, event, userData in
-                guard let event, let userData else { return OSStatus(eventNotHandledErr) }
-                // Carbon delivers application-target events on the main
-                // thread's run loop, so assuming MainActor is sound here.
-                return MainActor.assumeIsolated { () -> OSStatus in
-                    // Match our ID so another registration in this process can
-                    // never trigger the palette through this handler.
-                    var hotKeyID = EventHotKeyID()
-                    let status = GetEventParameter(
-                        event,
-                        EventParamName(kEventParamDirectObject),
-                        EventParamType(typeEventHotKeyID),
-                        nil,
-                        MemoryLayout<EventHotKeyID>.size,
-                        nil,
-                        &hotKeyID
-                    )
-                    guard status == noErr,
-                          hotKeyID.signature == GlobalHotkey.signature,
-                          hotKeyID.id == GlobalHotkey.hotKeyNumber
-                    else { return OSStatus(eventNotHandledErr) }
-                    let hotkey = Unmanaged<GlobalHotkey>.fromOpaque(userData).takeUnretainedValue()
-                    hotkey.onPress()
-                    return noErr
-                }
-            },
-            1,
-            &eventSpec,
-            selfPtr,
-            &handlerRef
-        )
-        guard installStatus == noErr else {
-            NSLog("Signalbox: failed to install hotkey handler (status \(installStatus))")
-            return false
-        }
-        let hotKeyID = EventHotKeyID(signature: Self.signature, id: Self.hotKeyNumber)
-        let registerStatus = RegisterEventHotKey(
-            spec.keyCode,
-            spec.modifiers,
-            hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRef
-        )
-        if registerStatus != noErr {
-            NSLog("Signalbox: failed to register hotkey \(spec.display) (status \(registerStatus))")
-            hotKeyRef = nil
-            return false
-        }
-        return true
-    }
-
-    // No deinit cleanup: the AppDelegate holds this for the process lifetime
-    // and the OS releases Carbon registrations on exit. (A nonisolated deinit
-    // also cannot touch the non-Sendable EventHotKeyRef under Swift 6.)
 }

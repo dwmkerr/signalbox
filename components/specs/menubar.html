@@ -48,7 +48,7 @@
 
   /* Combined mock: the bar with the dropdown hanging from the icon. */
   .barmock { position:relative; border:1px solid #ffffff18; border-radius:10px; overflow:hidden;
-             background:linear-gradient(160deg,#1b2a4a,#3b2a58); padding-bottom:330px; margin:4px 0 10px; }
+             background:linear-gradient(160deg,#1b2a4a,#3b2a58); padding-bottom:410px; margin:4px 0 10px; }
   .barmock .strip { background:rgba(20,20,24,.85); }
   .barmock .menu { position:absolute; top:34px; right:150px; margin:0; }
   /* Solid recreation of the dropdown (light appearance, opaque). */
@@ -93,6 +93,11 @@
     <div class="mrow"><span class="mk" style="background:#0A84FF"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><g stroke="#D97757" stroke-width="2.1" stroke-linecap="round"><line x1="10" y1="10" x2="18" y2="10"/><line x1="10" y1="10" x2="15.66" y2="15.66"/><line x1="10" y1="10" x2="10" y2="18"/><line x1="10" y1="10" x2="4.34" y2="15.66"/><line x1="10" y1="10" x2="2" y2="10"/><line x1="10" y1="10" x2="4.34" y2="4.34"/><line x1="10" y1="10" x2="10" y2="2"/><line x1="10" y1="10" x2="15.66" y2="4.34"/></g></svg></span><span class="t unread">work-project</span><span class="mage">10m</span></div>
     <div class="mrow"><span class="mk ring"></span><span class="agent"><svg viewBox="0 0 20 20" width="14" height="14"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#6e6e73" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#34C759" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#6e6e73" stroke-width="1.6" stroke-linecap="round"/></svg></span><span class="t read">release-notes <span class="mtags">work</span></span><span class="mage">5h</span></div>
     <div class="mrow"><span class="mk ring"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">crash-dumps</span><span class="mage">23h</span></div>
+    <div class="mrow"><span class="mk" style="background:#FF453A"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t unread">api-migration</span><span class="mage">16m</span></div>
+    <div class="mrow"><span class="mk" style="background:#0A84FF"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">test-harness</span><span class="mage">32m</span></div>
+    <div class="mrow"><span class="mk ring"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">weekly-review</span><span class="mage">2h</span></div>
+    <div class="mrow"><span class="mk ring"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">archive-cleanup</span><span class="mage">1d</span></div>
+    <div class="mrow"><span class="t">Show More (N)</span><span class="mage">›</span></div>
     <div class="msep"></div>
     <div class="mrow"><span class="agent" style="color:#1d1d1f"><svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="2.3" width="8" height="15.4" rx="2"/><line x1="9" y1="15" x2="11" y2="15" stroke-width="1.3"/></svg></span><span class="t">Connect Phone…</span></div>
     <div class="mrow"><span class="t">Settings…</span><span class="mage">⌘,</span></div>
@@ -118,7 +123,11 @@
   </table>
 
   <h2>Dropdown</h2>
-  <p>One row per session in board order: status mark, agent glyph, name, age.</p>
+  <p>One row per session in board order: status mark, agent glyph, name, age. Clicking any session
+  row jumps to that session. The first 10 sessions appear inline; any beyond the first 10 move into
+  a <code>Show More (N)</code> submenu in the same order, placed before the separator - N is the
+  number of overflow sessions, not the total. With 10 or fewer visible sessions there is no
+  Show More row at all.</p>
   <p>Tags appear as dim lowercase text after the name and before the age, the same quiet signal as
   the jumplist pill in the form a menu can carry.</p>
   <ul>
@@ -126,7 +135,8 @@
     cannot animate, so working shows a static dotted circle and failed the red ✕.</li>
     <li>The agent glyph is the same per-agent icon the jumplist uses (glyph only).</li>
     <li>Bold means unread; a faint ring means read.</li>
-    <li>Click a row to jump.</li>
+    <li>Overflow sessions (see above) sit in the <code>Show More (N)</code> submenu; submenu rows
+    behave identically to inline rows (click to jump).</li>
     <li>Hidden rows drop out, and the <a href="settings.html">additional filters</a> apply here too, so
     the dropdown matches the jumplist. With nothing to show, a disabled "No sessions" row appears.</li>
     <li>An empty board that is empty because the app cannot read the hub says so instead: the same
