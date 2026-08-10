@@ -524,7 +524,10 @@ is how the menu bar app's executor still receives a jump requested from a phone.
 
 <h3>The uplink is visible</h3>
 <p><code>GET /healthz</code> reports <code>url</code>, <code>connected</code>, <code>lastSeq</code> and
-<code>spooled</code> under <code>upstream</code>, so a local surface can show whether the link is up.</p>
+<code>spooled</code> under <code>upstream</code>, so a local surface can show whether the link is up.
+On an uplink reconnect the forwarder drops its downstream streams so every client resyncs from
+<code>/state</code> - that is how a seq-domain change (a switched or replaced hub) heals with no
+client-side protocol change.</p>
 
 <h3>Pair with the hub that owns the credential</h3>
 <p>A forwarder returns <code>409</code> from <code>POST /pair/new</code>,

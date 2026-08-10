@@ -68,6 +68,7 @@ export class Forwarder implements RequestHandler {
   private cmdSubs = new Set<CommandSubscriber>();
   private lastSeq = 0;
   private connected = false;
+  private hasConnected = false;
   private spool: Spool;
   private closed = false;
   private started = false;
@@ -296,6 +297,11 @@ export class Forwarder implements RequestHandler {
           clearInterval(hb);
           subs.delete(send);
           cmdSubs.delete(sendCmd);
+          try {
+            controller.close();
+          } catch {
+            // Closing an already-errored stream controller throws.
+          }
           if (cleanup) this.streamCleanups.delete(cleanup);
         };
         this.streamCleanups.add(cleanup);
@@ -329,6 +335,18 @@ export class Forwarder implements RequestHandler {
         }
         if (!res.body) throw new Error("upstream stream returned no body");
         this.connected = true;
+        if (this.hasConnected) {
+          // The first connect must not flap clients at boot; a re-connect must
+          // close them so their existing reconnect path resyncs from /state.
+          // Closing before the replay lands is safe: within one upstream the
+          // cache's domain matches, so a client that resyncs against a
+          // momentarily stale cache catches up from the next relayed frames.
+          // A REPLACED upstream (regressed domain) is not healed here at all -
+          // the uplink cursor itself is stale then and the forwarder needs a
+          // restart (see the seq-domain note in events.md).
+          for (const cleanup of this.streamCleanups) cleanup();
+        }
+        this.hasConnected = true;
         this.failureLogged = false;
         backoff = reconnectMinMs;
         this.kickDrain();

@@ -320,11 +320,143 @@ Evidence: the sessions page showing the green "Connected to 127.0.0.1" line
 and the seeded board rows. A screenshot right after launch (before the 3s
 sleep) additionally captures the quiet "Connecting..." state.
 
+## Step 10c - dropdown overflow
+
+Seed at least 12 sessions against the app's own hub on port 8377. The demo
+seed provides six sessions; add distinct sessions so the overflow cap engages:
+
+```bash
+mkdir -p "$EVIDENCE/10c-dropdown-overflow" || true
+SIGNALBOX_URL=http://127.0.0.1:8377 components/scripts/demo.sh || true
+for session_number in 01 02 03 04 05 06 07; do
+  SIGNALBOX_URL=http://127.0.0.1:8377 $SB fire --agent claude --event busy \
+    --session-key "itest:overflow-$session_number" --title "overflow-$session_number" || true
+done
+
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click menu bar item 1 of menu bar 2' || true
+sleep 1
+screencapture -x "$EVIDENCE/10c-dropdown-overflow/dropdown.png" || true
+
+osascript -e 'tell application "System Events" to tell process "Signalbox" to perform action "AXShowMenu" of first menu item of menu 1 of first menu bar item of menu bar 2 whose name starts with "Show More"' || true
+sleep 1
+screencapture -x "$EVIDENCE/10c-dropdown-overflow/show-more.png" || true
+```
+
+If Accessibility or Screen Recording permission is missing, or the menu bar
+script cannot open the menu or submenu, record a `warn` with a note and move
+on. Evidence: the first screenshot shows exactly 10 inline rows in board order,
+followed by `Show More (N)` before the separator; the second shows the
+remainder in the opened submenu.
+
+## Step 10d - logs pane
+
+Open Settings, select Logs, and capture the pane as soon as it opens. Use
+Accessibility scripting for the toolbar click; if it proves unreliable, select
+Logs manually and record that in the step note:
+
+```bash
+mkdir -p "$EVIDENCE/10d-logs-pane" || true
+# The keystroke goes to the frontmost app, so bring Signalbox forward first.
+osascript -e 'tell application "Signalbox" to activate' || true
+sleep 1
+osascript -e 'tell application "System Events" to key code 43 using {command down}' || true
+sleep 1
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click button "Logs" of toolbar 1 of window 1' || true
+sleep 1
+screencapture -x "$EVIDENCE/10d-logs-pane/logs-current.png" || true
+
+# Only toggle when the original appearance is known - toggling blind would
+# leave the user's system flipped with nothing to restore to.
+ORIGINAL_DARK_MODE="$(osascript -e 'tell application "System Events" to tell appearance preferences to get dark mode' 2>/dev/null || true)"
+printf 'original dark mode: %s\n' "${ORIGINAL_DARK_MODE:-unknown}" > "$EVIDENCE/10d-logs-pane/appearance.txt"
+case "$ORIGINAL_DARK_MODE" in
+  true|false)
+    osascript -e 'tell application "System Events" to tell appearance preferences to set dark mode to not dark mode' || true
+    sleep 1
+    screencapture -x "$EVIDENCE/10d-logs-pane/logs-opposite-appearance.png" || true
+    osascript -e "tell application \"System Events\" to tell appearance preferences to set dark mode to $ORIGINAL_DARK_MODE" || true
+    ;;
+  *) printf 'appearance state unreadable; opposite-appearance capture skipped (warn)\n' >> "$EVIDENCE/10d-logs-pane/appearance.txt" ;;
+esac
+```
+
+If Settings, appearance scripting, or screen capture fails, record a `warn`
+with a note and continue. Evidence: the Logs tail shows the newest lines, the
+timestamp column is visible, and the horizontal scroller is at the left, not
+mid-line. Both screenshots must be readable with no grey-on-white or
+black-on-black rendering. Restore the original system appearance.
+
+## Step 10e - shortcut recorder and migration
+
+Capture Settings -> General with the recorder idle and the current shortcut's
+glyphs visible. Try the UI route first:
+
+```bash
+mkdir -p "$EVIDENCE/10e-shortcut-recorder" || true
+# Snapshot the whole defaults domain before touching anything. The recorded
+# shortcut is stored as Data, which per-key defaults read/write cannot
+# round-trip - export/import round-trips every type.
+defaults export com.dwmkerr.signalbox "$EVIDENCE/10e-shortcut-recorder/signalbox-defaults-backup.plist" || true
+
+# The keystroke goes to the frontmost app, so bring Signalbox forward first.
+osascript -e 'tell application "Signalbox" to activate' || true
+sleep 1
+osascript -e 'tell application "System Events" to key code 43 using {command down}' || true
+sleep 1
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click button "General" of toolbar 1 of window 1' || true
+sleep 1
+screencapture -x "$EVIDENCE/10e-shortcut-recorder/recorder-idle.png" || true
+```
+
+Setting a combination through the recorder needs real keystrokes into the
+focused field; if that proves unreliable under `osascript`, record it as a
+manual step in the report rather than simulating it another way.
+
+Test migration with the app quit. The domain snapshot above is the restore
+mechanism:
+
+```bash
+osascript -e 'tell application "Signalbox" to quit' || true
+sleep 1
+defaults delete com.dwmkerr.signalbox KeyboardShortcuts_openJumplist 2>/dev/null || true
+defaults write com.dwmkerr.signalbox hotkey "cmd+shift+space" || true
+open components/app/build/Signalbox.app || true
+sleep 3
+# The migrated value is Data holding JSON; defaults read prints a hex dump, so
+# decode it back to text before asserting on the JSON keys.
+defaults read com.dwmkerr.signalbox KeyboardShortcuts_openJumplist 2>/dev/null \
+  | tr -d ' <>\n' | xxd -r -p \
+  | tee "$EVIDENCE/10e-shortcut-recorder/migration-readback.txt" || true
+
+osascript -e 'tell application "Signalbox" to activate' || true
+sleep 1
+osascript -e 'tell application "System Events" to key code 43 using {command down}' || true
+sleep 1
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click button "General" of toolbar 1 of window 1' || true
+sleep 1
+screencapture -x "$EVIDENCE/10e-shortcut-recorder/migration-recorder.png" || true
+
+# Restore the user's real preferences from the snapshot, whatever their types.
+osascript -e 'tell application "Signalbox" to quit' || true
+sleep 1
+defaults import com.dwmkerr.signalbox "$EVIDENCE/10e-shortcut-recorder/signalbox-defaults-backup.plist" || true
+open components/app/build/Signalbox.app || true
+```
+
+Evidence: the idle recorder screenshot shows the shortcut glyphs; the decoded
+migration readback contains `carbonKeyCode` 49 and `carbonModifiers` 768,
+which decode to ⌘⇧Space, and the migration screenshot shows the same. If the
+key, permissions, or any recorder operation fails, record a `warn` with a
+note and continue to the `defaults import` restoration. Note that the user's
+defaults domain was restored from the snapshot.
+
 ## Step 11 - teardown
 
-Best effort: Ctrl-C / `shell_stop` every shellwright session, quit the app
-(`osascript -e 'quit app "signalbox"'` - adjust to the real app name),
-terminate the Simulator app (`xcrun simctl terminate booted
+Best effort: restore the original system appearance (10d) and the user's
+defaults domain via `defaults import` from the 10e snapshot if those steps
+changed them, then Ctrl-C / `shell_stop` every
+shellwright session, quit the app (`osascript -e 'quit app "signalbox"'` -
+adjust to the real app name), terminate the Simulator app (`xcrun simctl terminate booted
 com.dwmkerr.signalbox.ios`), and note anything left running. When killing a
 hub by pattern, use `kill $(lsof -ti :PORT)` - a `pkill -f` whose pattern
 appears in your own command line kills your own shell.
