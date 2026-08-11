@@ -259,5 +259,8 @@ describe("normalizeInbound (legacy migration)", () => {
     const url: ev.Event = { v: 1, id: "x", ts: "t", host: "h", agent: "github", event: "done", session_key: "github:1", origin: { url: "https://x" } };
     ev.normalizeInbound(url);
     expect(url.origin?.kind).toBe("url");
+    const iterm: ev.Event = { v: 1, id: "x", ts: "t", host: "h", agent: "codex", event: "done", session_key: "codex:1", origin: { iterm: { session: "SESSION-GUID" } } };
+    ev.normalizeInbound(iterm);
+    expect(iterm.origin?.kind).toBe("iterm");
   });
 });

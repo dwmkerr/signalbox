@@ -455,7 +455,9 @@ final class HubClient: ObservableObject {
             // visible rows, and the connection line's machine count is the
             // visible board's, not a fleet that includes silenced machines.
             if event.hidden != true, !seenHosts.contains(host) { seenHosts.append(host) }
-            let jumpable = event.origin?.tmux != nil || event.origin?.cursor != nil
+            let jumpable = event.origin?.tmux != nil
+                || event.origin?.cursor != nil
+                || event.origin?.iterm != nil
             rows.append(Session(
                 key: event.sessionKey,
                 agent: event.agent,

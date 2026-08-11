@@ -122,7 +122,7 @@ Jump to a session's origin and mark it seen.
 signalbox jump claude:9f2a
 ```
 
-For a tmux origin this switches the right tmux server to the exact pane and raises the terminal window it lives in. For a URL origin (a CI run, for example) it opens the browser; http/https only, anything else is refused. For an editor origin (Cursor's own agent, or an agent in a VS Code / Cursor integrated terminal) it activates the editor by bundle id and best-effort raises the window matching the workspace folder. This is window-level because editor tabs are not externally addressable. Everything jump needs was captured when the event fired.
+For a tmux origin this switches the right tmux server to the exact pane and raises the terminal window it lives in. For a native iTerm origin it selects the exact recorded iTerm session (tab or split pane) by GUID and raises its window. For a URL origin (a CI run, for example) it opens the browser; http/https only, anything else is refused. For an editor origin (Cursor's own agent, or an agent in a VS Code / Cursor integrated terminal) it activates the editor by bundle id and best-effort raises the window matching the workspace folder. This is window-level because editor tabs are not externally addressable. Everything jump needs was captured when the event fired.
 
 ## pick
 
@@ -164,7 +164,7 @@ signalbox fire --agent script --event busy \
 
 - Flags: `--agent` and `--event` (both required), `--reason`, `--title`, `--prompt`, `--reply`, `--cropped` (the caller already cut the text at its own cap), `--session-key`, `--origin-url`, `--tag <t>` (repeatable), `--pid` (the agent process, for the hub's liveness sweep; `--pid-name` overrides the resolved name). Repeatable `--tag` fires one `tag` event immediately after the session event, carrying every tag and the same resolved session key, so `#tag` and `!tag` filters see it.
 - A missing `--agent` or an unknown `--event` warns on stderr - one line naming the valid events (`attention`, `error`, `done`, `busy`, `ended`, `seen`, `hide`, `show`, `pin`, `unpin`, `label`, `tag`, `untag`) - and still exits 0. fire is called from agent adapters and user hooks, so a usage mistake must be visible but never fatal to the caller; delivery failures likewise spool and exit 0, so scripts never break on a down hub.
-- Fired from inside tmux, the pane origin is captured automatically; from a VS Code / Cursor integrated terminal, an editor origin is captured instead, so `jump` can route back. tmux beats the editor check: a pane is a more precise jump target than an app window.
+- Fired from inside tmux, the pane origin is captured automatically; from a VS Code / Cursor integrated terminal, an editor origin is captured instead; from a native iTerm session, its stable session GUID is captured. tmux wins when more than one applies because a pane is the more portable target. Plain Terminal.app tabs still need tmux for exact jump-back.
 - `--prompt` and `--reply` keep raw, multi-line markdown and are cropped in the event builder at 1,024 and 10,240 characters. The event gets `cropped` when either cap is hit or the caller passes `--cropped`. `--detail` is accepted as an alias for `--prompt`. See the [data model](events.md).
 
 `components/scripts/demo.sh` tags every session it seeds `demo`. Add `!demo` to

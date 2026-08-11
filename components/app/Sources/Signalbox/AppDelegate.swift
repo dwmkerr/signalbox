@@ -668,7 +668,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // dealt with and must never be suggested as next-to-check or
             // visited by Tab.
             let unread = !session.acked && needsCheck(event.event)
-            let jumpable = session.origin?.tmux != nil || session.origin?.cursor != nil
+            let jumpable = session.origin?.tmux != nil
+                || session.origin?.cursor != nil
+                || session.origin?.iterm != nil
             return PaletteRow(
                 sessionKey: event.sessionKey,
                 mark: statusMark(event: event.event, acked: session.acked),
@@ -793,6 +795,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // captured bundle so a VS Code-hosted session doesn't read as Cursor.
             let folder = session.event.title ?? "session"
             return "Jump to \(editorDisplayName(bundleID: cursor.bundle)) (\(folder)) on \(hostDisplay(session.event.host))"
+        }
+        if session.origin?.iterm != nil {
+            return "Jump to iTerm (native session) on \(hostDisplay(session.event.host))"
         }
         if let raw = session.origin?.url, let url = URL(string: raw), let domain = url.host {
             if domain.lowercased() == "github.com" || domain.lowercased().hasSuffix(".github.com") {

@@ -328,7 +328,7 @@ machine that owns that session raises the window. The phone in your hand becomes
 laptop on your desk.</p>
 <p>Three rules:</p>
 <ul>
-  <li><b>Every visible machine row offers it.</b> Rows with a tmux or cursor origin jump as before.
+  <li><b>Every visible machine row offers it.</b> Rows with a tmux, cursor, or native iTerm origin jump.
   A machine row with no usable origin still carries the arrow and the right-swipe Jump action.</li>
   <li><b>URL-only rows are information.</b> A CI or GitHub row describes remote work, not a window,
   so it carries no arrow or Jump swipe action.</li>
@@ -441,7 +441,7 @@ power user pairs - and deliberately do not send them to Settings, which only rep
 <table>
   <tr><th>Gesture</th><th>Action</th></tr>
   <tr><td>Tap a card</td><td>Expand the preview in place, to a few lines. It never marks the session seen.</td></tr>
-  <tr><td>The <span class="blue">arrow</span>, or swipe right, <span class="blue">Jump</span></td><td>Shown on every visible machine row. A tmux or cursor origin asks the owning machine to raise its window. With no usable origin, it shows <b>Jump not supported</b>: "This session is running in a plain terminal - jump is not supported yet. Submit feedback if you would find this useful." <b>Submit feedback</b> opens <a href="https://github.com/dwmkerr/signalbox/issues/67">issue 67</a>, and <b>Cancel</b> dismisses the alert. URL-only CI and GitHub rows are information-only and offer neither the arrow nor the Jump swipe action.</td></tr>
+  <tr><td>The <span class="blue">arrow</span>, or swipe right, <span class="blue">Jump</span></td><td>Shown on every visible machine row. A tmux, cursor, or native iTerm origin asks the owning machine to raise its window. With no usable origin, it shows <b>Jump not supported</b>: "This session is running in a plain terminal - jump is not supported yet. Submit feedback if you would find this useful." <b>Submit feedback</b> opens <a href="https://github.com/dwmkerr/signalbox/issues/67">issue 67</a>, and <b>Cancel</b> dismisses the alert. URL-only CI and GitHub rows are information-only and offer neither the arrow nor the Jump swipe action.</td></tr>
   <tr><td>Swipe left, <span class="amber">Seen</span></td><td>Fire <code>seen</code>. The row goes quiet everywhere, on every surface. <span class="chip built">built</span> Offered only on an unread row; a quiet, already-acked row offers no no-op (the Mail rule: "Mark Read" appears only on unread mail).</td></tr>
   <tr><td>Swipe left, Hide</td><td>Fire <code>hide</code>. The row leaves the main list for the collapsed Hidden section until the session speaks again, or until unhidden there.</td></tr>
   <tr><td>Long-press <span class="chip built">built</span></td><td>Context menu: <b>Pin</b> / <b>Unpin</b> (see Pinned above) and <b>Show Chat</b> (see Chat below).</td></tr>

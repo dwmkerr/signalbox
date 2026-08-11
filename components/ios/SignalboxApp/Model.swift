@@ -73,21 +73,24 @@ struct SessionEvent: Decodable {
     }
 }
 
-// Origin per contract: {"tmux": {...}}, {"url": "..."} or {"cursor": {...}}.
-// Decoding never throws: origin is display-hint data only, and a type mismatch
-// from a skewed hub would otherwise fail the whole /state decode.
+// Origin per contract: {"tmux": {...}}, {"url": "..."}, {"cursor": {...}}
+// or {"iterm": {...}}. Decoding never throws: origin is display-hint data only,
+// and a type mismatch from a skewed hub would otherwise fail the whole /state
+// decode.
 struct SessionOrigin: Decodable {
     let tmux: TmuxTarget?
     let url: String?
     let cursor: CursorTarget?
+    let iterm: ITermTarget?
 
-    private enum CodingKeys: String, CodingKey { case tmux, url, cursor }
+    private enum CodingKeys: String, CodingKey { case tmux, url, cursor, iterm }
 
     init(from decoder: Decoder) throws {
         let container = try? decoder.container(keyedBy: CodingKeys.self)
         tmux = try? container?.decodeIfPresent(TmuxTarget.self, forKey: .tmux)
         url = try? container?.decodeIfPresent(String.self, forKey: .url)
         cursor = try? container?.decodeIfPresent(CursorTarget.self, forKey: .cursor)
+        iterm = try? container?.decodeIfPresent(ITermTarget.self, forKey: .iterm)
     }
 }
 
@@ -100,6 +103,10 @@ struct TmuxTarget: Decodable {
 
 struct CursorTarget: Decodable {
     let bundle: String?
+}
+
+struct ITermTarget: Decodable {
+    let session: String?
 }
 
 struct StateDoc: Decodable {
