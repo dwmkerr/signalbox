@@ -220,6 +220,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyFullState(decoded.sessions)
     }
 
+    // The preview's history comes from the hub's own ring, so the same call works
+    // against a local hub and a forwarder - the app never learns which it is
+    // talking to.
+    func fetchExchanges(sessionKey: String, limit: Int) async -> [Exchange] {
+        // URLQueryItem percent-encodes the key, so a session key containing ':'
+        // or '&' needs no hand-rolled escaping.
+        var components = URLComponents(string: "\(hubURL)/exchanges")
+        components?.queryItems = [
+            URLQueryItem(name: "session", value: sessionKey),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        guard let url = components?.url else { return [] }
+        var request = HubAuth.request(url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        // An older hub has no such route, and an empty history is not an error:
+        // either way the preview falls back to the row's own breadcrumb.
+        guard let (data, response) = try? await urlSession.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let doc = try? JSONDecoder().decode(ExchangesDoc.self, from: data)
+        else { return [] }
+        return doc.exchanges
+    }
+
     private func consumeStream() async throws {
         guard var components = URLComponents(
             url: hubURL.appendingPathComponent("stream"),
@@ -556,6 +579,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onPin: { [weak self] key, pinned in self?.setPinned(sessionKey: key, pinned: pinned) },
             onSettings: { [weak self] tab in self?.settings?.show(tab: tab) }
         )
+        palette?.exchangeProvider = { [weak self] key, limit in
+            await self?.fetchExchanges(sessionKey: key, limit: limit) ?? []
+        }
         KeyboardShortcuts.onKeyDown(for: .openJumplist) { [weak self] in self?.palette?.toggle() }
     }
 
@@ -643,6 +669,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // dealt with and must never be suggested as next-to-check or
             // visited by Tab.
             let unread = !session.acked && needsCheck(event.event)
+            let jumpable = session.origin?.tmux != nil || session.origin?.cursor != nil
             return PaletteRow(
                 sessionKey: event.sessionKey,
                 mark: statusMark(event: event.event, acked: session.acked),
@@ -658,6 +685,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 detail: session.detail,
                 reply: session.reply,
                 location: locationText(for: session),
+                jumpable: jumpable,
+                infoOnly: !jumpable && session.origin?.url != nil,
                 needsCheck: unread,
                 engagedDate: session.engagedDate,
                 tags: session.tags ?? [],

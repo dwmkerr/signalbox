@@ -152,14 +152,21 @@ function closeTrackedHub(hub: Hub): void {
   if (index >= 0) hubs.splice(index, 1);
 }
 
-function startForwarder(upstream: string): {
+function startForwarder(upstream: string, historyLimit = 1000): {
   forwarder: Forwarder;
   dir: string;
   server: Bun.Server<undefined>;
   url: string;
 } {
   const dir = tempDir("sbforwarder-uplink-");
-  const forwarder = new Forwarder({ upstream, token: TOKEN, stateDir: dir, version: "test", port: 0 });
+  const forwarder = new Forwarder({
+    upstream,
+    token: TOKEN,
+    stateDir: dir,
+    version: "test",
+    port: 0,
+    historyLimit,
+  });
   const server = trackServer(listen(forwarder, 0));
   forwarders.push(forwarder);
   forwarder.start();
@@ -550,4 +557,109 @@ describe("forwarder uplink", () => {
       "script:c",
     ]);
   }, 40_000);
+});
+
+describe("exchanges", () => {
+  test("serves exchanges from the downlink cache", async () => {
+    const upstream = trackFake(new FakeUpstream());
+    const { url } = startForwarder(upstream.url);
+    await waitForConnection(url, true);
+    const key = "host:script:exchange";
+
+    upstream.pushSignal(wireEvent(key, { event: "busy", prompt: "fix the bug", seq: 1 }));
+    upstream.pushSignal(wireEvent(key, { reply: "fixed", seq: 2 }));
+    await waitFor("the exchange to reach the downlink cache", async () => {
+      return (await getHealth(url)).upstream.lastSeq === 2;
+    });
+
+    const res = await fetch(`${url}/exchanges?session=${encodeURIComponent(key)}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(await res.json()).toEqual({
+      session_key: key,
+      exchanges: [{ prompt: "fix the bug", reply: "fixed", ts: "2026-07-29T10:00:00Z", seq: 2 }],
+      next_before: 2,
+    });
+  });
+
+  test("answers 404 for an unknown session", async () => {
+    const upstream = trackFake(new FakeUpstream());
+    const { url } = startForwarder(upstream.url);
+    await waitForConnection(url, true);
+
+    expect((await fetch(`${url}/exchanges?session=missing`)).status).toBe(404);
+  });
+
+  test("honours limit and before exactly like the hub", async () => {
+    const upstream = trackFake(new FakeUpstream());
+    const { url } = startForwarder(upstream.url);
+    await waitForConnection(url, true);
+    const key = "host:script:paging";
+
+    for (let i = 1; i <= 5; i++) {
+      upstream.pushSignal(wireEvent(key, { event: "busy", prompt: `prompt ${i}`, seq: i * 2 - 1 }));
+      upstream.pushSignal(wireEvent(key, { reply: `reply ${i}`, seq: i * 2 }));
+    }
+    await waitFor("five exchanges to reach the downlink cache", async () => {
+      return (await getHealth(url)).upstream.lastSeq === 10;
+    });
+
+    const first = await (await fetch(
+      `${url}/exchanges?session=${encodeURIComponent(key)}&limit=2`
+    )).json();
+    expect(first.exchanges.map((x: { prompt: string }) => x.prompt)).toEqual(["prompt 4", "prompt 5"]);
+    const second = await (await fetch(
+      `${url}/exchanges?session=${encodeURIComponent(key)}&limit=2&before=${first.next_before}`
+    )).json();
+    expect(second.exchanges.map((x: { prompt: string }) => x.prompt)).toEqual(["prompt 2", "prompt 3"]);
+  });
+
+  test("a local POST /events does not create history", async () => {
+    const upstream = trackFake(new FakeUpstream());
+    const { url } = startForwarder(upstream.url);
+    await waitForConnection(url, true);
+    const key = "host:script:local";
+
+    upstream.pushSignal(wireEvent(key, { event: "busy", prompt: "first prompt", seq: 1 }));
+    upstream.pushSignal(wireEvent(key, { reply: "first reply", seq: 2 }));
+    await waitFor("the first exchange to reach the downlink cache", async () => {
+      return (await getHealth(url)).upstream.lastSeq === 2;
+    });
+
+    const local = wireEvent(key, { prompt: "local prompt", reply: "local reply" });
+    expect((await postJSON(url, "/events", local)).status).toBe(202);
+    await waitFor("the local event to drain upstream", () => upstream.received.length === 1);
+    let body = await (await fetch(`${url}/exchanges?session=${encodeURIComponent(key)}`)).json();
+    expect(body.exchanges.map((x: { prompt: string }) => x.prompt)).toEqual(["first prompt"]);
+
+    upstream.pushSignal({ ...upstream.received[0].body, seq: 3 });
+    await waitFor("the returned event to reach the downlink cache", async () => {
+      return (await getHealth(url)).upstream.lastSeq === 3;
+    });
+    body = await (await fetch(`${url}/exchanges?session=${encodeURIComponent(key)}`)).json();
+    expect(body.exchanges.map((x: { prompt: string }) => x.prompt)).toEqual([
+      "first prompt",
+      "local prompt",
+    ]);
+  });
+
+  test("respects historyLimit from options", async () => {
+    const upstream = trackFake(new FakeUpstream());
+    const { url } = startForwarder(upstream.url, 2);
+    await waitForConnection(url, true);
+    const key = "host:script:bounded";
+
+    for (let i = 1; i <= 5; i++) {
+      upstream.pushSignal(wireEvent(key, { event: "busy", prompt: `prompt ${i}`, seq: i * 2 - 1 }));
+      upstream.pushSignal(wireEvent(key, { reply: `reply ${i}`, seq: i * 2 }));
+    }
+    await waitFor("bounded exchanges to reach the downlink cache", async () => {
+      return (await getHealth(url)).upstream.lastSeq === 10;
+    });
+
+    const body = await (await fetch(
+      `${url}/exchanges?session=${encodeURIComponent(key)}&limit=100`
+    )).json();
+    expect(body.exchanges.map((x: { prompt: string }) => x.prompt)).toEqual(["prompt 4", "prompt 5"]);
+  });
 });

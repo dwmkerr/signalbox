@@ -5,7 +5,7 @@ The universal specs every component builds against. Code follows spec: pull-requ
 Conventions:
 
 - Visual surfaces (jumplist, settings, menu bar, ios) are HTML pages. The mockup on the page is the normative spec; open it in a browser. Architecture is an HTML page too, and its diagrams are the spec.
-- Behaviour and data specs (cli, data model, agent integrations) are markdown. Tables and prose diff and review cleanly in a PR.
+- Behaviour and data specs (cli, data model, agent integrations, agent markdown) are markdown. Tables and prose diff and review cleanly in a PR.
 - A spec may lead the code. Sections describing unbuilt behaviour carry a status chip (`proposed`, `later`) and a banner. Unmarked sections match the code.
 - HTML nav links open the markdown specs in their GitHub-rendered view. Markdown nav links open the HTML specs on the published spec site (https://dwmkerr.github.io/signalbox/specs/). Paging through the specs stays rendered in both directions.
 - The spec site is published by `.github/workflows/pages.yml`. It goes live when Pages is enabled at launch (Settings, Pages, Source: GitHub Actions, after the repo is public).
@@ -15,6 +15,7 @@ Conventions:
 | [events.md](events.md) | Data model: the event, how events become sessions, ordering, the hub API, privacy |
 | [cli.md](cli.md) | Every CLI command, with the terminal output you should expect |
 | [adapters.md](adapters.md) | Agent integrations: hook → event mappings for Claude Code, OpenCode, pi, GitHub Actions |
+| [agent-markdown.md](agent-markdown.md) | How an agent's markdown is parsed and rendered on both apps: the grammar, the one-line preview rule, and the golden examples the package's tests mirror |
 | [hub-jumplist.html](hub-jumplist.html) | The jumplist (⌃⌥J) - interactive UI spec (open in a browser) |
 | [menubar.html](menubar.html) | Menu bar: icon (beacon default), status dot, dropdown, notifications |
 | [settings.html](settings.html) | Settings window - icon style, /clear and /rename behaviour, additional filters, the jumplist shortcut, where settings live |

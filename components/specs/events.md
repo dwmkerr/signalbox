@@ -1,4 +1,4 @@
-signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) | [settings](https://dwmkerr.github.io/signalbox/specs/settings.html) | [menu bar](https://dwmkerr.github.io/signalbox/specs/menubar.html) | [ios](https://dwmkerr.github.io/signalbox/specs/ios.html) | [architecture](https://dwmkerr.github.io/signalbox/specs/architecture.html) | [cli](cli.md) | data model | [agent integrations](adapters.md)
+signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) | [settings](https://dwmkerr.github.io/signalbox/specs/settings.html) | [menu bar](https://dwmkerr.github.io/signalbox/specs/menubar.html) | [ios](https://dwmkerr.github.io/signalbox/specs/ios.html) | [architecture](https://dwmkerr.github.io/signalbox/specs/architecture.html) | [cli](cli.md) | data model | [agent integrations](adapters.md) | [agent markdown](agent-markdown.md)
 
 # Specification: signalbox data model
 
@@ -81,14 +81,20 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   // with tag/untag events (or set on the creating event).
   "tags": ["work"],
 
-  // The exchange breadcrumb: your last prompt (max 160 chars) and the
-  // agent's last message (max 280 chars). One line each, cropped before
-  // they leave the emitting process. Never transcripts. (`prompt` was
-  // `detail` before v0.2; the hub still reads `detail` from old events. On
-  // the same read path, an event with no machine gets machine = host, so a
-  // pre-upgrade events.jsonl and older emitters behave exactly as before.)
+  // The exchange: your last prompt (max 1,024 characters) and the agent's
+  // last message (max 10,240 characters). Both carry the agent's RAW
+  // markdown - multi-line, headings, lists, fenced code - and are cropped
+  // only at those caps. (`prompt` was `detail` before v0.2; the hub still
+  // reads `detail` from old events. On the same read path, an event with no
+  // machine gets machine = host, so a pre-upgrade events.jsonl and older
+  // emitters behave exactly as before.)
   "prompt": "good enough. commit work for now.",
-  "reply": "Done - the dashboard now shows per-post traffic.",
+  "reply": "Done - the dashboard now shows **per-post traffic**.",
+
+  // The emitter hit a cap and cut the text above. Surfaces render a
+  // trailing affordance; text is never truncated silently. Omitted when
+  // nothing was cut (shown here only to document the field).
+  "cropped": true,
 
   // Where to jump to. `kind` names the origin type so more can be added
   // later (ssh); today tmux, url, or cursor (an editor window - the kind
@@ -148,6 +154,33 @@ The hub keeps one row per `session_key`, following these rules:
 - **Latest event wins.** A new agent event replaces the row's status. `ended` removes the row (the event log keeps everything).
 - **Breadcrumbs carry.** `prompt`, `reply`, `origin`, `proc` and `machine` persist across events that omit them, so a done without prompt text keeps showing the prompt that started it and an older emitter cannot blank the machine identity. `label` always carries, and only a `label` event can change or clear it.
 - **An enriched ask is not clobbered by its bare twin.** One blocked dialog can reach the hub twice (e.g. Claude's `PermissionRequest` with the real ask in `reply`, and its bare `Notification` with only "Claude needs your permission"). While a row is in attention, a second attention event whose `reply` is empty or carries no more than the generic message keeps the richer `reply` already on the row, regardless of arrival order. Any non-attention agent event ends the ask and normal reply rules resume.
+- **The hub keeps a history of exchanges.** Besides the latest breadcrumb on
+  the row, the reducer keeps a per-session ring of exchanges - a `prompt`, its
+  `reply`, the `ts` of the event that completed it, `cropped`, and the `seq`
+  that closed it. A prompt starts an exchange; a reply fills it; the pair
+  commits to the ring on the first **non-attention** agent event. Attention
+  events never touch history at all - neither their reply (the ask text) nor a
+  close; the exchange's real reply arrives on the following `done` or `error`.
+  A new prompt always begins a new exchange, so a prompt that never got a
+  reply is still kept. The event TYPE decides which turn a reply belongs to:
+  a `busy` is a turn starting, so a reply riding on it can only be the
+  previous turn's final text - it heals the outgoing exchange before the
+  prompt opens the next one, and a busy never closes a pair. A `done`/`error`
+  is a turn ending, so a prompt and reply on one event are the same turn's
+  pair (single-shot emitters like `fire` and the plugins). When a
+  non-attention event carries a non-empty reply with no pending exchange, it
+  replaces the latest committed reply and ORs `cropped` into that exchange
+  while preserving its `seq`. Claude's Stop-time reply capture can lose a
+  transcript write race; the next idle notification or prompt
+  deterministically carries the final text and heals the exchange. With no
+  pending exchange and no history, a reply still opens a reply-only pending
+  exchange. `ended` drops the
+  session's history with the row. The
+  ring holds `hub.historyLimit` exchanges (default 1000, oldest evicted first)
+  and lives in the reducer, so the hub rebuilds it from `events.jsonl` on boot
+  and a forwarder grows it from the upstream downlink with no extra machinery.
+  `/state` is unaffected: it still carries only the latest pair per session.
+  Read the history with [`GET /exchanges`](#the-hub-api).
 - **Tags carry.** `tags` persist across agent events that omit them (like `prompt`/`reply`), but an event carrying its own `tags` keeps them - even when the session already existed untagged. `tag`/`untag` events add or remove them. Filter with `state --tag` / `--exclude-tag`.
 - **New activity resets your flags.** Any agent event clears `acked` and `hidden` - a hidden session that speaks again comes back.
 - **A pin is yours until you drop it.** `pinned` (set by `pin`, cleared by `unpin`) carries across agent events like `label`: new activity never clears it, so a pinned session that speaks again stays pinned. Only `unpin` or `hide` removes a pin. `ended`/expiry removes the whole session; a pin does not resurrect or protect it.
@@ -242,11 +275,19 @@ The default posture is `http://127.0.0.1:8377`, loopback only, with no auth. Wid
 | `POST /events` | Validate, assign `seq`, append to the log, update state, broadcast. Returns `{"seq": 118}`. Requires `Content-Type: application/json`. |
 | `POST /command` | Fan out a [command](#commands) to every live stream and forget it: no `seq`, no log, no state. Returns `{"ok": true, "delivered": 2}`. |
 | `GET /state` | `{"sessions": [...]}` in display order. |
+| `GET /exchanges?session=K&limit=N&before=S` | `{"session_key": "...", "exchanges": [...], "next_before": 118}` - the newest `N` exchanges for session `K`, **oldest first**. `session` is required and carries the raw `session_key` as an ordinary query value (no path-encoding of keys containing `:`). `limit` defaults to 20 and is clamped to `hub.historyLimit`; `before` pages backwards by returning only exchanges whose `seq` is lower, and `next_before` is the oldest `seq` in the page, so a client pages with it until `exchanges` comes back empty. `400` for a missing `session`; `404` for a session that is not on the board (distinct from a session with no history yet, which is `200` with an empty list). Served from the reducer's ring, never from `events.jsonl`, so the hub and the [forwarder](#the-forwarder) answer identically. `Cache-Control: no-store`. |
 | `GET /stream?since=N` | Server-sent events: replay everything after seq N, then live. Heartbeat every 15s. Commands are live-only and never appear in the replay. |
 | `GET /healthz` | `{"ok": true, "version": "0.1.5", "build": "d6907e1-dirty", "mode": "local"|"lan"|"remote", "bind": "127.0.0.1", "port": 8377}`. `mode` is the single oracle for which runtime is answering: it is stated and must never be inferred from `bind` or from the presence of other keys. `version` is the bare semver and `build` is empty on an unstamped build. Never authenticated - platform health checks reach it from anywhere. |
 | `POST /pair` | Trade a valid [pairing code](#pairing) for the bearer token: `{"token": "..."}`, or `401 {"error": "invalid or expired pairing code"}` for any failure. Unauthenticated - the code is the credential. Requires `Content-Type: application/json`. |
 | `POST /pair/new` | Mint a pairing code. Reachable from a loopback peer or with a valid bearer; in remote mode the bearer is always required. Returns `{"code", "expires_in": 180, "bind"}`, plus `"fp"` (cert pin) and `"port"` (TLS listener) when the hub exposes pinned LAN TLS. A missing or wrong bearer is `401` off loopback, or from any peer in remote mode; `409` with no token configured or a loopback bind. Requires `Content-Type: application/json`. |
 | `GET /pair/status` | Read the pairing slot's state for `signalbox pair`: `{"status": "pending" \| "redeemed" \| "none"}`. Reachable from a loopback peer or with a valid bearer; in remote mode the bearer is always required. A missing or wrong bearer is `401` off loopback, or from any peer in remote mode. |
+
+An exchange is `{"prompt": "...", "reply": "...", "ts": "2026-07-07T18:04:11Z",
+"cropped": true, "seq": 118}`. `prompt` and `reply` are the raw markdown the
+emitter sent, `ts` is the event that completed the exchange, `cropped` marks a
+pair either side of which hit its cap, and `seq` is the ingest order of the
+event that closed it - which is why it doubles as the paging cursor. `prompt`,
+`reply` and `cropped` are omitted when empty.
 
 The hub appends every event to `events.jsonl` in the state dir and rebuilds its state from that file on boot; `seq` continues from the highest persisted value. Commands are not written, so they are never rebuilt or replayed. Only `application/json` may post (blocks cross-origin form posts from hostile pages), and bodies are capped at 1 MiB.
 
@@ -264,7 +305,7 @@ The hub's default posture binds `127.0.0.1`. `signalbox hub --bind <host>` (or `
 
 `GET /healthz` and `POST /pair` are the only exemptions from these checks, and both remain exempt in remote mode. `/pair` is exempt because the pairing code it carries is itself the credential (see [Pairing](#pairing)). A non-loopback bind is never served without a token: outside remote mode the hub resolves or generates one as described below, and the startup validation refuses the bind if it is still absent. Remote mode instead requires `SIGNALBOX_TOKEN` from the environment and exits before token generation when it is missing or empty.
 
-Outside remote mode, the `hub` section of `~/.config/signalbox/settings.json` (`hub.bind`, `hub.token`) is the persistent, file-backed equivalent of `--bind` and `SIGNALBOX_TOKEN`, so the hub the menu bar app spawns (it passes only `--port`) can let other devices connect with no flags. The bind resolves as `--bind` flag, then `SIGNALBOX_BIND`, then `hub.bind`, then loopback; the token as `SIGNALBOX_TOKEN`, then `hub.token`. `hub.bind` is stored as a literal address the hub binds verbatim (`config set` normalizes friendly words like `any` to `0.0.0.0` and refuses the ambiguous `lan` before saving); the `0.0.0.0` wildcard is what lets other devices connect while loopback stays served. When the resolved bind is non-loopback and no token is set either way, the hub **generates a token and saves it to `hub.token`**, so the startup validation is a backstop. Remote mode ignores both persisted values: its default bind is `0.0.0.0` and its token comes from `SIGNALBOX_TOKEN` only. See the [CLI spec](https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md#config) for `signalbox config`.
+Outside remote mode, the `hub` section of `~/.config/signalbox/settings.json` (`hub.bind`, `hub.token`) is the persistent, file-backed equivalent of `--bind` and `SIGNALBOX_TOKEN`, so the hub the menu bar app spawns (it passes only `--port`) can let other devices connect with no flags. The bind resolves as `--bind` flag, then `SIGNALBOX_BIND`, then `hub.bind`, then loopback; the token as `SIGNALBOX_TOKEN`, then `hub.token`. `hub.bind` is stored as a literal address the hub binds verbatim (`config set` normalizes friendly words like `any` to `0.0.0.0` and refuses the ambiguous `lan` before saving); the `0.0.0.0` wildcard is what lets other devices connect while loopback stays served. When the resolved bind is non-loopback and no token is set either way, the hub **generates a token and saves it to `hub.token`**, so the startup validation is a backstop. Remote mode ignores both persisted values: its default bind is `0.0.0.0` and its token comes from `SIGNALBOX_TOKEN` only. The same `hub` section also carries `hub.historyLimit` and `hub.replyCap`; see the [CLI spec's config section](https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md#config) for their ranges and `signalbox config` usage.
 
 ### The forwarder
 
@@ -279,13 +320,14 @@ The local listener is always unauthenticated http on `127.0.0.1` (port 8377 by d
 | `POST /events` | Normalize and validate, remove derived fields and `seq`, append to `${stateDir}/forward-spool.jsonl` under its `.lock`, start an asynchronous drain, and immediately return `202 {"spooled": true}` without waiting for the upstream. This response acknowledges spooling only and carries no `seq`; the upstream assigns one on ingest after the drain delivers the event, and the forwarder receives it later through the downlink. The hook client allows its POST only 200 ms; waiting for a WAN round trip would make the hook spool an event that the forwarder might also have delivered. The drain is the only sender of spooled events, so delivery stays FIFO and there is one spool. |
 | `POST /command` | Validate and synchronously proxy to the upstream. A successful upstream response supplies the same `{"ok": true, "delivered": N}` body; any upstream failure returns `502` with an error body. Commands are never spooled because a stale request has no meaning. |
 | `GET /state` | Return `{"sessions": [...]}` from the in-memory downlink cache. |
+| `GET /exchanges?session=K&limit=N&before=S` | Return the session's exchanges from the in-memory downlink cache, with the same shape, defaults, clamping and `400`/`404` behaviour as the hub's route. The forwarder writes no `events.jsonl`, so this is served from the reducer's ring like every other read; the ring is grown by the shared reducer as downlink frames arrive, which is why it needs no forwarder-specific code. A locally spooled `POST /events` never appears here until the upstream has assigned it a `seq` and the downlink has returned it. |
 | `GET /stream?since=N` | Replay cached `signal` frames after N, then re-broadcast live `signal` and `command` frames from the downlink. The signal backlog is bounded to the newest 2,000 events; commands remain live-only. The stream sends an immediate `: connected` comment so a same-process fetch receives first bytes before the first event, then the normal 15-second heartbeat comments. |
 | `GET /healthz` | Return `{"ok": true, "version": "0.1.5", "build": "d6907e1-dirty", "mode": "forwarder", "port": 8377, "upstream": {"url": "https://my-hub.fly.dev", "connected": true, "lastSeq": 118, "spooled": 0}}`. `mode` is the single oracle for which runtime is answering: it is stated and must never be inferred from the presence of `upstream` or other keys. `version` is the bare semver and `build` is empty on an unstamped build. Never authenticated. |
 | `POST /pair`, `POST /pair/new`, `GET /pair/status` | Return `409` with a message naming `signalbox pair --url <upstream>`. A forwarder owns neither the state nor the pairing token. |
 
 The uplink opens `GET <upstream>/stream?since=<lastSeq>`, using `since=0` on first connect to build the cache from the full upstream log. It sends the resolved bearer when one is configured, resumes after the last seen upstream `seq`, and reconnects after 1 second with exponential backoff capped at 15 seconds. On a reconnect (never the first connect) the forwarder also closes every downstream stream, so its own clients resync from `/state` and adopt the upstream's seq domain (see the seq-domain note above). `signal` frames are normalized, applied to the cache, added to the bounded backlog and re-broadcast. `command` frames are only re-broadcast and never touch the cache. The same resolved credential is used for event and command POSTs; a tokenless forwarder sends no Authorization header, which supports an unauthenticated loopback upstream but normally leaves the upstream to reject the request.
 
-The forward spool is bounded by 10,000 events or 16 MiB, whichever limit is reached first. Overflow drops the oldest events and writes one log line when the overflow episode begins. Drains send oldest first. Uplink delivery is at-least-once: a crash after a successful send but before the reconcile write can resend an event on the next drain, which is safe because events carry unique ids and the reducer is last-write-wins. An upstream 4xx permanently drops that event so it cannot wedge the queue; a network error or any other upstream status keeps it for a later pass. Spooled events carry no `seq` because the upstream assigns one on ingest.
+The forward spool is bounded by 10,000 events or 16 MiB, whichever limit is reached first. Overflow drops the oldest events and writes one log line when the overflow episode begins. Drains send oldest first. Uplink delivery is at-least-once: a crash after a successful send but before the reconcile write can resend an event on the next drain. The hub makes this safe by deduplicating ingest on the event's unique id (a bounded window of recent ids, seeded from the log tail on boot so a redelivery straddling a hub restart is still caught): row state was already last-write-wins, but the exchange ring is not - a redelivered `done` would double-commit and a redelivered `busy` could mis-pair a healed reply - so a repeated id is acknowledged without being applied, logged, or broadcast. An upstream 4xx permanently drops that event so it cannot wedge the queue; a network error or any other upstream status keeps it for a later pass. Spooled events carry no `seq` because the upstream assigns one on ingest.
 
 The cache is fed only by the downlink. A local `POST /events` returns `202 {"spooled": true}` as soon as the event is spooled; that acknowledgement has no `seq`, and the event is neither applied nor broadcast locally. The drain later sends it upstream, where ingest assigns `seq`; the sequenced event arrives asynchronously over the downlink and is then applied to the cache exactly once. Nothing originates local state, so there is nothing to reconcile or deduplicate.
 
@@ -306,4 +348,15 @@ What pairing does and does not do:
 
 ## Privacy
 
-Signals and a two-line breadcrumb of the exchange, never transcripts. `prompt` and `reply` are the only content-bearing fields in normal operation and both are cropped at the emitter (the diagnostic `raw` field is opt-in via `SIGNALBOX_RAW`). The redacted profile (`SIGNALBOX_PROFILE=redacted`) drops cwd, title, prompt, reply and raw, and hashes the session id - for machines where even one line must not leave. It keeps `machine`: the value is the already-retained hostname plus random hex, so it discloses nothing further while preserving stable machine identity.
+The hub runs on your own machine, so the exchange is not redacted on the way
+there: `prompt` and `reply` carry the agent's raw markdown up to their caps
+(1,024 and 10,240 characters), and `cropped` marks an event whose text hit
+one. Formatting is preserved because the surfaces render it - an emitter that
+flattens markdown to one line destroys information no reader can recover.
+
+For machines where even one line must not leave, the redacted profile
+(`SIGNALBOX_PROFILE=redacted`) drops `cwd`, `title`, `prompt`, `reply`,
+`cropped` and `raw`, and hashes the session id. It keeps `machine`: the value
+is the already-retained hostname plus random hex, so it discloses nothing
+further while preserving stable machine identity. The diagnostic `raw` field
+is opt-in via `SIGNALBOX_RAW` and is never set in normal operation.

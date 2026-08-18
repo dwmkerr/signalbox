@@ -8,7 +8,7 @@ import type { Command } from "./command";
 import { logTo } from "./client";
 import * as ev from "./event";
 import type { Event } from "./event";
-import { isLoopbackHost } from "./hub";
+import { parseExchangeQuery, exchangesBody, isLoopbackHost } from "./hub";
 import type { RequestHandler } from "./hub";
 import { PermanentError, Spool } from "./spool";
 import { Store } from "./state";
@@ -59,10 +59,11 @@ export interface ForwarderOptions {
   stateDir: string;
   version: string;
   port: number;
+  historyLimit: number;
 }
 
 export class Forwarder implements RequestHandler {
-  private store = new Store();
+  private store: Store;
   private events: Event[] = [];
   private subs = new Set<Subscriber>();
   private cmdSubs = new Set<CommandSubscriber>();
@@ -81,6 +82,7 @@ export class Forwarder implements RequestHandler {
   private failureLogged = false;
 
   constructor(private opts: ForwarderOptions) {
+    this.store = new Store(opts.historyLimit);
     this.spool = new Spool(
       opts.stateDir,
       "forward-spool.jsonl",
@@ -122,6 +124,9 @@ export class Forwarder implements RequestHandler {
     if (req.method === "GET" && url.pathname === "/state") {
       return Response.json({ sessions: this.store.list() });
     }
+    if (req.method === "GET" && url.pathname === "/exchanges") {
+      return this.handleExchanges(url);
+    }
     if (req.method === "GET" && url.pathname === "/stream") {
       return this.handleStream(req, url, server);
     }
@@ -139,6 +144,18 @@ export class Forwarder implements RequestHandler {
       );
     }
     return undefined;
+  }
+
+  // A forwarder has no events.jsonl, so exchanges come from its downlink
+  // cache; the shared reducer makes this answer identical to the upstream's.
+  private handleExchanges(url: URL): Response {
+    const parsed = parseExchangeQuery(url, this.opts.historyLimit);
+    if (parsed.error) return jsonError(400, parsed.error);
+    const list = this.store.exchanges(parsed.session!, { limit: parsed.limit!, before: parsed.before });
+    if (list === null) return jsonError(404, "unknown session");
+    return Response.json(exchangesBody(parsed.session!, list), {
+      headers: { "Cache-Control": "no-store" },
+    });
   }
 
   start(): void {

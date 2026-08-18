@@ -1,4 +1,6 @@
+import AgentMarkdown
 import SwiftUI
+import UIKit
 
 // The same signals, the same words, the same colours as every other surface
 // (components/specs/hub-jumplist.html). A phone that invents its own language
@@ -47,6 +49,23 @@ enum Theme {
     static let dim = Color(red: 0.557, green: 0.557, blue: 0.576)      // #8E8E93
     static let faint = Color(red: 0.431, green: 0.431, blue: 0.451)    // #6E6E73
 }
+
+// The phone's chat paint. Proportional and soft on purpose: the Mac's preview
+// is a terminal quote, this is a conversation.
+let chatStyle = ChatStyle(
+    font: .systemFont(ofSize: 15),
+    boldFont: .systemFont(ofSize: 15, weight: .semibold),
+    italicFont: .italicSystemFont(ofSize: 15),
+    codeFont: .monospacedSystemFont(ofSize: 13.5, weight: .regular),
+    textColor: UIColor(Theme.text),
+    codeColor: UIColor(Theme.blue),
+    headingFont: .systemFont(ofSize: 16, weight: .semibold),
+    headingColor: UIColor(Theme.text),
+    linkColor: UIColor(Theme.blue),
+    lineSpacing: 2,
+    paragraphSpacing: 7,
+    indent: 18
+)
 
 // The glyph comes from the event's `agent` field: there is no icon metadata on
 // the wire, each surface maps the name itself. SF Symbols stand in for the

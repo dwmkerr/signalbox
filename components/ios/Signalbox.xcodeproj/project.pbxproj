@@ -13,6 +13,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AA0000000000000000000D01 /* AgentMarkdown in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000C01 /* AgentMarkdown */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		AA0000000000000000000101 /* Signalbox.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Signalbox.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -26,6 +30,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0000000000000000000D01 /* AgentMarkdown in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -67,6 +72,9 @@
 				AA0000000000000000000201 /* SignalboxApp */,
 			);
 			name = Signalbox;
+			packageProductDependencies = (
+				AA0000000000000000000C01 /* AgentMarkdown */,
+			);
 			productName = Signalbox;
 			productReference = AA0000000000000000000101 /* Signalbox.app */;
 			productType = "com.apple.product-type.application";
@@ -95,6 +103,9 @@
 			);
 			mainGroup = AA0000000000000000000401;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AA0000000000000000000B01 /* XCLocalSwiftPackageReference "../shared/AgentMarkdown" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = AA0000000000000000000402 /* Products */;
 			projectDirPath = "";
@@ -251,6 +262,20 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		AA0000000000000000000B01 /* XCLocalSwiftPackageReference "../shared/AgentMarkdown" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../shared/AgentMarkdown;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA0000000000000000000C01 /* AgentMarkdown */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AgentMarkdown;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = AA0000000000000000000901 /* Project object */;
 }

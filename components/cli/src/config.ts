@@ -23,6 +23,11 @@ export interface HubSettings {
   // owning state. This is how the app-spawned hub, which passes only --port,
   // becomes a forwarder with no flags. Empty means own the state locally.
   upstream: string;
+  // How many exchanges the reducer keeps per session. The ring is rebuilt from
+  // the event log on boot, so raising this costs memory, never migration.
+  historyLimit: number;
+  // The emitter's cap on a reply, in characters. Prompts keep the fixed cap.
+  replyCap: number;
 }
 
 export interface Settings {
@@ -54,7 +59,13 @@ const defaults: Settings = {
   claudeRenameTitle: true,
   codexClearEnds: true,
   codexRenameTitle: true,
-  hub: { bind: "127.0.0.1", token: "", upstream: "" },
+  hub: {
+    bind: "127.0.0.1",
+    token: "",
+    upstream: "",
+    historyLimit: 1000,
+    replyCap: 10240,
+  },
 };
 
 // Resolution order mirrors kubectl/gh style: explicit file (--config sets
@@ -66,6 +77,13 @@ export function settingsPath(): string {
   if (file) return file;
   const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
   return join(base, "signalbox", "settings.json");
+}
+
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const n = typeof value === "string" && value.trim() ? Number(value) : value;
+  return typeof n === "number" && Number.isInteger(n) && n >= min && n <= max
+    ? n
+    : fallback;
 }
 
 export function loadSettings(): Settings {
@@ -82,6 +100,11 @@ export function loadSettings(): Settings {
     ...fromFile,
     hub: { ...defaults.hub, ...(fromFile.hub ?? {}) },
   };
+  // A hand-edited settings file must never wedge the hook path, so a
+  // non-numeric or out-of-range value falls back to the default rather than
+  // failing.
+  s.hub.historyLimit = clampInt(fromFile.hub?.historyLimit, 1, 100000, defaults.hub.historyLimit);
+  s.hub.replyCap = clampInt(fromFile.hub?.replyCap, 1, 1000000, defaults.hub.replyCap);
   // Env override for scripting/testing, and for hosts without the file.
   const env = process.env.SIGNALBOX_CLEAR_ENDS;
   if (env === "0" || env === "false") s.claudeClearEnds = false;
@@ -150,6 +173,18 @@ export function normalizeBindInput(input: string): { value?: string; error?: str
   // An IPv6 literal; a bare colon is enough to tell it apart from a typo.
   if (raw.includes(":")) return { value: raw };
   return { error: `invalid hub.bind ${JSON.stringify(input)} (expected an IP, "loopback"/"local", or "any"/"all")` };
+}
+
+export function normalizeIntInput(
+  input: string,
+  min: number,
+  max: number
+): { value?: number; error?: string } {
+  const value = Number(input);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    return { error: `expected a whole number between ${min} and ${max}` };
+  }
+  return { value };
 }
 
 const upstreamInputError =

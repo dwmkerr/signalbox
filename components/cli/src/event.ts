@@ -28,11 +28,15 @@ export const Untag = "untag";
 
 export const Version = 1;
 
-// Crop bounds. The privacy line is "signals and a two-line breadcrumb of the
-// exchange, never transcripts" - crops happen at the emitter, the full text
-// never leaves the machine that produced it.
-export const PromptMax = 160;
-export const ReplyMax = 280;
+// Emitter caps. The hub is the person's own machine, so the caps exist to
+// bound one event, not to protect the content: send the agent's raw
+// markdown, multi-line, and set `cropped` when it had to be cut so a UI can
+// show a deterministic affordance rather than guess.
+export const PromptMax = 1024;
+export const ReplyMax = 10240;
+// A title and a user label are one-line display names, so they keep the
+// collapse-to-one-line crop.
+export const TitleMax = 160;
 export const LabelMax = 80;
 
 export interface TmuxOrigin {
@@ -95,6 +99,9 @@ export interface Event {
   prompt?: string;
   // The agent/result side (the agent's last message).
   reply?: string;
+  // The emitter had to cut `prompt` or `reply` at its cap. A UI shows a
+  // trailing affordance; nothing on the wire is truncated silently.
+  cropped?: boolean;
   // signalbox's own display name, set by the user ("label" events only);
   // beats title on every surface, carried by the reducer.
   label?: string;
@@ -130,12 +137,33 @@ function cropLine(s: string, max: number): string {
   return points.length > max ? points.slice(0, max).join("") : collapsed;
 }
 
-export function cropPrompt(s: string): string {
-  return cropLine(s, PromptMax);
+export interface Cropped {
+  text: string;
+  cropped: boolean;
 }
 
-export function cropReply(s: string): string {
-  return cropLine(s, ReplyMax);
+// cropText bounds an agent's raw markdown without reshaping it: internal
+// newlines, list markers and fences survive, only leading/trailing
+// whitespace goes. Cropping counts code points, so a multi-byte character
+// is never split in half.
+export function cropText(s: string, max: number): Cropped {
+  const trimmed = s.trim();
+  const points = Array.from(trimmed);
+  if (points.length <= max) return { text: trimmed, cropped: false };
+  return { text: points.slice(0, max).join(""), cropped: true };
+}
+
+export function cropPrompt(s: string, max: number = PromptMax): Cropped {
+  return cropText(s, max);
+}
+
+export function cropReply(s: string, max: number = ReplyMax): Cropped {
+  return cropText(s, max);
+}
+
+// cropTitle is the one-line crop for an agent-provided session name.
+export function cropTitle(s: string): string {
+  return cropLine(s, TitleMax);
 }
 
 export function cropLabel(s: string): string {
@@ -342,6 +370,7 @@ export async function redact(e: Event): Promise<void> {
   delete e.title;
   delete e.prompt;
   delete e.reply;
+  delete e.cropped;
   delete e.raw; // the raw payload carries everything - never leaves a corp host
   const idx = e.session_key.indexOf(":");
   if (idx > 0 && idx < e.session_key.length - 1) {

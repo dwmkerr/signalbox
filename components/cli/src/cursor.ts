@@ -4,7 +4,7 @@
 // format in particular is unverified - flagged inline so it can be checked
 // empirically. Unknown fields are ignored so payload growth is harmless.
 
-import { cropReply, cropPrompt, Busy, Done, Attention, Error as ErrorType, Ended, type Origin } from "./event";
+import { Busy, Done, Attention, Error as ErrorType, Ended, type Origin } from "./event";
 import { stripHarness, lastAssistantText, lastUserText, type Mapped } from "./claude";
 
 // Cursor's stable macOS bundle id (Cursor ships as a ToDesktop build). Captured
@@ -119,7 +119,7 @@ export function cursorWorkspace(h: CursorHook): string {
 export function cursorReply(h: CursorHook): string {
   const speaking = h.hook_event_name === "stop" || h.hook_event_name === "subagentStop";
   if (!speaking || !h.transcript_path) return "";
-  return cropReply(stripHarness(lastAssistantText(h.transcript_path)));
+  return stripHarness(lastAssistantText(h.transcript_path));
 }
 
 // Cursor wraps the user's real message in <user_query>...</user_query>, preceded
@@ -136,5 +136,5 @@ export function cursorPrompt(h: CursorHook): string {
   if (!speaking || !h.transcript_path) return "";
   const raw = lastUserText(h.transcript_path);
   const m = raw.match(userQuery);
-  return cropPrompt(stripHarness(m ? m[1] : raw));
+  return stripHarness(m ? m[1] : raw);
 }

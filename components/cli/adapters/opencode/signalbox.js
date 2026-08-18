@@ -5,10 +5,10 @@
  *   session.status busy|retry → busy · session.idle → done ·
  *   permission.asked → attention · session.error → error ·
  *   session.deleted → ended.  session_key = opencode:<sessionID>.
- *   detail = last user prompt (cropped), cached from message.updated +
- *   message.part.updated and sent on busy/done/attention/error.
- *   reply = last assistant text part (cropped), cached the same way and
- *   sent on done/attention - the palette's "last exchange" preview.
+ *   detail = last user prompt, cached from message.updated +
+ *   message.part.updated and sent as raw markdown on busy/done/attention/error.
+ *   reply = last assistant text part, cached the same way and sent as raw
+ *   markdown on done/attention. Both are cut only at the shared CLI caps.
  *   Every fire carries --pid/--pid-name (our own process: the plugin runs
  *   in-process) so the hub's liveness sweep can end sessions whose agent
  *   died without an exit event.
@@ -39,17 +39,18 @@ function resolveBinary() {
 // back up behind a dead process.
 const FIRE_EXIT_WAIT_MS = 5000
 
-// The contract caps content at the emitter - detail is one cropped line of
-// 160 chars, reply one of 280: signals and a two-line breadcrumb of the
-// exchange, never transcripts.
-const DETAIL_MAX = 160
-const REPLY_MAX = 280
+// These caps match the CLI's; text stays raw markdown and only surrounding
+// whitespace is trimmed before a code-point-safe cut.
+const DETAIL_MAX = 1024
+const REPLY_MAX = 10240
 
 function cropLine(text, max) {
   if (typeof text !== "string") return undefined
-  const oneLine = text.replace(/\s+/g, " ").trim()
-  if (!oneLine) return undefined
-  return oneLine.length > max ? oneLine.slice(0, max - 1) + "…" : oneLine
+  const trimmed = text.trim()
+  if (!trimmed) return undefined
+  const points = Array.from(trimmed)
+  const cropped = points.length > max
+  return { text: cropped ? points.slice(0, max).join("") : trimmed, cropped }
 }
 
 const cropDetail = (text) => cropLine(text, DETAIL_MAX)
@@ -119,8 +120,9 @@ function fire({ event, sessionID, title, reason, detail, reply }) {
     if (sessionID) args.push("--session-key", `opencode:${sessionID}`)
     if (title) args.push("--title", title)
     if (reason) args.push("--reason", reason)
-    if (detail) args.push("--detail", detail)
-    if (reply) args.push("--reply", reply)
+    if (detail?.text) args.push("--detail", detail.text)
+    if (reply?.text) args.push("--reply", reply.text)
+    if (detail?.cropped || reply?.cropped) args.push("--cropped")
     args.push("--pid", String(process.pid))
 
     // Resolving comm inside the chain keeps fire order intact; when capture

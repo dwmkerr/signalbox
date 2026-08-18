@@ -19,9 +19,26 @@ function after(a: string | undefined, b: string | undefined): boolean {
   return !!a && (!b || a > b);
 }
 
+// One turn of the conversation. `seq` is the seq of the event that closed the
+// exchange, which makes it the paging cursor: it is monotonic within a hub's
+// log, exactly like /stream's `since`.
+export interface Exchange {
+  prompt?: string;
+  reply?: string;
+  ts: string;
+  cropped?: boolean;
+  seq: number;
+}
+
+export const DefaultHistoryLimit = 1000;
+
 // Store is the LWW reducer over events keyed by session_key.
 export class Store {
   private sessions = new Map<string, Event>();
+  private history = new Map<string, Exchange[]>();
+  private pending = new Map<string, Exchange>();
+
+  constructor(private historyLimit: number = DefaultHistoryLimit) {}
 
   // apply folds one event in. "ended" removes the session (stays in the
   // log). "seen" marks dealt-with without touching recency. "hide"
@@ -32,6 +49,8 @@ export class Store {
     switch (e.event) {
       case ev.Ended:
         this.sessions.delete(e.session_key);
+        this.history.delete(e.session_key);
+        this.pending.delete(e.session_key);
         return;
       case ev.Seen: {
         const cur = this.sessions.get(e.session_key);
@@ -162,7 +181,97 @@ export class Store {
     for (const k of ["reason", "cwd", "title", "prompt", "reply"] as const) {
       if (e[k] === "") delete e[k];
     }
+    this.recordExchange(incoming, incoming.seq ?? 0);
     this.sessions.set(e.session_key, e);
+  }
+
+  // Attention events never touch history because their reply is ask text. The
+  // event TYPE decides which turn a reply belongs to: a busy is a turn
+  // STARTING, so a reply riding on it can only be the previous turn's final
+  // text (the new turn has produced nothing yet) - it heals the outgoing
+  // exchange. A done/error is a turn ENDING, so a prompt+reply on one event
+  // are the same turn's pair (single-shot emitters like `fire` and the
+  // opencode plugin). The heal exists because Stop-time capture can lose the
+  // transcript write race; the next idle notification or prompt
+  // deterministically carries the corrected final text.
+  private recordExchange(incoming: Event, seq: number): void {
+    if (![ev.Busy, ev.Done, ev.Error].includes(incoming.event)) return;
+
+    const key = incoming.session_key;
+    const commit = (exchange: Exchange): void => {
+      const history = this.history.get(key) ?? [];
+      history.push({ ...exchange, seq });
+      while (history.length > this.historyLimit) history.shift();
+      this.history.set(key, history);
+    };
+    // The reply lands on the exchange in flight: fill the pending if one is
+    // open, amend the latest committed exchange if not (the write-race heal;
+    // replacing with an identical value keeps at-least-once delivery
+    // idempotent), or cold-start a reply-only pending when there is nothing
+    // to amend.
+    const applyReply = (): void => {
+      const pending = this.pending.get(key);
+      if (pending) {
+        pending.reply = incoming.reply;
+        pending.ts = incoming.ts;
+        if (incoming.cropped === true) pending.cropped = true;
+        return;
+      }
+      const history = this.history.get(key);
+      const latest = history?.[history.length - 1];
+      if (latest) {
+        latest.reply = incoming.reply;
+        if (incoming.cropped === true) latest.cropped = true;
+        return;
+      }
+      this.pending.set(key, {
+        reply: incoming.reply,
+        ts: incoming.ts,
+        cropped: incoming.cropped === true ? true : undefined,
+        seq: 0,
+      });
+    };
+    const openPrompt = (): void => {
+      const existing = this.pending.get(key);
+      if (existing) commit(existing);
+      this.pending.set(key, {
+        prompt: incoming.prompt,
+        ts: incoming.ts,
+        cropped: incoming.cropped === true ? true : undefined,
+        seq: 0,
+      });
+    };
+
+    if (incoming.event === ev.Busy) {
+      // Turn start: heal the outgoing exchange first, then open the new one.
+      // A busy never closes a pair - its reply belongs to the turn before it.
+      if (incoming.reply) applyReply();
+      if (incoming.prompt) openPrompt();
+      return;
+    }
+
+    // Turn end (done/error): prompt then reply, so a single event carrying
+    // both pairs them; then a completed pair commits.
+    if (incoming.prompt) openPrompt();
+    if (incoming.reply) applyReply();
+    const pending = this.pending.get(key);
+    if (pending?.prompt && pending.reply) {
+      commit(pending);
+      this.pending.delete(key);
+    }
+  }
+
+  // exchanges returns the newest `limit` exchanges, OLDEST FIRST (both surfaces
+  // render a conversation top to bottom). `before` pages backwards: only
+  // exchanges with a lower seq are considered. Returns null when the session is
+  // not on the board, so a caller can answer 404 rather than an empty list -
+  // "no history yet" and "no such session" are different answers.
+  exchanges(sessionKey: string, opts: { limit: number; before?: number }): Exchange[] | null {
+    if (!this.sessions.has(sessionKey)) return null;
+    const all = this.history.get(sessionKey) ?? [];
+    const eligible = opts.before === undefined ? all : all.filter((x) => x.seq < opts.before!);
+    // Return copies so callers cannot mutate the ring through shared references.
+    return eligible.slice(Math.max(0, eligible.length - opts.limit)).map((x) => ({ ...x }));
   }
 
   // list returns the display ordering - pinned first, then engagement MRU:

@@ -8,7 +8,8 @@ import * as ev from "./event";
 import type { Event } from "./event";
 import * as cmd from "./command";
 import type { Command } from "./command";
-import { Store } from "./state";
+import { Store, DefaultHistoryLimit } from "./state";
+import type { Exchange } from "./state";
 import { procAlive } from "./proc";
 import { buildStamp } from "./build";
 
@@ -28,7 +29,7 @@ export interface RequestHandler {
 export class Hub {
   private seq = 0;
   private log: Event[] = [];
-  private store = new Store();
+  private store: Store;
   private subs = new Set<Subscriber>();
   // Commands ride the same /stream connection but a separate set, so the event
   // subscriber's seq-dedupe closure never has to reason about a seq-less thing.
@@ -72,8 +73,10 @@ export class Hub {
     // The port this hub listens on, echoed by /healthz. A surface that wants
     // to tell a person where to reach the hub must not have to guess it from
     // the URL it happened to dial.
-    private port: number = 0
+    private port: number = 0,
+    private historyLimit: number = DefaultHistoryLimit
   ) {
+    this.store = new Store(historyLimit);
     mkdirSync(stateDir, { recursive: true });
     this.logPath = join(stateDir, "events.jsonl");
     if (existsSync(this.logPath)) {
@@ -91,6 +94,13 @@ export class Hub {
         this.log.push(e);
         if ((e.seq ?? 0) > this.seq) this.seq = e.seq!;
         this.store.apply(e);
+        // Seed the dedupe window from the log, so a redelivery straddling a
+        // hub restart is still caught.
+        if (e.id) {
+          this.seenIds.add(e.id);
+          this.seenIdOrder.push(e.id);
+          if (this.seenIdOrder.length > 4096) this.seenIds.delete(this.seenIdOrder.shift()!);
+        }
       }
     }
     // Keep an fd open for appends (append mode).
@@ -104,11 +114,26 @@ export class Hub {
     } catch {}
   }
 
+  // The forwarder's drain is at-least-once: a crash between send and
+  // reconcile resends events. Row state is last-write-wins so redelivery was
+  // harmless there, but the exchange ring is not - a redelivered done would
+  // double-commit and a redelivered busy could mis-pair a healed reply - so
+  // ingest dedupes on the event's unique id. Bounded FIFO: redeliveries are
+  // near-adjacent, so a small window suffices.
+  private seenIds = new Set<string>();
+  private seenIdOrder: string[] = [];
+
   // ingest is the single write path - POST /events and the sweeps all go
   // through it, so every event gets a seq and is persisted, applied and
   // broadcast identically. Persist failure refuses the event rather than
   // acknowledging one that would vanish on restart.
   ingest(e: Event): number {
+    if (e.id) {
+      if (this.seenIds.has(e.id)) return this.seq;
+      this.seenIds.add(e.id);
+      this.seenIdOrder.push(e.id);
+      if (this.seenIdOrder.length > 4096) this.seenIds.delete(this.seenIdOrder.shift()!);
+    }
     e.seq = ++this.seq;
     appendFileSync(this.logFd, JSON.stringify(e) + "\n");
     this.log.push(e);
@@ -246,6 +271,9 @@ export class Hub {
         headers: { "Cache-Control": "no-store" },
       });
     }
+    if (req.method === "GET" && url.pathname === "/exchanges") {
+      return this.handleExchanges(url);
+    }
     if (req.method === "GET" && url.pathname === "/stream") {
       return this.handleStream(req, url, server);
     }
@@ -257,6 +285,19 @@ export class Hub {
     if (req.method === "POST" && url.pathname === "/pair/new") return this.handlePairNew(req);
     if (req.method === "GET" && url.pathname === "/pair/status") return this.handlePairStatus();
     return undefined;
+  }
+
+  // Served from the reducer's ring, never from events.jsonl: a forwarder has
+  // no log, and one code path means the answer cannot differ between the two
+  // runtimes.
+  private handleExchanges(url: URL): Response {
+    const parsed = parseExchangeQuery(url, this.historyLimit);
+    if (parsed.error) return jsonError(400, parsed.error);
+    const list = this.store.exchanges(parsed.session!, { limit: parsed.limit!, before: parsed.before });
+    if (list === null) return jsonError(404, "unknown session");
+    return Response.json(exchangesBody(parsed.session!, list), {
+      headers: { "Cache-Control": "no-store" },
+    });
   }
 
   // checkBearer returns a 401 Response when the request does not carry the
@@ -485,6 +526,43 @@ export class Hub {
       },
     });
   }
+}
+
+export function parseExchangeQuery(
+  url: URL,
+  historyLimit: number
+): { session?: string; limit?: number; before?: number; error?: string } {
+  const session = url.searchParams.get("session");
+  if (session === null || session === "") return { error: "session is required" };
+  const limitRaw = url.searchParams.get("limit");
+  let limit = 20;
+  if (limitRaw !== null) {
+    // parseInt accepts a numeric prefix, so strict digits keep the 400 contract honest.
+    if (!/^[0-9]+$/.test(limitRaw)) return { error: "limit must be a positive integer" };
+    limit = parseInt(limitRaw, 10);
+    if (!Number.isInteger(limit) || limit < 1) return { error: "limit must be a positive integer" };
+  }
+  if (limit > historyLimit) limit = historyLimit;
+  const beforeRaw = url.searchParams.get("before");
+  let before: number | undefined;
+  if (beforeRaw !== null) {
+    if (!/^[0-9]+$/.test(beforeRaw)) return { error: "before must be a non-negative integer seq" };
+    before = parseInt(beforeRaw, 10);
+    if (!Number.isInteger(before) || before < 0) return { error: "before must be a non-negative integer seq" };
+  }
+  return { session, limit, before };
+}
+
+// next_before is the cursor for the page BEFORE this one: the oldest
+// returned seq. Null when the caller has reached the start, so a UI knows to
+// stop offering "older" rather than discovering it by an empty page.
+export function exchangesBody(sessionKey: string, list: Exchange[]) {
+  const oldest = list.length > 0 ? list[0].seq : null;
+  return {
+    session_key: sessionKey,
+    exchanges: list,
+    next_before: list.length > 0 ? oldest : null,
+  };
 }
 
 export function isLoopbackHost(hostport: string): boolean {
