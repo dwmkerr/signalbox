@@ -16,6 +16,8 @@ struct SessionEvent: Decodable {
     // or an older hub never blanks the row.
     let prompt: String?
     let reply: String?
+    // The emitter cut prompt or reply at its cap; surfaces show the crop marker.
+    let cropped: Bool
     // User-set display label (the "label" user-event); beats title everywhere.
     let label: String?
     // Discreet free-form tags carried across agent events; drive `#tag` search.
@@ -31,7 +33,7 @@ struct SessionEvent: Decodable {
     let origin: SessionOrigin?
 
     enum CodingKeys: String, CodingKey {
-        case agent, event, reason, host, cwd, title, prompt, detail, reply, label, tags, ts, seq, acked, hidden, pinned, origin
+        case agent, event, reason, host, cwd, title, prompt, detail, reply, cropped, label, tags, ts, seq, acked, hidden, pinned, origin
         case sessionKey = "session_key"
         case engagedTs = "engaged_ts"
     }
@@ -53,6 +55,7 @@ struct SessionEvent: Decodable {
         prompt = (try? container.decodeIfPresent(String.self, forKey: .prompt))
             ?? (try? container.decodeIfPresent(String.self, forKey: .detail)) ?? nil
         reply = try? container.decodeIfPresent(String.self, forKey: .reply)
+        cropped = (try? container.decodeIfPresent(Bool.self, forKey: .cropped)) ?? false
         label = try? container.decodeIfPresent(String.self, forKey: .label)
         tags = try? container.decodeIfPresent([String].self, forKey: .tags)
         ts = try? container.decodeIfPresent(String.self, forKey: .ts)

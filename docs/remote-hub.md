@@ -52,6 +52,23 @@ curl -s http://<host>:8377/healthz
 curl -s -H "Authorization: Bearer $SIGNALBOX_TOKEN" http://<host>:8377/state
 ```
 
+Read the newest exchanges for a session with query encoding that safely handles
+keys containing `:` or `&`:
+
+```bash
+curl --get -s \
+  -H "Authorization: Bearer $SIGNALBOX_TOKEN" \
+  --data-urlencode 'session=claude:review&fixes' \
+  --data-urlencode 'limit=3' \
+  http://<host>:8377/exchanges
+```
+
+Each page contains the newest exchanges in chronological order. To retrieve an
+older page, pass the response's `next_before` value as the `before` query
+parameter. Both the state-owning hub and the local forwarder expose this route.
+See the [hub API specification](../components/specs/events.md#the-hub-api) for
+the complete response and pagination contract.
+
 The image sets `SIGNALBOX_REMOTE=1`, so the hub serves plain HTTP and expects the platform in front of it to terminate TLS - do not expose port 8377 directly to the internet. State lives on the `/data` volume.
 
 ## Pair a phone
@@ -90,5 +107,9 @@ A 401 on `/state` is not a failure - every route except `/healthz` and `POST /pa
 - `SIGNALBOX_REMOTE=1` - remote mode: plain HTTP behind platform TLS, token on every request. Set by the image.
 - `/data` volume - the event log; one machine, one volume.
 - `hub.remoteUrl` - the app's memory of the last confirmed remote address, so switching modes and back restores it; `hub.upstream` alone decides whether the hub forwards.
+- `hub.historyLimit` - the number of exchanges retained per session. The default is 1,000 and the accepted range is 1 to 100,000. A change takes effect when the hub or forwarder restarts.
+- `hub.replyCap` - the emitter cap for replies. The default is 10,240 characters and the accepted range is 1 to 1,000,000. Emitters read a change on their next invocation. The prompt cap remains fixed at 1,024 characters.
+
+Set these values with `signalbox config set`. They currently have no Settings UI.
 
 Fly specifics (ports, health check, machine sizing) live in [`components/deploy/fly/README.md`](../components/deploy/fly/README.md).

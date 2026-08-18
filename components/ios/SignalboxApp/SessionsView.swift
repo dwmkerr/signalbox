@@ -51,8 +51,6 @@ struct SessionsView: View {
                                 // gesture. The hub owns the partition, so this
                                 // only fires an event; it never re-sorts here.
                                 .contextMenu { pinMenu(session); chatButton(session) }
-                                // URL-only rows describe remote work rather than
-                                // a window, so they remain information-only.
                                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                     if !session.infoOnly {
                                         Button { jump(session) } label: { Label("Jump", systemImage: "arrow.uturn.forward") }
@@ -430,7 +428,6 @@ struct SessionsView: View {
                 }
             }
 
-            // URL-only rows carry no window action. Hidden rows remain silenced.
             if !session.infoOnly && !dimmed {
                 Button { jump(session) } label: {
                     Image(systemName: "arrow.uturn.forward")

@@ -94,8 +94,8 @@ export class Hub {
         this.log.push(e);
         if ((e.seq ?? 0) > this.seq) this.seq = e.seq!;
         this.store.apply(e);
-        // Seed the dedupe window from the log, so a redelivery straddling a
-        // hub restart is still caught.
+        // Seed the dedupe window from the log so a redelivery spanning a hub
+        // restart is still recognized.
         if (e.id) {
           this.seenIds.add(e.id);
           this.seenIdOrder.push(e.id);
@@ -114,12 +114,11 @@ export class Hub {
     } catch {}
   }
 
-  // The forwarder's drain is at-least-once: a crash between send and
-  // reconcile resends events. Row state is last-write-wins so redelivery was
-  // harmless there, but the exchange ring is not - a redelivered done would
-  // double-commit and a redelivered busy could mis-pair a healed reply - so
-  // ingest dedupes on the event's unique id. Bounded FIFO: redeliveries are
-  // near-adjacent, so a small window suffices.
+  // The forwarder's drain is at-least-once, so a crash between send and
+  // reconcile can resend events. Last-write-wins makes duplicates harmless for
+  // session rows. Duplicate done or busy events can corrupt exchange history,
+  // so ingest deduplicates them by id. Redeliveries are near-adjacent, so a
+  // bounded FIFO window suffices.
   private seenIds = new Set<string>();
   private seenIdOrder: string[] = [];
 
@@ -287,9 +286,8 @@ export class Hub {
     return undefined;
   }
 
-  // Served from the reducer's ring, never from events.jsonl: a forwarder has
-  // no log, and one code path means the answer cannot differ between the two
-  // runtimes.
+  // Both handlers query Store.exchanges, which keeps their paging semantics
+  // aligned.
   private handleExchanges(url: URL): Response {
     const parsed = parseExchangeQuery(url, this.historyLimit);
     if (parsed.error) return jsonError(400, parsed.error);
@@ -553,9 +551,8 @@ export function parseExchangeQuery(
   return { session, limit, before };
 }
 
-// next_before is the cursor for the page BEFORE this one: the oldest
-// returned seq. Null when the caller has reached the start, so a UI knows to
-// stop offering "older" rather than discovering it by an empty page.
+// next_before is the oldest returned seq on a non-empty page. An empty page
+// returns null, so clients discover the end by requesting the next page.
 export function exchangesBody(sessionKey: string, list: Exchange[]) {
   const oldest = list.length > 0 ? list[0].seq : null;
   return {

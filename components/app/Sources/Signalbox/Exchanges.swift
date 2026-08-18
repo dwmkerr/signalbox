@@ -1,6 +1,5 @@
-// One turn from GET /exchanges?session=K (specs/events.md). Decoded
-// leniently like SessionEvent: a hub that grows a field must not blank the
-// preview.
+// Exchange fields are decoded leniently because older hubs may omit optional
+// values such as `cropped`.
 struct Exchange: Decodable, Equatable {
     let prompt: String?
     let reply: String?

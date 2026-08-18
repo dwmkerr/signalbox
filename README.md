@@ -38,10 +38,10 @@ open https://testflight.apple.com/join/umJpETbZ
 ```
 
 
-Open the jumplist with `⌃⌥J` to see all sessions, their statuses, most recent message, whether they need input, and quickly jump between them.
+Open the jumplist with Control-Option-J to see every session and jump to the one you need. The right pane renders the latest three exchanges in chronological order. Older exchanges are dimmed, Markdown uses terminal styling, and cropped text ends with the U+2026 marker defined by the [Agent Markdown specification](components/specs/agent-markdown.md).
 
 <p align="center">
-  <img width="820" src="docs/images/jumplist.png" alt="The signalbox jumplist: every agent session in one list, the last exchange on the right, and one keystroke to jump to the terminal that needs you">
+  <img width="820" src="docs/images/jumplist.png" alt="The signalbox jumplist with a session list and a right pane showing recent Markdown-rendered prompts and replies.">
 </p>
 
 Or see running sessions in the menu bar:
@@ -50,7 +50,7 @@ Or see running sessions in the menu bar:
   <img width="480" src="docs/images/menubar.png" alt="The signalbox menu bar dropdown: a status dot on the icon, one row per session with its agent glyph and age">
 </p>
 
-[Install the app](https://testflight.apple.com/join/umJpETbZ) and pair with a QR code to see your sessions on your phone:
+[Install the app](https://testflight.apple.com/join/umJpETbZ) and pair with a QR code to see your sessions on your phone. Touch and hold a session, then choose Show Chat to read its history:
 
 <p align="center">
   <img width="860" src="docs/images/ios-pairing.svg" alt="Pairing signalbox: the Connect Phone window on the Mac shows a QR code, and next to it the iOS app shows the board - one card per agent session with its status, glyph and latest exchange">

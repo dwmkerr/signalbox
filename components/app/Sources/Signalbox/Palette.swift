@@ -23,6 +23,9 @@ struct PaletteRow {
     let ageStart: Date
     let detail: String?
     let reply: String?
+    // The emitter cut the exchange at its cap; the breadcrumb and the
+    // fallback preview show the crop marker.
+    let cropped: Bool
     // The action line's "where": derived from origin + host by the delegate
     // (terminal app name, tmux coords, host) - display data, not jump logic.
     let location: String
@@ -813,7 +816,8 @@ final class PaletteController: NSObject {
     var exchangeProvider: ((String, Int) async -> [Exchange])?
     private var exchangeCache: [String: [Exchange]] = [:]
     private var exchangeRequest: [String: Bool] = [:]
-    // A slow fetch must not resurrect history invalidated by a close or reload.
+    // Generation invalidation prevents a slow fetch from restoring history
+    // after a close or reload.
     private var exchangeGeneration = 0
     private var actionRow: NSStackView!
     private var actionLabel: NSTextField!
@@ -1032,7 +1036,7 @@ final class PaletteController: NSObject {
             var divider = PaletteRow(
                 sessionKey: "", mark: .working, statusWord: "", isAsking: false,
                 isUnread: false, isRead: false, agent: "", name: "", ageStart: Date(),
-                detail: nil, reply: nil, location: "", jumpable: false, infoOnly: true,
+                detail: nil, reply: nil, cropped: false, location: "", jumpable: false, infoOnly: true,
                 needsCheck: false,
                 engagedDate: Date(), tags: [], pinned: false
             )
@@ -1934,16 +1938,15 @@ final class PaletteController: NSObject {
             listBorder.widthAnchor.constraint(equalToConstant: 1),
         ])
 
-        // RIGHT: the terminal-styled recent exchanges plus the action line. No
-        // preview title - the location lives in the action line (contract v4).
-        // Full black, like the terminal it is quoting - the pane reads as a
-        // window into the session, not more panel chrome.
+        // The right pane shows recent exchanges with terminal styling. The
+        // action line carries the location, so the pane has no separate title.
+        // Its black background visually connects it to the terminal session.
         let preview = NSView()
         preview.wantsLayer = true
         preview.layer?.backgroundColor = Theme.terminalBG.cgColor
         let term = NSTextField(wrappingLabelWithString: "")
-        // Selectable buys two things at once: text can be copied out of the
-        // preview, and the painter's .link attributes become clickable.
+        // Making the field selectable lets users copy preview text and activate
+        // rendered links.
         term.isSelectable = true
         term.allowsEditingTextAttributes = true
         term.preferredMaxLayoutWidth =
@@ -2075,7 +2078,7 @@ final class PaletteController: NSObject {
         }
 
         let exchanges = history.isEmpty
-            ? [Exchange(prompt: row.detail, reply: row.reply, ts: "", cropped: false, seq: 0)]
+            ? [Exchange(prompt: row.detail, reply: row.reply, ts: "", cropped: row.cropped, seq: 0)]
             : Array(history.suffix(3))
         let mono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .regular)
         let boldMono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .bold)
@@ -2484,8 +2487,7 @@ private final class SessionCellView: NSTableCellView {
                 paragraphSpacing: 0,
                 indent: 0
             )
-            // PaletteRow has no cropped state, so it cannot add a crop marker here.
-            let spans = previewLine(detail, cropped: false)
+            let spans = previewLine(detail, cropped: row.cropped)
             let breadcrumb = NSTextField(labelWithString: "")
             // Whitespace collapse includes newlines, so explicit breaks never reach AppKit.
             breadcrumb.attributedStringValue = render(spans: spans, style: breadcrumbStyle)

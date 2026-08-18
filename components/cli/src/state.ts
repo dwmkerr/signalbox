@@ -270,7 +270,7 @@ export class Store {
     if (!this.sessions.has(sessionKey)) return null;
     const all = this.history.get(sessionKey) ?? [];
     const eligible = opts.before === undefined ? all : all.filter((x) => x.seq < opts.before!);
-    // Return copies so callers cannot mutate the ring through shared references.
+    // Copy each exchange so callers cannot mutate the reducer's ring.
     return eligible.slice(Math.max(0, eligible.length - opts.limit)).map((x) => ({ ...x }));
   }
 

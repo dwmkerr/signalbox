@@ -146,8 +146,8 @@ export class Forwarder implements RequestHandler {
     return undefined;
   }
 
-  // A forwarder has no events.jsonl, so exchanges come from its downlink
-  // cache; the shared reducer makes this answer identical to the upstream's.
+  // The forwarder serves exchanges from its downlink-fed reducer using the
+  // same response contract as the upstream.
   private handleExchanges(url: URL): Response {
     const parsed = parseExchangeQuery(url, this.opts.historyLimit);
     if (parsed.error) return jsonError(400, parsed.error);

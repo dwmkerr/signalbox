@@ -778,9 +778,8 @@ function runHub(args: string[]): void {
 
 // ---- config ----------------------------------------------------------------
 
-// runConfig reads and writes the persistent hub network settings that runHub
-// (and the app-spawned hub) honor. A deliberately tiny five-key surface, not
-// a general config editor: the app owns everything else in settings.json.
+// runConfig reads and writes the supported hub settings. The app owns all
+// other values in settings.json.
 function runConfig(args: string[]): void {
   const { flags, rest } = parseFlags(args, ["generate"]);
   const sub = rest[0] ?? "get";

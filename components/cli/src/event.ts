@@ -28,10 +28,8 @@ export const Untag = "untag";
 
 export const Version = 1;
 
-// Emitter caps. The hub is the person's own machine, so the caps exist to
-// bound one event, not to protect the content: send the agent's raw
-// markdown, multi-line, and set `cropped` when it had to be cut so a UI can
-// show a deterministic affordance rather than guess.
+// Emitter caps bound event size. Emitters otherwise preserve the agent's raw
+// multiline Markdown and set `cropped` when they cut it.
 export const PromptMax = 1024;
 export const ReplyMax = 10240;
 // A title and a user label are one-line display names, so they keep the
@@ -142,10 +140,10 @@ export interface Cropped {
   cropped: boolean;
 }
 
-// cropText bounds an agent's raw markdown without reshaping it: internal
+// cropText bounds an agent's raw Markdown without reshaping it: internal
 // newlines, list markers and fences survive, only leading/trailing
-// whitespace goes. Cropping counts code points, so a multi-byte character
-// is never split in half.
+// whitespace goes. Cropping counts Unicode code points and therefore preserves
+// encoded code points. It may still split a multi-code-point grapheme cluster.
 export function cropText(s: string, max: number): Cropped {
   const trimmed = s.trim();
   const points = Array.from(trimmed);

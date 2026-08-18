@@ -1,12 +1,17 @@
-signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) | [settings](https://dwmkerr.github.io/signalbox/specs/settings.html) | [menu bar](https://dwmkerr.github.io/signalbox/specs/menubar.html) | [ios](https://dwmkerr.github.io/signalbox/specs/ios.html) | [architecture](https://dwmkerr.github.io/signalbox/specs/architecture.html) | [cli](cli.md) | [data model](events.md) | [agent integrations](adapters.md) | agent markdown
+signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) | [settings](https://dwmkerr.github.io/signalbox/specs/settings.html) | [menu bar](https://dwmkerr.github.io/signalbox/specs/menubar.html) | [ios](https://dwmkerr.github.io/signalbox/specs/ios.html) | [architecture](https://dwmkerr.github.io/signalbox/specs/architecture.html) | [cli](cli.md) | [data model](events.md) | [agent integrations](adapters.md) | Agent Markdown
 
-# Specification: agent markdown
+# Specification: Agent Markdown
 
-## 1. What this is
+## Overview
 
-Agents reply in markdown, and the hub carries it raw (see the [data model](events.md)). Both apps render it through one shared Swift package, `components/shared/AgentMarkdown`, so a heading looks like a heading on the Mac and on the phone. The package parses markdown into a platform-neutral intermediate representation and paints that IR per platform. The IR is the contract this spec pins down; the paint is styling and may differ: the Mac renders terminal-style in a mono font, while iOS renders softer proportional chat bubbles.
+Agents send raw Markdown through the hub. Both apps parse it with
+`AgentMarkdown`, which produces a platform-independent intermediate
+representation. This specification defines that representation and its parsing
+rules. Each platform supplies its own renderer and styling. macOS uses terminal
+styling and a monospaced font, while iOS uses proportional chat bubbles. See the
+[data model](events.md) for the transport contract.
 
-## 2. The IR
+## Intermediate representation
 
 The parser produces these exact types, and the tests assert them:
 
@@ -37,16 +42,16 @@ public struct SpanStyle: OptionSet, Sendable {
 
 Every span array is canonical. The parser drops spans whose `text` is empty and merges adjacent spans when both `style` and `link` are identical. The exact span counts in the golden examples rely on this canonicalization.
 
-## 3. Recognized grammar (v1)
+## Supported grammar
 
-| Construct | Markdown | IR | Terminal styling (Mac) |
+| Construct | Markdown | IR | Terminal styling (macOS) |
 |---|---|---|---|
 | bold | `**text**` or `__text__` | `Span(style: .bold)` | bold mono |
 | italic | `*text*` or `_text_` | `Span(style: .italic)` | italic mono |
 | inline code | `` `text` `` | `Span(style: .code)` | tinted mono |
 | link | `[label](url)` | `Span(text: "label", link: "url")` | accent colour, underlined |
 | heading | `# text` .. `###### text` | `.heading(level:spans:)` | bold mono, one blank line above |
-| unordered list | `- item` / `* item` / `+ item` | `.bulletList` | `•` bullet, hanging indent |
+| unordered list | `- item` / `* item` / `+ item` | `.bulletList` | U+2022 bullet character, with a hanging indent |
 | ordered list | `1. item` | `.orderedList(start:items:)` | `N.` marker, hanging indent |
 | fenced code block | 3+ backticks with an optional language word and a matching-or-longer close | `.codeBlock(language:code:)` | tinted mono block, no inline parsing inside |
 | table | GFM pipe table with matching header and delimiter cell counts; escaped pipes (\|) stay in cells | `.table(header:rows:)` | mono, columns padded to the widest cell (best effort) |
@@ -57,25 +62,51 @@ List indentation has no nesting semantics in v1. An indented list marker line jo
 
 Emphasis uses a simple left-to-right toggle scan, deliberately not CommonMark flanking. At each position, longer markers win: `**` and `__` are checked before `*` and `_`. A recognized marker toggles its style regardless of surrounding characters, so `a_b_c` italicizes `b` and `** x **` produces one bold span containing ` x `. An opener with no matching marker later in the text remains literal. With the longer-marker rule, `***x***` produces exactly one span, `Span(text: "x", style: [.bold, .italic], link: nil)`.
 
-The deliberate exclusions for v1 are blockquotes, horizontal rules, images, nested list structure, task-list semantics, HTML, reference links, setext headings, and autolinks. Unsupported standalone constructs are rendered as plain paragraph text. Indented list markers and checkbox-looking item prefixes follow the flat list rules above. Inline markers inside a code span or a fenced block are never interpreted. Unclosed emphasis and an unterminated fence degrade to literal text rather than swallowing the rest of the document.
+The deliberate exclusions for v1 are blockquotes, horizontal rules, images, nested list structure, task-list semantics, HTML, reference links, setext headings, and autolinks. Unsupported standalone constructs are rendered as plain paragraph text. Indented list markers and checkbox-looking item prefixes follow the flat list rules above. Inline markers inside a code span or a fenced block are never interpreted. Unclosed emphasis and unterminated fences are rendered literally. They do not consume later input.
 
-## 4. The one-line preview rule
+## Preview generation
 
-List rows on both platforms use `previewLine`. Take the first paragraph block. If the document has no paragraph, take the first block's spans: a heading's spans, a list's first item, a code block's first line as a single `.code` span, or a table's first header cell. Apply inline styles only; block constructs contribute no markers. Collapse every whitespace run, including newlines preserved from paragraph soft breaks, to one space character (U+0020). This collapse happens only in the preview and does not change the parsed IR. The result is a `[Span]`, never a `String`, so a row can still bold a word.
+List rows on both platforms use `previewLine`:
 
-## 5. Cropped
+1. Select the first paragraph block.
+2. If the document has no paragraph, use the first block's spans. Use a heading's spans, a list's first item, a code block's first line as a single `.code` span, or a table's first header cell.
+3. Apply inline styles only. Block constructs contribute no markers.
+4. Collapse every whitespace run, including newlines preserved from paragraph soft breaks, to one space character (U+0020).
+5. If the source event has `cropped: true`, append the shared crop marker as a separate unstyled span.
 
-The cropped marker never enters the parsed IR. When the source event carries `cropped: true`, `previewLine` appends `…` (U+2026, a single character) as a separate unstyled span. A painter appends the same marker after painting the document. If the last block is a paragraph, heading, bullet list, or ordered list, the marker follows the content on that block's final line. If the last block is a code block or table, the painter emits the marker on its own trailing line. For an empty document, the marker is the entire painted output. The marker is exposed as `AgentMarkdown.croppedMarker` so there is exactly one definition.
+Whitespace collapse happens only in the preview and does not change the parsed
+intermediate representation. `previewLine` returns `[Span]`, which preserves
+inline styles.
 
-## 6. Paint
+## Crop marker
 
-The platform painters expose `render(_:style:cropped:)` for a parsed `MarkdownDocument` or raw markdown, plus `render(spans:style:)` for previews. macOS uses `TerminalStyle` to return an `NSAttributedString`; iOS uses `ChatStyle` to return an `AttributedString`. Bold and italic styles compose into a bold-italic face, while code uses the code font and colour in preference to either emphasis style. The caller owns the palette so each app keeps control of its theme. Tests pin contract-level text placement, while platform-specific pixels remain outside the unit-test contract.
+The crop marker never enters the parsed intermediate representation. It is the
+single U+2026 character. When the source event carries `cropped: true`,
+`previewLine` appends the marker as a separate unstyled span. A renderer appends
+the same marker after rendering the document. If the last block is a paragraph,
+heading, bullet list, or ordered list, the marker follows the content on that
+block's final line. If the last block is a code block or table, the renderer
+emits the marker on its own trailing line. For an empty document, the marker is
+the entire rendered output. `AgentMarkdown.croppedMarker` provides the shared
+definition.
 
-## 7. Golden examples
+## Rendering
 
-The package's tests mirror these examples one for one, so the spec and the tests cannot drift.
+The platform renderers expose `render(_:style:cropped:)` for a parsed
+`MarkdownDocument` or raw Markdown, plus `render(spans:style:)` for previews.
+macOS uses `TerminalStyle` to return an `NSAttributedString`; iOS uses
+`ChatStyle` to return an `AttributedString`. Bold and italic styles compose into
+a bold-italic face, while code uses the code font and colour in preference to
+either emphasis style. The caller owns the palette so each app controls its
+theme. Tests pin contract-level text placement, while platform-specific pixels
+remain outside the unit-test contract.
 
-1. **G1 emphasis**
+## Contract examples
+
+Each example has a corresponding test. Update the example and test together
+when the contract changes.
+
+### G1: Emphasis
 
    Input:
 
@@ -97,7 +128,7 @@ The package's tests mirror these examples one for one, so the spec and the tests
    ])
    ```
 
-2. **G2 inline code**
+### G2: Inline code
 
    Input:
 
@@ -117,7 +148,7 @@ The package's tests mirror these examples one for one, so the spec and the tests
    ])
    ```
 
-3. **G3 link**
+### G3: Link
 
    Input:
 
@@ -137,7 +168,7 @@ The package's tests mirror these examples one for one, so the spec and the tests
    ])
    ```
 
-4. **G4 heading plus paragraph**
+### G4: Heading plus paragraph
 
    Input:
 
@@ -160,7 +191,7 @@ The package's tests mirror these examples one for one, so the spec and the tests
    ])
    ```
 
-5. **G5 unordered list**
+### G5: Unordered list
 
    Input:
 
@@ -180,7 +211,7 @@ The package's tests mirror these examples one for one, so the spec and the tests
    ])
    ```
 
-6. **G6 ordered list**
+### G6: Ordered list
 
    Input:
 
@@ -200,7 +231,7 @@ The package's tests mirror these examples one for one, so the spec and the tests
    ])
    ```
 
-7. **G7 fenced code**
+### G7: Fenced code
 
    Input:
 
@@ -218,7 +249,7 @@ The package's tests mirror these examples one for one, so the spec and the tests
    ])
    ```
 
-8. **G8 table**
+### G8: Table
 
    Input:
 
@@ -254,7 +285,7 @@ The package's tests mirror these examples one for one, so the spec and the tests
 
 The preview goldens apply the same contract to `previewLine`:
 
-1. **P1 first paragraph**
+### P1: First paragraph
 
    Input:
 
@@ -274,7 +305,7 @@ The preview goldens apply the same contract to `previewLine`:
    ]
    ```
 
-2. **P2 list fallback**
+### P2: List fallback
 
    Input:
 
@@ -291,7 +322,7 @@ The preview goldens apply the same contract to `previewLine`:
    ]
    ```
 
-3. **P3 whitespace collapse**
+### P3: Whitespace collapse
 
    Input:
 
@@ -308,7 +339,7 @@ The preview goldens apply the same contract to `previewLine`:
    ]
    ```
 
-4. **P4 cropped marker**
+### P4: Crop marker
 
    Input with `cropped: true`:
 
@@ -325,6 +356,7 @@ The preview goldens apply the same contract to `previewLine`:
    ]
    ```
 
-## 8. Growing this
+## Dialects
 
-The parser takes a `dialect` parameter that defaults to `.common`, so a future per-agent dialect, such as an agent that emits its own conventions, is added as a case without changing any call site.
+`dialect` defaults to `.common`. Future agent-specific rules can be introduced as
+new dialect cases without changing existing call sites.

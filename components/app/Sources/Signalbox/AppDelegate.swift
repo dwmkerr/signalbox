@@ -224,8 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // against a local hub and a forwarder - the app never learns which it is
     // talking to.
     func fetchExchanges(sessionKey: String, limit: Int) async -> [Exchange] {
-        // URLQueryItem percent-encodes the key, so a session key containing ':'
-        // or '&' needs no hand-rolled escaping.
+        // URLQueryItem percent-encodes ':' and '&' in session keys.
         var components = URLComponents(string: "\(hubURL)/exchanges")
         components?.queryItems = [
             URLQueryItem(name: "session", value: sessionKey),
@@ -234,8 +233,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let url = components?.url else { return [] }
         var request = HubAuth.request(url)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        // An older hub has no such route, and an empty history is not an error:
-        // either way the preview falls back to the row's own breadcrumb.
+        // Older hubs lack this route, and empty history is valid. Both cases
+        // fall back to the row's own breadcrumb.
         guard let (data, response) = try? await urlSession.data(for: request),
               let http = response as? HTTPURLResponse, http.statusCode == 200,
               let doc = try? JSONDecoder().decode(ExchangesDoc.self, from: data)
@@ -684,6 +683,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ageStart: sessionAgeStart(session),
                 detail: session.detail,
                 reply: session.reply,
+                cropped: event.cropped,
                 location: locationText(for: session),
                 jumpable: jumpable,
                 infoOnly: !jumpable && session.origin?.url != nil,

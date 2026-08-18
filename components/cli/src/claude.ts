@@ -74,8 +74,8 @@ export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
     case "SessionStart":
       return { eventType: Busy, reason: "session_start", detail: "" };
     case "UserPromptSubmit": {
-      // Claude's transcript is append-only, so the next prompt guarantees the
-      // previous turn's final assistant entry is available to heal its reply.
+      // The next prompt arrives after Claude appends the previous turn's final
+      // assistant entry, allowing the reducer to heal its reply.
       const reply = h.transcript_path ? stripHarness(lastAssistantText(h.transcript_path)) : "";
       return {
         eventType: Busy,

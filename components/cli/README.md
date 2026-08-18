@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://github.com/dwmkerr/signalbox">
-    <img width="900" src="https://raw.githubusercontent.com/dwmkerr/signalbox/main/docs/images/jumplist.png" alt="The signalbox jumplist: every agent session in one list, the last exchange on the right, and one keystroke to jump to the terminal that needs you">
+    <img width="900" src="https://raw.githubusercontent.com/dwmkerr/signalbox/main/docs/images/jumplist.png" alt="The signalbox jumplist with a session list and a right pane showing recent Markdown-rendered prompts and replies.">
   </a>
 </p>
 
@@ -39,7 +39,7 @@ signalbox init
 signalbox is a tool that configures your coding agents to send a signal as they work - when a task is running, when a message comes back, when input is needed. The signals go to an app on your machine, so you can see the status of every session and jump between them through a macOS jumplist.
 
 <p align="center">
-  <img width="820" src="https://raw.githubusercontent.com/dwmkerr/signalbox/main/docs/images/jumplist.png" alt="The signalbox jumplist over several agent sessions">
+  <img width="820" src="https://raw.githubusercontent.com/dwmkerr/signalbox/main/docs/images/jumplist.png" alt="The signalbox jumplist with a session list and a right pane showing recent Markdown-rendered prompts and replies.">
 </p>
 
 This means you can:

@@ -2,8 +2,8 @@ import AgentMarkdown
 import SwiftUI
 
 // The session as a conversation: prompts on the right, replies on the left,
-// the agent's markdown rendered properly. Chat styling is deliberately softer
-// than the Mac's terminal pane - the IR is shared, the paint is not.
+// with the agent's Markdown rendered. Both apps share the parsed representation.
+// iOS applies its own proportional chat styling.
 struct ChatView: View {
     @ObservedObject var hub: HubClient
     let session: Session

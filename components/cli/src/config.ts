@@ -23,8 +23,9 @@ export interface HubSettings {
   // owning state. This is how the app-spawned hub, which passes only --port,
   // becomes a forwarder with no flags. Empty means own the state locally.
   upstream: string;
-  // How many exchanges the reducer keeps per session. The ring is rebuilt from
-  // the event log on boot, so raising this costs memory, never migration.
+  // How many exchanges the reducer keeps per session. Increasing the limit uses
+  // more memory. The reducer rebuilds the ring from existing events without a
+  // migration.
   historyLimit: number;
   // The emitter's cap on a reply, in characters. Prompts keep the fixed cap.
   replyCap: number;
@@ -100,9 +101,7 @@ export function loadSettings(): Settings {
     ...fromFile,
     hub: { ...defaults.hub, ...(fromFile.hub ?? {}) },
   };
-  // A hand-edited settings file must never wedge the hook path, so a
-  // non-numeric or out-of-range value falls back to the default rather than
-  // failing.
+  // Invalid hand-edited values fall back to defaults so hooks can continue.
   s.hub.historyLimit = clampInt(fromFile.hub?.historyLimit, 1, 100000, defaults.hub.historyLimit);
   s.hub.replyCap = clampInt(fromFile.hub?.replyCap, 1, 1000000, defaults.hub.replyCap);
   // Env override for scripting/testing, and for hosts without the file.
