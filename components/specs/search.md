@@ -96,6 +96,39 @@ CREATE VIRTUAL TABLE turns_fts USING fts5(
 
 The `prefix='2 3'` indexes make the fallback row's live hit count affordable while the user types. The tokenizer deliberately does not use `porter` stemming because stemming mangles code identifiers and terms that users expect to match exactly.
 
+## Query semantics
+
+Search input is plain text, never FTS5 syntax. The query layer extracts Unicode
+word tokens, quotes each token, prefix-matches tokens of two or more characters,
+and joins them with `AND`. A query such as `edit skill` becomes
+`"edit"* AND "skill"*`. Single-character tokens are matched exactly because the
+schema's cheap prefix indexes begin at two characters. At most the first 32
+tokens and 128 Unicode code points from each token are used, which keeps one
+search-box query bounded.
+
+Quotes, wildcards, parentheses, carets, and leading minus signs are separators,
+not operators. FTS5-looking words such as `OR` and `NEAR` are quoted as ordinary
+search terms. Consequently raw user input never reaches `MATCH`, and malformed
+FTS5 syntax cannot surface as a SQLite error. A query containing no word tokens,
+such as `*` or `^`, has zero hits and zero results.
+
+`countHits(q)` counts matching turns, not occurrences or sessions. Its prefix
+expressions use the `prefix='2 3'` indexes so the jumplist can refresh the count
+while the user types.
+
+`search(q, limit)` groups matching turns by `session_uuid`. Each result carries
+the session UUID, agent, cwd, best matching turn's timestamp, an FTS5
+`snippet()` with matches enclosed in `<mark>` and `</mark>`, and the number of
+matching turns in that session. The best turn is the one with the lowest FTS5
+`bm25()` score. Sessions are ordered by that score, then by the best turn's
+timestamp from newest to oldest, with the session UUID as a stable final tie
+breaker.
+
+A result is marked `live` only when an indexed file path for its session exactly
+matches the `transcript` path of a current board row. A live result also carries
+that row's `session_key` as its jump target. Every other result is marked
+`ended` and has no jump target.
+
 ## Turn extraction
 
 A turn is one displayed user prompt or assistant reply from an eligible transcript line. Tool calls, tool output, reasoning, system instructions, metadata, and lifecycle records are not turns. Empty displayed text and malformed JSON lines are skipped. Only complete newline-terminated records are consumed, so a line still being written remains at the current `byte_offset` for the next sweep.
