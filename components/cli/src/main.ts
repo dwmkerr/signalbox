@@ -18,7 +18,7 @@ import { runPair, lanIPv4 } from "./pair";
 import { captureProc, captureAgentProc } from "./proc";
 import { mapClaudeHook, claudeReply, sessionName, type ClaudeHook } from "./claude";
 import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle, editorTerminalOrigin, hostPrefixedAgent, type CursorHook } from "./cursor";
-import { mapCodexHook, codexReply, codexSessionName, type CodexHook } from "./codex";
+import { mapCodexHook, codexReply, codexSessionName, resolveCodexTranscript, type CodexHook } from "./codex";
 import {
   loadSettings, saveSettings, settingsPath, normalizeBindInput, lanHint,
   normalizeUpstreamInput, shouldGenerateToken, generateToken,
@@ -204,6 +204,7 @@ async function buildEvent(opts: {
   originURL?: string;
   origin?: Origin | null;
   cwd?: string;
+  transcript?: string;
   proc?: Proc | null;
 }): Promise<Event> {
   const cwd = opts.cwd || process.cwd();
@@ -236,6 +237,7 @@ async function buildEvent(opts: {
   };
   if (opts.reason) e.reason = opts.reason;
   if (opts.title) e.title = opts.title;
+  if (opts.transcript) e.transcript = opts.transcript;
   // Crop at the emitter, whatever the source: the full text must never
   // leave this process.
   const prompt = ev.cropPrompt(opts.prompt ?? "");
@@ -474,6 +476,7 @@ async function runClaudeHook(): Promise<void> {
     reply: claudeReply(payload),
     sessionKey: key,
     cwd: payload.cwd,
+    transcript: payload.transcript_path,
     proc,
   });
   // Diagnostic (off by default): SIGNALBOX_RAW attaches the untouched hook
@@ -523,6 +526,7 @@ async function runCursorHook(): Promise<void> {
     sessionKey: key,
     origin,
     cwd: workspace || undefined,
+    transcript: payload.transcript_path,
     proc,
   });
   if (process.env.SIGNALBOX_RAW) e.raw = text;
@@ -567,6 +571,7 @@ async function runCodexHook(): Promise<void> {
     reply: codexReply(payload),
     sessionKey: key,
     cwd: payload.cwd,
+    transcript: payload.session_id ? resolveCodexTranscript(payload.session_id) : "",
     proc,
   });
   if (process.env.SIGNALBOX_RAW) e.raw = text;

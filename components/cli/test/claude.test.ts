@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,6 +7,42 @@ import {
 } from "../src/claude";
 
 const fixture = join(import.meta.dir, "testdata", "transcript.jsonl");
+
+function spooledClaudeEvent(payload: Record<string, unknown>): Record<string, unknown> {
+  const dir = mkdtempSync(join(tmpdir(), "sb-claude-hook-"));
+  const home = mkdtempSync(join(tmpdir(), "sb-claude-home-"));
+  const proc = Bun.spawnSync(
+    [process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "hook", "claude"],
+    {
+      env: {
+        ...process.env,
+        HOME: home,
+        SIGNALBOX_CONFIG: join(dir, "settings.json"),
+        SIGNALBOX_DATA_DIR: dir,
+        SIGNALBOX_PROFILE: "full",
+        SIGNALBOX_URL: "http://127.0.0.1:1",
+        TMUX: "",
+      },
+      stdin: new TextEncoder().encode(JSON.stringify(payload)),
+      stdout: "pipe",
+      stderr: "pipe",
+    }
+  );
+  expect(proc.exitCode).toBe(0);
+  return JSON.parse(readFileSync(join(dir, "spool.jsonl"), "utf8").trim());
+}
+
+describe("Claude transcript event", () => {
+  test("threads transcript_path into the built event", () => {
+    const event = spooledClaudeEvent({
+      hook_event_name: "SessionStart",
+      session_id: "claude-transcript-test",
+      cwd: "/tmp/project",
+      transcript_path: fixture,
+    });
+    expect(event.transcript).toBe(fixture);
+  });
+});
 
 describe("mapClaudeHook", () => {
   const cases: [any, { eventType: string; reason: string } | null][] = [

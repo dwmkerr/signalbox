@@ -156,10 +156,12 @@ describe("redact", () => {
     const e: ev.Event = {
       v: 1, id: "x", ts: "t", host: "h", agent: "claude", event: "done",
       session_key: "claude:secret-session-id",
-      cwd: "/home/dave/corp/secret", title: "secret", prompt: "names the work", reply: "also names it",
+      cwd: "/home/dave/corp/secret", transcript: "/home/dave/.claude/projects/-home-dave-corp-secret/secret.jsonl",
+      title: "secret", prompt: "names the work", reply: "also names it",
     };
     await ev.redact(e);
     expect(e.cwd).toBeUndefined();
+    expect(e.transcript).toBeUndefined();
     expect(e.title).toBeUndefined();
     expect(e.prompt).toBeUndefined();
     expect(e.reply).toBeUndefined();

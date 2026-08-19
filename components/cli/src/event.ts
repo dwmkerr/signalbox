@@ -88,6 +88,9 @@ export interface Event {
   reason?: string;
   session_key: string;
   cwd?: string;
+  // session_key uses <family>:<tmux-pane> or <family>:<shortHash(cwd)>, never
+  // the transcript uuid, so this path links a content-search hit to its live row.
+  transcript?: string;
   title?: string;
   // The human/trigger side of the exchange breadcrumb (your last prompt, a
   // CI trigger line, ...). Was `detail` before v0.2; readers still accept
@@ -339,6 +342,7 @@ export function validate(e: Event): string | null {
 export async function redact(e: Event): Promise<void> {
   // machine is hostname plus random hex; host is retained, so it discloses nothing new and preserves redacted identity.
   delete e.cwd;
+  delete e.transcript;
   delete e.title;
   delete e.prompt;
   delete e.reply;

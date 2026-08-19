@@ -195,6 +195,9 @@ export class Forwarder implements RequestHandler {
     delete e.pinned;
     delete e.engaged_ts;
     delete e.seq;
+    // A local hub uses this path to match search hits, but an upstream hub
+    // cannot read another machine's transcripts, so forwarding it only leaks.
+    delete e.transcript;
     // The hook gives its POST only 200 ms. Waiting for a WAN round trip would
     // make the hook spool locally after this process had also delivered the
     // event, creating a duplicate; one local append and one async drain avoid it.

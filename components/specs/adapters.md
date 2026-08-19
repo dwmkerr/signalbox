@@ -20,6 +20,19 @@ An adapter can only surface what its agent's hooks emit, so the board shows diff
 - **Question ask** is Claude Code's `AskUserQuestion` (the agent asks you to pick an option); no other agent has an equivalent tool, so the column is Claude-only by nature.
 - `*` **Codex has no error hook.** Its hook set is `session_start, user_prompt_submit, stop, permission_request, session_end` - there is no turn-failure event, so a Codex turn that errors just stops emitting and the row ages out via the liveness sweep rather than showing an error. Surfacing it would mean inferring failure from silence, which is worse than an honest gap. Not a bug to fix here - it needs an upstream Codex hook.
 
+### Transcript paths
+
+The optional event `transcript` field links a live board row to the local conversation used by content search. Empty paths are omitted from the event.
+
+| Adapter | `transcript` source |
+|---|---|
+| Claude Code | Supplied directly as `transcript_path` in the hook payload. |
+| Codex | Derived from `session_id` by a bounded, newest-first search under `~/.codex/sessions/YYYY/MM/DD/`; Codex does not provide the path. |
+| Cursor | Supplied directly as `transcript_path` in the hook payload. |
+| OpenCode | Not supplied. Its conversation store is SQLite and is out of scope for transcript-path events. |
+| pi | Not supplied. |
+| GitHub Actions | Not supplied. |
+
 Installing: `signalbox init` converges everything ([cli.md](cli.md); `install` and `setup` are aliases); `signalbox init --agent <name>` (repeatable, `--agent all` for every agent) scopes the run to one or more agents and applies without the picker; `--remove` turns the same components off. `--app` and `--tmux` scope to the other components.
 
 ## Where adapters send events
