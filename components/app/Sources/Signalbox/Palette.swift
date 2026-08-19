@@ -1,4 +1,5 @@
 import AppKit
+import AgentMarkdown
 
 // One display row, precomputed by the AppDelegate from its session model so
 // the palette never duplicates ordering, status, or naming logic. Rows arrive
@@ -22,9 +23,16 @@ struct PaletteRow {
     let ageStart: Date
     let detail: String?
     let reply: String?
+    // The emitter cut the exchange at its cap; the breadcrumb and the
+    // fallback preview show the crop marker.
+    let cropped: Bool
     // The action line's "where": derived from origin + host by the delegate
     // (terminal app name, tmux coords, host) - display data, not jump logic.
     let location: String
+    // URL-only rows are information. Originless machine rows still offer Jump
+    // so Enter can explain the current plain-terminal limitation.
+    let jumpable: Bool
+    let infoOnly: Bool
     let needsCheck: Bool
     // Drives next-to-check and Tab cycling; display order stays the hub's.
     let engagedDate: Date
@@ -86,6 +94,9 @@ enum Theme {
     static let titleUnread = NSColor(hex: 0xEDEDED)
     static let age = NSColor(hex: 0x98989D)
     static let accent = NSColor(hex: 0x0A84FF)
+    // Inline code in the preview. A warm tone keeps code visually distinct
+    // from links, which share the accent blue and an underline.
+    static let codeText = NSColor(hex: 0xE5C07B)
     static let green = NSColor(hex: 0x32D74B)
     static let rust = NSColor(hex: 0xD97757) // claude sunburst
     static let vscode = NSColor(hex: 0x007ACC) // VS Code blue (host mark)
@@ -794,8 +805,23 @@ final class PaletteController: NSObject {
     private var tableView: NSTableView!
     private var emptyLabel: NSTextField!
     private var termLabel: NSTextField!
+    private var termScrollView: NSScrollView!
+    // Working sessions redraw once a second, so tailing depends on a changed
+    // session or document height instead of every attributed-string update.
+    private var previewSessionKey: String?
+    private var previewContentHeight: CGFloat = 0
+    // The preview reads history from the hub, not from the row, so it is
+    // fetched per selection and cached until the palette closes. A row with no
+    // history yet falls back to its own breadcrumb.
+    var exchangeProvider: ((String, Int) async -> [Exchange])?
+    private var exchangeCache: [String: [Exchange]] = [:]
+    private var exchangeRequest: [String: Bool] = [:]
+    // Generation invalidation prevents a slow fetch from restoring history
+    // after a close or reload.
+    private var exchangeGeneration = 0
     private var actionRow: NSStackView!
     private var actionLabel: NSTextField!
+    private var unsupportedJumpKey: String?
     private var searchField: NSTextField!
     private var labelBar: NSView!
     private var labelField: NSTextField!
@@ -818,6 +844,7 @@ final class PaletteController: NSObject {
 
     // Working-state glyphs cycled once per second, matching the mock.
     private static let spinGlyphs = ["·", "✢", "✳", "∗", "✻", "✽"]
+    private static let feedbackURL = URL(string: "https://github.com/dwmkerr/signalbox/issues/67")!
 
     // Mock geometry: 960-wide panel, 46pt header, 34pt footer, 430pt list -
     // reference values at 1.0×, multiplied by the current zoom.
@@ -897,6 +924,12 @@ final class PaletteController: NSObject {
 
     func hide() {
         guard panel.isVisible else { return }
+        exchangeGeneration += 1
+        exchangeCache.removeAll()
+        exchangeRequest.removeAll()
+        previewSessionKey = nil
+        previewContentHeight = 0
+        unsupportedJumpKey = nil
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
@@ -922,6 +955,9 @@ final class PaletteController: NSObject {
     // MARK: - Data
 
     private func reload(preservingSelection: Bool) {
+        exchangeGeneration += 1
+        exchangeCache.removeAll()
+        exchangeRequest.removeAll()
         let previousKey = selectedKey()
         let previousIndex = tableView.selectedRow
         allRows = rowsProvider()
@@ -1000,7 +1036,8 @@ final class PaletteController: NSObject {
             var divider = PaletteRow(
                 sessionKey: "", mark: .working, statusWord: "", isAsking: false,
                 isUnread: false, isRead: false, agent: "", name: "", ageStart: Date(),
-                detail: nil, reply: nil, location: "", needsCheck: false,
+                detail: nil, reply: nil, cropped: false, location: "", jumpable: false, infoOnly: true,
+                needsCheck: false,
                 engagedDate: Date(), tags: [], pinned: false
             )
             divider.isDivider = true
@@ -1093,6 +1130,13 @@ final class PaletteController: NSObject {
         // list must not react underneath the rename.
         guard labelEditingKey == nil else { return event }
         let ctrl = event.modifierFlags.contains(.control)
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if unsupportedJumpKey != nil,
+           !flags.contains(.control), !flags.contains(.command), !flags.contains(.option),
+           event.charactersIgnoringModifiers?.lowercased() == "f" {
+            NSWorkspace.shared.open(Self.feedbackURL)
+            return nil
+        }
         switch event.keyCode {
         case 53: // esc clears the search first; a second esc closes
             if statusPopoverOpen {
@@ -1185,8 +1229,15 @@ final class PaletteController: NSObject {
 
     private func jumpRow(_ index: Int) {
         guard rows.indices.contains(index), !rows[index].isDivider, !rows[index].isHidden else { return }
+        let row = rows[index]
+        guard !row.infoOnly else { return }
+        guard row.jumpable else {
+            unsupportedJumpKey = row.sessionKey
+            renderPreview()
+            return
+        }
         hide()
-        onJump(rows[index].sessionKey)
+        onJump(row.sessionKey)
     }
 
     private func hideSelected() {
@@ -1562,7 +1613,7 @@ final class PaletteController: NSObject {
         let footer = NSView()
         let label = NSTextField(
             labelWithString:
-                "type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump  ·  esc clear/close"
+                "type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump / F feedback  ·  esc clear/close"
         )
         label.font = .systemFont(ofSize: s(10.5))
         label.textColor = Theme.textDim
@@ -1887,17 +1938,27 @@ final class PaletteController: NSObject {
             listBorder.widthAnchor.constraint(equalToConstant: 1),
         ])
 
-        // RIGHT: the terminal-styled last exchange plus the action line. No
-        // preview title - the location lives in the action line (contract v4).
-        // Full black, like the terminal it is quoting - the pane reads as a
-        // window into the session, not more panel chrome.
+        // The right pane shows recent exchanges with terminal styling. The
+        // action line carries the location, so the pane has no separate title.
+        // Its black background visually connects it to the terminal session.
         let preview = NSView()
         preview.wantsLayer = true
         preview.layer?.backgroundColor = Theme.terminalBG.cgColor
         let term = NSTextField(wrappingLabelWithString: "")
-        term.isSelectable = false
+        // Making the field selectable lets users copy preview text and activate
+        // rendered links.
+        term.isSelectable = true
+        term.allowsEditingTextAttributes = true
         term.preferredMaxLayoutWidth =
             Self.panelSize.width - Self.listWidth - s(44)
+        term.translatesAutoresizingMaskIntoConstraints = false
+
+        let termScroll = NSScrollView()
+        termScroll.documentView = term
+        termScroll.hasVerticalScroller = true
+        termScroll.hasHorizontalScroller = false
+        termScroll.autohidesScrollers = true
+        termScroll.drawsBackground = false
 
         let keycap = Self.keycap("↩", fontSize: 10.5)
         let action = NSTextField(labelWithString: "")
@@ -1909,17 +1970,21 @@ final class PaletteController: NSObject {
         actionRow.spacing = s(6)
         actionRow.alignment = .centerY
 
-        for view in [term, actionRow] {
+        for view in [termScroll, actionRow] {
             view.translatesAutoresizingMaskIntoConstraints = false
             preview.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            term.topAnchor.constraint(equalTo: preview.topAnchor, constant: s(18)),
-            term.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: s(22)),
-            term.trailingAnchor.constraint(lessThanOrEqualTo: preview.trailingAnchor, constant: -s(22)),
-            actionRow.topAnchor.constraint(equalTo: term.bottomAnchor, constant: s(16)),
+            termScroll.topAnchor.constraint(equalTo: preview.topAnchor, constant: s(18)),
+            termScroll.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: s(22)),
+            termScroll.trailingAnchor.constraint(equalTo: preview.trailingAnchor, constant: -s(22)),
+            termScroll.bottomAnchor.constraint(equalTo: actionRow.topAnchor, constant: -s(16)),
             actionRow.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: s(22)),
             actionRow.trailingAnchor.constraint(lessThanOrEqualTo: preview.trailingAnchor, constant: -s(22)),
+            actionRow.bottomAnchor.constraint(equalTo: preview.bottomAnchor, constant: -s(18)),
+            term.leadingAnchor.constraint(equalTo: termScroll.contentView.leadingAnchor),
+            term.trailingAnchor.constraint(equalTo: termScroll.contentView.trailingAnchor),
+            term.topAnchor.constraint(equalTo: termScroll.contentView.topAnchor),
         ])
 
         for view in [list, preview] {
@@ -1940,8 +2005,11 @@ final class PaletteController: NSObject {
         self.tableView = table
         self.emptyLabel = empty
         self.termLabel = term
+        self.termScrollView = termScroll
         self.actionRow = actionRow
         self.actionLabel = action
+        self.previewSessionKey = nil
+        self.previewContentHeight = 0
         return body
     }
 
@@ -1983,52 +2051,120 @@ final class PaletteController: NSObject {
         guard rows.indices.contains(index) else {
             termLabel.attributedStringValue = NSAttributedString()
             actionRow.isHidden = true
+            unsupportedJumpKey = nil
+            previewSessionKey = nil
+            previewContentHeight = 0
             return
         }
         let row = rows[index]
-        actionRow.isHidden = false
+        if unsupportedJumpKey != row.sessionKey || row.jumpable || row.infoOnly {
+            unsupportedJumpKey = nil
+        }
+        actionRow.isHidden = row.infoOnly
 
-        let mono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .regular)
-        let text = NSMutableAttributedString()
-
-        // "❯ <prompt>" - the user's half of the exchange, dim.
-        let prompt = (row.detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !prompt.isEmpty {
-            let promptStyle = NSMutableParagraphStyle()
-            promptStyle.minimumLineHeight = s(20)
-            promptStyle.maximumLineHeight = s(20)
-            promptStyle.paragraphSpacing = s(12)
-            promptStyle.lineBreakMode = .byWordWrapping
-            text.append(NSAttributedString(string: "❯ ", attributes: [
-                .font: mono, .foregroundColor: Theme.caret, .paragraphStyle: promptStyle,
-            ]))
-            text.append(NSAttributedString(string: "\(prompt)\n", attributes: [
-                .font: mono, .foregroundColor: Theme.promptText, .paragraphStyle: promptStyle,
-            ]))
+        let key = row.sessionKey
+        let history = exchangeCache[key] ?? []
+        if exchangeCache[key] == nil, exchangeRequest[key] != true {
+            exchangeRequest[key] = true
+            let generation = exchangeGeneration
+            Task { [weak self] in
+                guard let self else { return }
+                let list = await self.exchangeProvider?(key, 3) ?? []
+                guard self.exchangeGeneration == generation else { return }
+                self.exchangeCache[key] = list
+                self.exchangeRequest[key] = nil
+                self.renderPreview()
+            }
         }
 
-        // Hanging indent so wrapped reply lines align after the bullet,
-        // matching the mock's flex row.
-        let bodyStyle = NSMutableParagraphStyle()
-        bodyStyle.minimumLineHeight = s(20)
-        bodyStyle.maximumLineHeight = s(20)
-        bodyStyle.lineBreakMode = .byWordWrapping
-        bodyStyle.headIndent = s(16)
-        bodyStyle.tabStops = [NSTextTab(textAlignment: .left, location: s(16))]
+        let exchanges = history.isEmpty
+            ? [Exchange(prompt: row.detail, reply: row.reply, ts: "", cropped: row.cropped, seq: 0)]
+            : Array(history.suffix(3))
+        let mono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .regular)
+        let boldMono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .bold)
+        let italicMono = NSFontManager.shared.convert(mono, toHaveTrait: .italicFontMask)
+        let promptTerminalStyle = TerminalStyle(
+            font: mono,
+            boldFont: boldMono,
+            italicFont: italicMono,
+            textColor: Theme.promptText,
+            codeColor: Theme.codeText,
+            headingColor: Theme.replyText,
+            linkColor: Theme.accent,
+            markerColor: Theme.caret,
+            lineHeight: s(20),
+            paragraphSpacing: s(12),
+            indent: s(16)
+        )
+        let replyTerminalStyle = TerminalStyle(
+            font: mono,
+            boldFont: boldMono,
+            italicFont: italicMono,
+            textColor: Theme.replyText,
+            codeColor: Theme.codeText,
+            headingColor: Theme.replyText,
+            linkColor: Theme.accent,
+            markerColor: Theme.caret,
+            lineHeight: s(20),
+            paragraphSpacing: s(12),
+            indent: s(16)
+        )
+        let text = NSMutableAttributedString()
 
-        if row.mark == .working {
-            let runtime = ageString(from: row.ageStart, to: now)
-            let glyph = Self.spinGlyphs[spinIndex]
-            text.append(NSAttributedString(string: "\(glyph)\tWorking… (\(runtime))", attributes: [
-                .font: mono, .foregroundColor: Theme.amber, .paragraphStyle: bodyStyle,
-            ]))
-        } else if let reply = row.reply?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !reply.isEmpty {
-            // Bullet color is the temperature: amber = ask, blue = output
-            // updated, dim = read, red = failed (amber scheme).
+        for (exchangeIndex, exchange) in exchanges.enumerated() {
+            let newest = exchangeIndex == exchanges.count - 1
+            if exchangeIndex > 0 {
+                text.append(NSAttributedString(string: "\n"))
+            }
+
+            var promptStyle = promptTerminalStyle
+            if !newest {
+                promptStyle.textColor = Theme.caret
+                promptStyle.headingColor = Theme.caret
+            }
+            let prompt = (exchange.prompt ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !prompt.isEmpty {
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.minimumLineHeight = s(20)
+                paragraph.maximumLineHeight = s(20)
+                paragraph.paragraphSpacing = s(12)
+                paragraph.lineBreakMode = .byWordWrapping
+                text.append(NSAttributedString(string: "❯ ", attributes: [
+                    .font: mono, .foregroundColor: Theme.caret, .paragraphStyle: paragraph,
+                ]))
+                text.append(render(prompt, style: promptStyle, cropped: exchange.cropped))
+                text.append(NSAttributedString(string: "\n", attributes: [
+                    .font: mono, .foregroundColor: Theme.caret, .paragraphStyle: paragraph,
+                ]))
+            }
+
+            // The prefix owns the first paragraph so wrapped lines align with
+            // the reply body while markdown keeps its own block indentation.
+            let bodyParagraph = NSMutableParagraphStyle()
+            bodyParagraph.minimumLineHeight = s(20)
+            bodyParagraph.maximumLineHeight = s(20)
+            bodyParagraph.lineBreakMode = .byWordWrapping
+            bodyParagraph.headIndent = s(16)
+            bodyParagraph.tabStops = [NSTextTab(textAlignment: .left, location: s(16))]
+
+            if newest, row.mark == .working {
+                let runtime = ageString(from: row.ageStart, to: now)
+                let glyph = Self.spinGlyphs[spinIndex]
+                text.append(NSAttributedString(string: "\(glyph)\tWorking… (\(runtime))", attributes: [
+                    .font: mono, .foregroundColor: Theme.amber, .paragraphStyle: bodyParagraph,
+                ]))
+                continue
+            }
+
+            let reply = (exchange.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !reply.isEmpty else { continue }
+
             let bulletColor: NSColor
             let bodyColor: NSColor
-            if row.mark == .failed {
+            if !newest {
+                bulletColor = Theme.caret
+                bodyColor = Theme.readText
+            } else if row.mark == .failed {
                 bulletColor = .systemRed
                 bodyColor = Theme.replyText
             } else if row.isAsking {
@@ -2041,21 +2177,26 @@ final class PaletteController: NSObject {
                 bulletColor = Theme.accent
                 bodyColor = Theme.replyText
             }
+            var replyStyle = replyTerminalStyle
+            replyStyle.textColor = bodyColor
+            replyStyle.headingColor = bodyColor
             text.append(NSAttributedString(string: "●\t", attributes: [
-                .font: mono, .foregroundColor: bulletColor, .paragraphStyle: bodyStyle,
+                .font: mono, .foregroundColor: bulletColor, .paragraphStyle: bodyParagraph,
             ]))
-            text.append(NSAttributedString(string: reply, attributes: [
-                .font: mono, .foregroundColor: bodyColor, .paragraphStyle: bodyStyle,
-            ]))
+            text.append(render(reply, style: replyStyle, cropped: exchange.cropped))
         }
         termLabel.attributedStringValue = text
+        tailPreviewIfNeeded(for: key)
 
         // Action line: "↩ <where>", plus the ask marker in amber - the same
         // temperature as the row's mark.
-        let action = NSMutableAttributedString(string: row.location, attributes: [
+        let actionText = unsupportedJumpKey == row.sessionKey
+            ? "Jump not supported for this session yet (plain terminal). Press F to send feedback."
+            : row.location
+        let action = NSMutableAttributedString(string: actionText, attributes: [
             .font: NSFont.systemFont(ofSize: s(11)), .foregroundColor: Theme.textDim,
         ])
-        if row.isAsking {
+        if row.isAsking && unsupportedJumpKey == nil {
             action.append(NSAttributedString(string: " · ", attributes: [
                 .font: NSFont.systemFont(ofSize: s(11)), .foregroundColor: Theme.textDim,
             ]))
@@ -2065,6 +2206,21 @@ final class PaletteController: NSObject {
             ]))
         }
         actionLabel.attributedStringValue = action
+    }
+
+    private func tailPreviewIfNeeded(for key: String) {
+        termLabel.invalidateIntrinsicContentSize()
+        panel.contentView?.layoutSubtreeIfNeeded()
+
+        let contentHeight = termLabel.frame.height
+        let sessionChanged = previewSessionKey != key
+        let contentGrew = previewSessionKey == key && contentHeight > previewContentHeight + 0.5
+        previewSessionKey = key
+        previewContentHeight = contentHeight
+        guard sessionChanged || contentGrew, contentHeight > 0 else { return }
+
+        let bottomY = termLabel.isFlipped ? termLabel.bounds.maxY - 1 : termLabel.bounds.minY
+        termLabel.scrollToVisible(NSRect(x: termLabel.bounds.minX, y: bottomY, width: 1, height: 1))
     }
 
     // The remembered panel origin (bottom-left, screen coordinates). A dragged
@@ -2311,17 +2467,31 @@ private final class SessionCellView: NSTableCellView {
             right.leadingAnchor.constraint(greaterThanOrEqualTo: titleRow.trailingAnchor, constant: s(8)),
         ])
 
-        // The subtext is the latest line of the exchange (spec: Subtext):
-        // the prompt while working, the reply once the session has finished,
-        // asked, or failed.
         let prompt = (row.detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let reply = (row.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let detail = (row.mark == .working || reply.isEmpty) ? prompt : reply
         if detail.isEmpty {
             titleRow.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
         } else {
-            let breadcrumb = NSTextField(labelWithString: detail)
-            breadcrumb.font = .systemFont(ofSize: s(10.5))
+            let font = NSFont.systemFont(ofSize: s(10.5))
+            let breadcrumbStyle = TerminalStyle(
+                font: font,
+                boldFont: .systemFont(ofSize: s(10.5), weight: .bold),
+                italicFont: NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask),
+                textColor: Theme.textDim,
+                codeColor: Theme.codeText,
+                headingColor: Theme.textDim,
+                linkColor: Theme.accent,
+                markerColor: Theme.textDim,
+                lineHeight: s(13),
+                paragraphSpacing: 0,
+                indent: 0
+            )
+            let spans = previewLine(detail, cropped: row.cropped)
+            let breadcrumb = NSTextField(labelWithString: "")
+            // Whitespace collapse includes newlines, so explicit breaks never reach AppKit.
+            breadcrumb.attributedStringValue = render(spans: spans, style: breadcrumbStyle)
+            breadcrumb.font = font
             breadcrumb.textColor = Theme.textDim
             breadcrumb.lineBreakMode = .byTruncatingTail
             breadcrumb.maximumNumberOfLines = 1

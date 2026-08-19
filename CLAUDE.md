@@ -181,7 +181,16 @@ is correct. Verify with `security import` locally before setting the secret.
 - Push to GitHub at the end of the day only - commit locally as you go, one
   push when the day's work is done.
 - Conventional Commits (`feat:`, `fix:`, `docs:`, ...).
-- Comments explain *why*, not *what* - no breadcrumb comments.
+- Comments explain *why*, not *what* - no breadcrumb comments, no process
+  history (what was tried, what it replaced), no narrating a consumer's
+  behaviour. Exported types and their fields always get full doc comments
+  (JSDoc / Swift doc) - type docs earn their keep, inline narration does not.
+- Backwards compatibility is never assumed - it is a planning question to ask
+  explicitly. The default is that a reinstall/redeploy is acceptable; only
+  build compat shims when agreed, and say so in the comment/spec.
+- Prefer adjacent tests: `foo.test.ts` beside `foo.ts`, not a separate
+  `test/` tree. (Existing `components/cli/test/` migrates as files are
+  touched.)
 - Use a regular hyphen (-), never an em-dash, anywhere in code, comments, or docs.
 - User config: JSON agent configs (Claude settings.json, Cursor hooks.json)
   are merged only with consent, with a timestamped backup and an atomic

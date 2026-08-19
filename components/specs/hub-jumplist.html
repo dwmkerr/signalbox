@@ -61,6 +61,8 @@
           color:#6E6E73; font-size:9.5px; font-weight:500; line-height:normal;
           text-transform:lowercase; box-shadow:none; }
   .txt .d { font-size:10.5px; color:#6E6E73; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .txt .d code, .txt .d a { color:#0A84FF; }
+  .txt .d a { text-decoration:underline; }
   .right { text-align:right; flex-shrink:0; }
   .age { font-size:11px; font-weight:600; color:#98989D; }
   .dot { width:8.5px; height:8.5px; border-radius:50%; background:#0A84FF; }
@@ -92,8 +94,14 @@
   .ctxmenu .mi:hover { background:#3a3a40; }
   .ctxmenu .sep { height:1px; background:#ffffff14; margin:4px 6px; }
   /* The preview is full black: a window into the terminal it quotes. */
-  .preview { flex:1; padding:18px 22px; min-height:360px; background:#000; }
-  .term { font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.75; color:#C8C8CC; }
+  .preview { flex:1; padding:18px 22px; min-height:360px; background:#000;
+             display:flex; flex-direction:column; }
+  .term { flex:1; min-height:0; overflow-y:auto;
+          font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.75; color:#C8C8CC; }
+  .term .turn { margin-bottom:12px; }
+  .term .turn.older .you { color:#5A5A5F; }
+  .term .turn.older .body-t { color:#8E8E93; }
+  .term .turn.older .b { color:#5A5A5F; }
   .term .you { color:#98989D; white-space:pre-wrap; }
   .term .you::before { content:"❯ "; color:#5A5A5F; }
   .term .gap { height:12px; }
@@ -103,7 +111,16 @@
   .term .resp .body-t { white-space:pre-wrap; color:#D8D8DC; }
   .term .working { color:#E8B339; }
   .term .working .spinch { display:inline-block; width:14px; color:#E8B339; }
-  .actline { margin-top:16px; font-size:11px; color:#6E6E73;
+  .term b { font-weight:700; }
+  .term i { font-style:italic; }
+  .term code { color:#E5C07B; font-family:inherit; } /* warm, so code never reads as a link */
+  .term a { color:#0A84FF; text-decoration:underline; }
+  .term h3 { color:inherit; font:700 1em/1.75 'SF Mono',ui-monospace,Menlo,monospace; margin-top:12px; }
+  .term ul, .term ol { padding-left:18px; list-style-position:outside; }
+  .term pre { color:#0A84FF; font:inherit; white-space:pre-wrap; padding-left:16px; }
+  .term table { border-collapse:collapse; font:inherit; }
+  .term th, .term td { padding:0 12px 0 0; text-align:left; }
+  .actline { flex-shrink:0; margin-top:16px; font-size:11px; color:#6E6E73;
              font-family:-apple-system,sans-serif; display:flex; align-items:center; gap:6px; }
   .actline kbd { font-size:10.5px; }
   footer { border-top:1px solid #ffffff14; height:34px; display:flex; align-items:center; justify-content:center;
@@ -153,7 +170,7 @@
 </style></head><body>
 
 <div class="page">
-<div class="nav">signalbox specifications: jumplist | <a href="settings.html">settings</a> | <a href="menubar.html">menu bar</a> | <a href="ios.html">ios</a> | <a href="architecture.html">architecture</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
+<div class="nav">signalbox specifications: jumplist | <a href="settings.html">settings</a> | <a href="menubar.html">menu bar</a> | <a href="ios.html">ios</a> | <a href="architecture.html">architecture</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/agent-markdown.md">agent markdown</a></div>
 <h1>Specification: signalbox jumplist</h1>
 <div class="subtitle">Open with <kbd>⌃</kbd><kbd>⌥</kbd><kbd>J</kbd> (change this in <a href="settings.html">settings</a>).</div>
 <div class="interactive-note"><b>Note:</b> the mockup below is interactive and operates as the living specification for the signalbox jumplist.</div>
@@ -172,11 +189,12 @@
     <div class="list"><h3>SESSIONS</h3><div id="rows"></div></div>
     <div class="preview">
       <div class="term" id="term"></div>
+      <div class="actline" id="actline"></div>
     </div>
   </div>
   <footer>
     <span class="jlight" id="jlight" title="Hub status. Click for details."></span>
-    <span class="keys">type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump  ·  esc clear/close</span>
+    <span class="keys">type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump / F feedback  ·  esc clear/close</span>
     <span class="cog" title="Settings (⌘,)">⚙</span>
     <div class="labelbar" id="labelbar"><span class="p">Rename:</span><input id="labelinput" placeholder="session label - empty clears, ↩ saves, esc cancels"></div>
   </footer>
@@ -185,8 +203,10 @@
 
 <div class="prose">
   <h2>What this is</h2>
-  <p>The jumplist shows every agent session in one place and jumps you to the one you pick: the right
-  terminal window and tmux pane, or the browser for remote work like CI runs. It is a floating panel
+  <p>The jumplist shows every agent session in one place and jumps you to the machine session you pick:
+  the right terminal window and tmux pane, or the captured editor window. URL-only rows such as CI
+  runs stay on the board as
+  information, with no jump action. It is a floating panel
   that takes keys while your app keeps focus, and dismisses on <kbd class="sc">esc</kbd>, the shortcut,
   or a click elsewhere. Drag any background area to reposition it, like Alfred or Raycast. It remembers
   its position across opens and recenters if that spot is offscreen, for example after a display is
@@ -216,9 +236,10 @@
   <p>A bold title means unread. The amber mark alone means the session is asking for you.</p>
 
   <h2>Subtext</h2>
-  <p>The line under each name is the latest line of the exchange. While a session works you see your
-  prompt; once it finishes, asks, or fails you see its reply. The preview on the right highlights the
-  same line with the colored bullet, so the list and the preview always agree.</p>
+  <p>The line under each name follows the one-line preview rule from
+  <a href="agent-markdown.md">agent-markdown.md</a>: take the first paragraph, keep inline styles, and
+  collapse whitespace to one line. While a session works you see your prompt (what it is working on);
+  once it finishes, asks, or fails you see its reply (what came back). Identical rule to iOS.</p>
 
   <h2>Tags</h2>
   <p>Tags are discreet lowercase pills after the title: a filing aid, never a status. They come from
@@ -295,16 +316,27 @@
   agent runs - jump.</p>
 
   <h2>Preview</h2>
-  <p>The right pane is the last exchange, on black like the terminal it quotes: your prompt, then the
-  agent's reply. The bullet is amber for asks and blue for finished work. While a session works you
-  see a live <code>✻ Working…</code> line with the runtime. The line above the footer says exactly
-  where <kbd>↩</kbd> takes you, for example "Jump to iTerm (tmux dwmkerr:1) on localhost".</p>
+  <p>The right pane shows the last three exchanges on black like the terminal it quotes, oldest first,
+  with older turns dimmed. The pane scrolls and opens tailed to the newest exchange. The agent's
+  <a href="agent-markdown.md">markdown</a> is rendered in terminal
+  style - bold, italic, inline code, lists, headings, fenced blocks and tables all stay mono. The pane's
+  text is selectable for copying, and a rendered link opens in the browser when clicked. A cropped
+  exchange ends in <code>…</code>. The newest exchange alone keeps the live working line and bullet
+  temperature: amber for asks, blue for finished work, red for failure and dim for read.</p>
+  <p>The action row above the footer is shown on every machine row. For a tmux or cursor origin it says
+  exactly where <kbd>↩</kbd> takes you, for example "Jump to iTerm (tmux dwmkerr:1) on localhost". An
+  originless machine row initially says "Jump to session". Pressing <kbd>↩</kbd> replaces that text
+  with "Jump not supported for this session yet (plain terminal). Press F to send feedback." While
+  that notice is shown, <kbd>F</kbd> opens
+  <a href="https://github.com/dwmkerr/signalbox/issues/67">https://github.com/dwmkerr/signalbox/issues/67</a>.
+  URL-only rows remain information-only: their action row is hidden and <kbd>↩</kbd> does nothing.</p>
 
   <h2>Shortcuts</h2>
   <p>Typing is searching, so list commands use the control key:</p>
   <table>
     <tr><th>Keys</th><th>Action</th></tr>
-    <tr><td><kbd>↩</kbd></td><td>Jump to the selected session (marks it seen)</td></tr>
+    <tr><td><kbd>↩</kbd></td><td>Jump to the selected machine session; a successful jump marks it seen. On an originless machine row, show "Jump not supported for this session yet (plain terminal). Press F to send feedback." URL-only rows do nothing.</td></tr>
+    <tr><td><kbd>F</kbd></td><td>While the unsupported-jump notice is shown, open <a href="https://github.com/dwmkerr/signalbox/issues/67">issue 67</a></td></tr>
     <tr><td><kbd>⌃J</kbd> <kbd>⌃K</kbd> or arrows</td><td>Down / up</td></tr>
     <tr><td><kbd>⌃1</kbd> <kbd>⌃2</kbd> …</td><td>Jump directly to a session</td></tr>
     <tr><td><kbd>⇥</kbd></td><td>Next unread</td></tr>
@@ -318,8 +350,8 @@
     <tr><td><kbd class="sc">esc</kbd></td><td>Clear the search, then close</td></tr>
   </table>
   <p>Zoom scales the whole panel, geometry and text together, and text stays crisp for dense screens
-  or recordings. The footer keys strip stays unchanged; ⌘+/−/0 are universal conventions and the
-  strip is already full.</p>
+  or recordings. The footer keys strip pairs <kbd>F</kbd> feedback with <kbd>↩</kbd> jump;
+  ⌘+/−/0 remain omitted because they are universal conventions and the strip is already full.</p>
 </div>
 
 </div>
@@ -330,12 +362,22 @@
 const SESSIONS = [
   {key:"claude:7786", agent:"claude", title:"work-project", state:"working", ageSeconds:6, tags:["work"], pinned:true,
    prompt:"yes please send it. please also mark the old batches as read.", reply:null,
+   exchanges:[
+     {prompt:"check the newsletter queue before we send anything.", reply:"The queue has **14 drafts** and two scheduled sends.", ts:"2026-08-13T08:40:00Z", cropped:false},
+     {prompt:"archive the stale drafts and show me what remains.", reply:"Archived seven drafts. The remaining list is in `queue.json`.", ts:"2026-08-13T08:46:00Z", cropped:false},
+     {prompt:"yes please send it. please also mark the old batches as read.", reply:"Sending the **current issue** now.\n\n- marked old batches as `read`\n- queued the current issue", ts:"2026-08-13T08:51:00Z", cropped:false}
+   ],
    loc:"Jump to iTerm (tmux work-project:1) on localhost"},
   // A question ask (reason "question"): the AskUserQuestion content, question
   // plus option labels, rendered from reply like any other attention text.
   {key:"claude:1f72", agent:"claude", title:"dwmkerr-toolkit", state:"ask", ageSeconds:16,
    prompt:"good enough. commit work for now.",
    reply:"Which commit style for this batch? (Squash into one / Keep separate / Interactive rebase)",
+   exchanges:[
+     {prompt:"run the focused tests and summarise any failures.", reply:"All **18 focused tests** pass. See [the run](https://example.com/runs/18) for timings.", ts:"2026-08-13T08:35:00Z", cropped:false},
+     {prompt:"prepare the changes for a clean commit.", reply:"## Ready\n\nStaged the source and spec updates. `git diff --check` is clean.", ts:"2026-08-13T08:43:00Z", cropped:false},
+     {prompt:"good enough. commit work for now.", reply:"Which **commit style** should I use?\n\n- `feat:` squash into one\n- keep separate commits\n- interactive rebase", ts:"2026-08-13T08:52:00Z", cropped:false}
+   ],
    loc:"Jump to iTerm (tmux work-project:1) on localhost"},
   // A permission ask (reason "permission_request"): the pending tool call
   // itself - tool name and cropped input - never a bare "needs permission".
@@ -351,7 +393,7 @@ const SESSIONS = [
    prompt:"add a per-post traffic panel with the substack numbers.",
    reply:"Done - the dashboard now shows per-post traffic with a 30-day sparkline. Build is green, preview at http://localhost:4321.",
    loc:"Jump to iTerm (tmux work:7) on localhost"},
-  {key:"github:run-9182", agent:"github", title:"claude-toolkit-deploy", state:"unread", ageSeconds:1260,
+  {key:"github:run-9182", agent:"github", title:"claude-toolkit-deploy", state:"unread", ageSeconds:1260, infoOnly:true,
    prompt:"push to main (b41c2f9) triggered deploy",
    reply:"Workflow run #9182 succeeded in 4m 12s - plugin published. 2 artifacts.",
    loc:"Open on GitHub (Actions run #9182)"},
@@ -374,10 +416,12 @@ const SESSIONS = [
    prompt:"cluster yesterday's error logs by root cause.",
    reply:"Grouped 1,204 errors into 7 clusters - the top two are the same timeout, 63% of volume.",
    loc:"Jump to iTerm (tmux dwmkerr:4) on localhost"},
-  {key:"script:backup", agent:"script", title:"nightly-backup", state:"read", ageSeconds:7400,
+  // An originless machine session still offers Jump; Enter explains the
+  // current plain-terminal limitation and enables F feedback.
+  {key:"script:backup", agent:"script", title:"nightly-backup", state:"read", ageSeconds:7400, jumpable:false,
    prompt:"cron: nightly snapshot of the postgres volume",
    reply:"Snapshot complete - 4.2 GB in 38s, retention pruned to 14 dailies.",
-   loc:"Jump to iTerm (tmux ops:1) on localhost"},
+   loc:"Jump to session"},
   // Hidden sessions: set aside with the same flag the show/hide events model.
   // They stay out of the main list and surface only under the Hidden divider.
   {key:"claude:2a11", agent:"claude", title:"flaky-e2e-hunt", state:"read", ageSeconds:9300, hidden:true,
@@ -388,7 +432,7 @@ const SESSIONS = [
    prompt:"prototype the columnar store migration.",
    reply:"Spike done - tradeoffs written up in MIGRATION_NOTES.md, parking it for now.",
    loc:"Jump to iTerm (tmux data:5) on localhost"},
-  {key:"github:run-8890", agent:"github", title:"legacy-site-deploy", state:"unread", ageSeconds:64000, hidden:true,
+  {key:"github:run-8890", agent:"github", title:"legacy-site-deploy", state:"unread", ageSeconds:64000, hidden:true, infoOnly:true,
    prompt:"manual deploy of the legacy marketing site",
    reply:"Workflow run #8890 succeeded in 2m 3s - nothing else pending on that repo.",
    loc:"Open on GitHub (Actions run #8890)"},
@@ -444,7 +488,137 @@ function markHTML(st){
   if(st==="unread") return '<div class="dot"></div>';
   return '<div class="ring"></div>';
 }
-function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function inlineMd(source){
+  const held = [];
+  const hold = html => `\uE000${held.push(html)-1}\uE001`;
+  let out = source || "";
+  out = out.replace(/`([^`\n]+)`/g, (_, code) => hold(`<code>${esc(code)}</code>`));
+  out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) =>
+    hold(`<a href="${esc(url)}">${inlineMd(label)}</a>`));
+  out = esc(out);
+  out = out.replace(/\*\*\*([\s\S]+?)\*\*\*/g, "<b><i>$1</i></b>");
+  out = out.replace(/___([\s\S]+?)___/g, "<b><i>$1</i></b>");
+  out = out.replace(/\*\*([\s\S]+?)\*\*/g, "<b>$1</b>");
+  out = out.replace(/__([\s\S]+?)__/g, "<b>$1</b>");
+  out = out.replace(/\*([^*]+?)\*/g, "<i>$1</i>");
+  out = out.replace(/_([^_]+?)_/g, "<i>$1</i>");
+  return out.replace(/\uE000(\d+)\uE001/g, (_, index) => held[+index]);
+}
+function tableCells(line){
+  const pipe = "\uE100";
+  return line.trim().replace(/^\|/,"").replace(/\|$/,"").replace(/\\\|/g,pipe)
+    .split("|").map(cell=>cell.trim().replaceAll(pipe,"|"));
+}
+function md(source, cropped=false){
+  const lines = (source || "").replace(/\r\n?/g,"\n").split("\n");
+  const out = [];
+  const fenceEnd = start => {
+    const open = lines[start].match(/^(`{3,})(\w*)\s*$/);
+    if (!open) return -1;
+    const close = new RegExp("^`{" + open[1].length + ",}\\s*$");
+    for (let j=start+1; j<lines.length; j++) if (close.test(lines[j])) return j;
+    return -1;
+  };
+  const tableAt = index => {
+    if (index+1 >= lines.length || !lines[index].includes("|")) return false;
+    const header = tableCells(lines[index]), delimiter = tableCells(lines[index+1]);
+    return header.length === delimiter.length && delimiter.every(cell=>/^:?-{3,}:?$/.test(cell));
+  };
+  const blockAt = index => /^#{1,6}\s+/.test(lines[index]) || /^\s*[-*+]\s+/.test(lines[index]) ||
+    /^\s*\d+\.\s+/.test(lines[index]) || fenceEnd(index) >= 0 || tableAt(index);
+
+  for (let i=0; i<lines.length;) {
+    if (!lines[i].trim()) { i++; continue; }
+    const end = fenceEnd(i);
+    if (end >= 0) {
+      out.push(`<pre><code>${esc(lines.slice(i+1,end).join("\n"))}</code></pre>`);
+      i = end + 1;
+      continue;
+    }
+    const heading = lines[i].match(/^#{1,6}\s+(.*)$/);
+    if (heading) { out.push(`<h3>${inlineMd(heading[1])}</h3>`); i++; continue; }
+    if (tableAt(i)) {
+      const header = tableCells(lines[i]), rows = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) rows.push(tableCells(lines[i++]));
+      out.push(`<table><thead><tr>${header.map(cell=>`<th>${inlineMd(cell)}</th>`).join("")}</tr></thead>` +
+        `<tbody>${rows.map(row=>`<tr>${header.map((_,column)=>`<td>${inlineMd(row[column]||"")}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+      continue;
+    }
+    const bullet = lines[i].match(/^\s*[-*+]\s+(.*)$/);
+    const ordered = lines[i].match(/^\s*(\d+)\.\s+(.*)$/);
+    if (bullet || ordered) {
+      const items = [], tag = ordered ? "ol" : "ul", start = ordered ? ` start="${ordered[1]}"` : "";
+      while (i < lines.length) {
+        const item = ordered ? lines[i].match(/^\s*\d+\.\s+(.*)$/) : lines[i].match(/^\s*[-*+]\s+(.*)$/);
+        if (!item) break;
+        items.push(item[1]); i++;
+      }
+      out.push(`<${tag}${start}>${items.map(item=>`<li>${inlineMd(item)}</li>`).join("")}</${tag}>`);
+      continue;
+    }
+    const paragraph = [lines[i++]];
+    while (i < lines.length && lines[i].trim() && !blockAt(i)) paragraph.push(lines[i++]);
+    out.push(paragraph.map(inlineMd).join("<br>"));
+  }
+  return out.join("<br>") + (cropped ? "<span class=\"cropped\">…</span>" : "");
+}
+function previewMd(source, cropped=false){
+  const lines = (source || "").replace(/\r\n?/g,"\n").split("\n");
+  const collapse = value => value.replace(/\s+/g," ");
+  const marker = cropped ? '<span class="cropped">…</span>' : "";
+  const inline = value => inlineMd(collapse(value));
+  const fenceEnd = start => {
+    const open = lines[start].match(/^(`{3,})(\w*)\s*$/);
+    if (!open) return -1;
+    const close = new RegExp("^`{" + open[1].length + ",}\\s*$");
+    for (let j=start+1; j<lines.length; j++) if (close.test(lines[j])) return j;
+    return -1;
+  };
+  const tableAt = index => {
+    if (index+1 >= lines.length || !lines[index].includes("|")) return false;
+    const header = tableCells(lines[index]), delimiter = tableCells(lines[index+1]);
+    return header.length === delimiter.length && delimiter.every(cell=>/^:?-{3,}:?$/.test(cell));
+  };
+  const blockAt = index => /^#{1,6}\s+/.test(lines[index]) || /^\s*[-*+]\s+/.test(lines[index]) ||
+    /^\s*\d+\.\s+/.test(lines[index]) || fenceEnd(index) >= 0 || tableAt(index);
+  let fallback = null;
+
+  for (let i=0; i<lines.length;) {
+    if (!lines[i].trim()) { i++; continue; }
+    const end = fenceEnd(i);
+    if (end >= 0) {
+      if (fallback === null) fallback = `<code>${esc(collapse(lines[i+1] || ""))}</code>`;
+      i = end + 1;
+      continue;
+    }
+    const heading = lines[i].match(/^#{1,6}\s+(.*)$/);
+    if (heading) {
+      if (fallback === null) fallback = inline(heading[1]);
+      i++;
+      continue;
+    }
+    if (tableAt(i)) {
+      if (fallback === null) fallback = inline(tableCells(lines[i])[0] || "");
+      i += 2;
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) i++;
+      continue;
+    }
+    const bullet = lines[i].match(/^\s*[-*+]\s+(.*)$/);
+    const ordered = lines[i].match(/^\s*\d+\.\s+(.*)$/);
+    if (bullet || ordered) {
+      if (fallback === null) fallback = inline((bullet || ordered)[1]);
+      const itemPattern = ordered ? /^\s*\d+\.\s+/ : /^\s*[-*+]\s+/;
+      while (i < lines.length && itemPattern.test(lines[i])) i++;
+      continue;
+    }
+    const paragraph = [lines[i++]];
+    while (i < lines.length && lines[i].trim() && !blockAt(i)) paragraph.push(lines[i++]);
+    return inline(paragraph.join("\n")) + marker;
+  }
+  return (fallback || "") + marker;
+}
 function tagPills(s){
   return (s.tags||[]).slice(0,3).map(tag=>`<span class="pill">${esc(tag.toLowerCase())}</span>`).join("");
 }
@@ -459,7 +633,7 @@ function renderList(){
     <div class="row ${i===sel?"sel":""} ${needsCheck(s)?"unread":""}" onclick="select(${i})" oncontextmenu="event.preventDefault();showCtxMenu(${i},event.clientX,event.clientY)">
       <div class="mark">${markHTML(s.state)}</div>
       <div class="glyph">${AG[s.agent]||AG.generic}</div>
-      <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${esc(subtext(s))}</div></div>
+      <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${previewMd(subtext(s))}</div></div>
       <div class="right">${s.pinned?`<span class="pin">${PIN}</span>`:""}<span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span></div>
     </div>`}).join("");
   const hidden = hiddenHTML();
@@ -484,13 +658,15 @@ function hiddenHTML(){
     <div class="row hrow">
       <div class="mark">${EYESLASH}</div>
       <div class="glyph">${AG[s.agent]||AG.generic}</div>
-      <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${esc(subtext(s))}</div></div>
+      <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${previewMd(subtext(s))}</div></div>
       <div class="right"><span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span></div>
     </div>`}).join("");
   return out;
 }
 function toggleHidden(){ hiddenOpen = !hiddenOpen; renderList(); }
 const GLYPHS = ["·","✢","✳","∗","✻","✽"]; let gi = 0;
+let lastPreviewKey = null, lastPreviewHeight = 0;
+let unsupportedJumpKey = null;
 setInterval(()=>{ gi=(gi+1)%GLYPHS.length; const el=document.querySelector(".spinch"); if(el) el.textContent=GLYPHS[gi];
   SESSIONS.forEach(s=>s.ageSeconds++);
   // Ages are keyed by session index so visible and expanded hidden rows both stay live.
@@ -498,20 +674,44 @@ setInterval(()=>{ gi=(gi+1)%GLYPHS.length; const el=document.querySelector(".spi
 
 function renderPreview(){
   const s = SESSIONS[sel];
-  if (!s) { document.getElementById("term").innerHTML = ""; return; }
-  let h = `<div class="you">${esc(s.prompt)}</div><div class="gap"></div>`;
-  let act = `<div class="actline"><kbd>↩</kbd> ${esc(s.loc)}</div>`;
-  if (s.state === "working") {
-    h += `<div class="working"><span class="spinch">✻</span> Working… (${ageStr(s.ageSeconds)})</div>`;
-  } else if (s.state === "ask") {
-    h += `<div class="resp askb"><span class="b">●</span><span class="body-t">${esc(s.reply)}</span></div>`;
-    act = `<div class="actline"><kbd>↩</kbd> ${esc(s.loc)} · <span style="color:#FF9F0A;font-weight:600">needs your input</span></div>`;
-  } else if (s.state === "unread") {
-    h += `<div class="resp"><span class="b">●</span><span class="body-t">${esc(s.reply)}</span></div>`;
-  } else {
-    h += `<div class="resp"><span class="b" style="color:#5A5A5F">●</span><span class="body-t" style="color:#8E8E93">${esc(s.reply)}</span></div>`;
-  }
-  document.getElementById("term").innerHTML = h + act;
+  const term = document.getElementById("term");
+  const actline = document.getElementById("actline");
+  if (!s) { term.innerHTML = ""; actline.innerHTML = ""; unsupportedJumpKey = null; lastPreviewKey = null; lastPreviewHeight = 0; return; }
+  if (unsupportedJumpKey !== s.key || s.jumpable !== false || s.infoOnly) unsupportedJumpKey = null;
+  actline.style.display = s.infoOnly ? "none" : "flex";
+  const exchanges = (s.exchanges && s.exchanges.length ? s.exchanges : [
+    {prompt:s.prompt, reply:s.reply, cropped:false}
+  ]).slice(-3);
+  let h = "";
+  const showingUnsupported = unsupportedJumpKey === s.key;
+  let act = showingUnsupported
+    ? `<kbd>↩</kbd> Jump not supported for this session yet (plain terminal). Press F to send feedback.`
+    : `<kbd>↩</kbd> ${esc(s.loc)}`;
+  exchanges.forEach((exchange,index) => {
+    const newest = index === exchanges.length-1;
+    let turn = `<div class="turn${newest ? "" : " older"}">`;
+    if (exchange.prompt) turn += `<div class="you">${md(exchange.prompt,exchange.cropped)}</div><div class="gap"></div>`;
+    if (!newest) {
+      if (exchange.reply) turn += `<div class="resp"><span class="b">●</span><span class="body-t">${md(exchange.reply,exchange.cropped)}</span></div>`;
+    } else if (s.state === "working") {
+      turn += `<div class="working"><span class="spinch">✻</span> Working… (${ageStr(s.ageSeconds)})</div>`;
+    } else if (s.state === "ask") {
+      turn += `<div class="resp askb"><span class="b">●</span><span class="body-t">${md(exchange.reply,exchange.cropped)}</span></div>`;
+      if (!showingUnsupported) act = `<kbd>↩</kbd> ${esc(s.loc)} · <span style="color:#FF9F0A;font-weight:600">needs your input</span>`;
+    } else if (s.state === "unread") {
+      turn += `<div class="resp"><span class="b">●</span><span class="body-t">${md(exchange.reply,exchange.cropped)}</span></div>`;
+    } else {
+      turn += `<div class="resp"><span class="b" style="color:#5A5A5F">●</span><span class="body-t" style="color:#8E8E93">${md(exchange.reply,exchange.cropped)}</span></div>`;
+    }
+    h += turn + `</div>`;
+  });
+  const previousHeight = lastPreviewKey === s.key ? lastPreviewHeight : 0;
+  term.innerHTML = h;
+  actline.innerHTML = act;
+  const contentHeight = term.scrollHeight;
+  if (lastPreviewKey !== s.key || contentHeight > previousHeight) term.scrollTop = contentHeight;
+  lastPreviewKey = s.key;
+  lastPreviewHeight = contentHeight;
 }
 function select(i){ sel = i; renderList(); renderPreview(); }
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 1300); }
@@ -625,6 +825,12 @@ function moveSel(delta){
   const pos = Math.max(0, v.indexOf(sel));
   select(v[Math.min(Math.max(pos+delta,0), v.length-1)]);
 }
+function jumpSelected(){
+  const s = SESSIONS[sel];
+  if (!s || s.hidden || s.infoOnly) return;
+  if (s.jumpable === false) { unsupportedJumpKey = s.key; renderPreview(); return; }
+  toast("would jump to the session");
+}
 const searchEl = document.getElementById("search");
 searchEl.addEventListener("input", () => { query = searchEl.value.trim(); sel = defaultSel(); renderList(); renderPreview(); });
 
@@ -632,7 +838,10 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape" && hub.popOpen) { e.preventDefault(); closePop(); return; }
   if (editing) return;
   const ctrl = e.ctrlKey;
-  if (ctrl && (e.key==="j"||e.key==="J")) { e.preventDefault(); moveSel(1); }
+  if (unsupportedJumpKey !== null && !ctrl && !e.metaKey && !e.altKey && e.key.toLowerCase()==="f") {
+    e.preventDefault(); window.open("https://github.com/dwmkerr/signalbox/issues/67", "_blank");
+  }
+  else if (ctrl && (e.key==="j"||e.key==="J")) { e.preventDefault(); moveSel(1); }
   else if (ctrl && (e.key==="k"||e.key==="K")) { e.preventDefault(); moveSel(-1); }
   else if (e.key==="ArrowDown") { e.preventDefault(); moveSel(1); }
   else if (e.key==="ArrowUp") { e.preventDefault(); moveSel(-1); }
@@ -640,7 +849,7 @@ document.addEventListener("keydown", e => {
   else if (e.key==="Tab") { e.preventDefault();
     const un = visible().filter(i=>needsCheck(SESSIONS[i]));
     if (un.length) select(un[(un.indexOf(sel)+1) % un.length] ?? un[0]); }
-  else if (e.key==="Enter") { const s=SESSIONS[sel]; if (s) toast(s.loc.startsWith("Open") ? "would open in the browser" : "would jump to the tmux pane"); }
+  else if (e.key==="Enter") { jumpSelected(); }
   else if (ctrl && (e.key==="p"||e.key==="P")) { e.preventDefault(); if (sel>=0) togglePin(sel); }
   else if (ctrl && (e.key==="r"||e.key==="R")) { e.preventDefault(); beginLabel(); }
   else if (ctrl && (e.key==="x"||e.key==="X")) { e.preventDefault(); if (sel>=0) { SESSIONS[sel].state="read"; renderList(); renderPreview(); toast("hidden until it speaks (mock: shown as read)"); } }

@@ -79,7 +79,8 @@ export function notify(): void {
     }
   }
 
-  run("select-pane", "-t", pane, "-P", notifyBG);
+  run("set-option", "-p", "-t", pane, "window-style", notifyBG);
+  // Avoid select-pane -P because it activates the agent pane.
   run("set-option", "-p", "-t", pane, paneOption, "1");
 
   const session = run("display-message", "-p", "#{session_name}");
@@ -95,7 +96,8 @@ export function notify(): void {
 export function clear(): void {
   if (!inside()) return;
   const pane = process.env.TMUX_PANE!;
-  run("select-pane", "-t", pane, "-P", "default");
+  run("set-option", "-pu", "-t", pane, "window-style");
+  // Avoid select-pane -P because it activates the agent pane.
   run("set-option", "-pu", "-t", pane, paneOption);
   const session = run("display-message", "-p", "#{session_name}");
   if (session !== null && session.endsWith(bellSuffix)) {

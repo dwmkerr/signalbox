@@ -79,6 +79,17 @@ right of Sessions. The token never appears on screen or in the QR; the phone
 redeems the code for it. Pairing details are in
 [specs/cli.md](../components/specs/cli.md).
 
+## View chat history
+
+Touch and hold a session, then choose Show Chat. The read-only chat aligns
+prompts on the right and replies on the left, with the exchange time below each
+bubble. It renders Markdown and ends cropped text with the shared U+2026 marker.
+
+The newest three exchanges load first. If older exchanges may be available, tap
+the `U+2026 older` control at the top to load the previous page. A session with
+no committed exchanges shows `No history yet`. The chat cannot send prompts or
+change session state.
+
 ## Corporate networks
 
 Pairing and the live board are a **direct connection from the phone to the hub
@@ -123,3 +134,5 @@ Building on the simulator is the fastest loop for day-to-day work.
 ## Where the spec lives
 
 The iOS UI spec is [components/specs/ios.html](../components/specs/ios.html).
+The [Agent Markdown specification](../components/specs/agent-markdown.md)
+defines the parsing and rendering contract shared by macOS and iOS.

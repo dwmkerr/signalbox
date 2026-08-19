@@ -143,6 +143,16 @@ describe("host-prefixed agent (editor-hosted display name)", () => {
 });
 
 describe("cursorReply", () => {
+  test("cursor returns the reply as raw markdown", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sb-cursor-"));
+    const p = join(dir, "t.jsonl");
+    const reply = "Line one\n\n- bullet\n- bullet";
+    writeFileSync(
+      p,
+      JSON.stringify({ type: "assistant", message: { role: "assistant", content: reply } })
+    );
+    expect(cursorReply({ hook_event_name: "stop", transcript_path: p })).toBe(reply);
+  });
   // Best-effort, transcript shape assumed to match Claude's JSONL (UNVERIFIED).
   test("stop reads the last assistant text", () => {
     const dir = mkdtempSync(join(tmpdir(), "sb-cursor-"));

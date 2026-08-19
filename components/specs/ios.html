@@ -92,7 +92,8 @@
                white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   /* A tapped card expands: the preview runs to a few lines instead of one. */
   .card.open .sub { white-space:normal; }
-  /* The jump arrow is its own target, and only a jumpable row carries it. */
+  /* The jump arrow is its own target. Every visible machine row carries it,
+     including a plain-terminal row; URL-only information rows do not. */
   .card .arrow { width:34px; height:34px; border-radius:50%; background:#0A84FF1f; color:#0A84FF;
                  display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:17px; }
 
@@ -147,10 +148,31 @@
          font-size:10px; padding:4px 14px; border-radius:16px; line-height:1.2; }
   .tab span { font-size:14px; }
   .tab.on { background:#ffffff14; color:#0A84FF; }
+
+  .chatnav { display:flex; align-items:center; min-height:42px; padding:4px 14px 8px;
+             border-bottom:1px solid #ffffff14; position:relative; }
+  .chatnav .back { color:#0A84FF; font-size:28px; line-height:1; }
+  .chatnav .chatname { color:#EDEDED; font-size:16px; font-weight:600; position:absolute;
+                       left:44px; right:44px; text-align:center; white-space:nowrap;
+                       overflow:hidden; text-overflow:ellipsis; }
+  .chat { flex:1; padding:10px 12px 16px; overflow:hidden; display:flex;
+          flex-direction:column; gap:11px; }
+  .older { align-self:center; color:#8E8E93; text-align:center; font-size:20px;
+           line-height:.8; padding:2px 14px 4px; }
+  .older small { display:block; font-size:10px; line-height:1.4; }
+  .turn { display:flex; flex-direction:column; gap:4px; }
+  .bubble { max-width:80%; color:#EDEDED; font-size:12.5px; line-height:1.4;
+            padding:8px 11px; border-radius:16px; }
+  .bubble.prompt { align-self:flex-end; background:#0A84FF38; }
+  .bubble.reply { align-self:flex-start; background:#141416; }
+  .bubble code { font-size:11.5px; color:#0A84FF; }
+  .chat-time { color:#6E6E73; font-size:9.5px; }
+  .chat-time.prompt { align-self:flex-end; }
+  .chat-time.reply { align-self:flex-start; }
 </style></head><body>
 
 <div class="page">
-<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | <a href="settings.html">settings</a> | <a href="menubar.html">menu bar</a> | ios | <a href="architecture.html">architecture</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a></div>
+<div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | <a href="settings.html">settings</a> | <a href="menubar.html">menu bar</a> | ios | <a href="architecture.html">architecture</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/agent-markdown.md">agent markdown</a></div>
 <h1>Specification: signalbox for iOS</h1>
 <div class="subtitle">The board on your phone: what needs you, from away from the desk.</div>
 <div class="note-line"><b>Note:</b> the mockups below are the living specification for the signalbox iOS app.</div>
@@ -233,8 +255,9 @@
       </div>
     </div></div>
     <div class="phonecap">Sessions. Tap a card to expand, the arrow or a right-swipe to jump,
-      left-swipe for Seen and Hide. The <b>ci: release</b> row has no window to raise, so it carries
-      no arrow.</div>
+      left-swipe for Seen and Hide. Every machine row carries the arrow, including the
+      plain-terminal <b>release-notes</b> row. The URL-only <b>ci: release</b> row is information and
+      carries no arrow.</div>
   </div>
 
   <div class="phonewrap">
@@ -303,14 +326,21 @@ already knows how to jump, so the phone asks it to.</p>
 on the same bus the board rides. Fire the jump from a card with the arrow or a right-swipe, and the
 machine that owns that session raises the window. The phone in your hand becomes a jumplist for the
 laptop on your desk.</p>
-<p>Two rules:</p>
+<p>Three rules:</p>
 <ul>
-  <li><b>Only jumpable rows offer it.</b> A CI run has no machine to raise a window on, so its row
-  carries no jump.</li>
+  <li><b>Every visible machine row offers it.</b> Rows with a tmux or cursor origin jump as before.
+  A machine row with no usable origin still carries the arrow and the right-swipe Jump action.</li>
+  <li><b>URL-only rows are information.</b> A CI or GitHub row describes remote work, not a window,
+  so it carries no arrow or Jump swipe action.</li>
   <li><b>Success shows only once the phone can see it.</b> The laptop may be asleep or not running the
   app. The row going quiet when that machine acks is the confirmation, since <code>jump</code> fires
   <code>seen</code> only once the switch has landed.</li>
 </ul>
+<p>Activating Jump on a machine row with no usable origin presents an alert titled
+<b>Jump not supported</b> with this message: "This session is running in a plain terminal - jump is
+not supported yet. Submit feedback if you would find this useful." <b>Submit feedback</b> opens
+<a href="https://github.com/dwmkerr/signalbox/issues/67">https://github.com/dwmkerr/signalbox/issues/67</a>;
+<b>Cancel</b> dismisses the alert.</p>
 <p><code>origin.kind</code> reserves <code>ssh</code> as a future kind. When it lands, a row on a
 machine that is not next to you becomes jumpable too.</p>
 
@@ -330,9 +360,10 @@ surfaces never disagree: status mark, agent glyph, name, host, age, and the subt
 extra badge.</p>
 
 <h3>Subtext</h3>
-<p>The line under each name is the latest line of the exchange, cropped to two lines. While a session
-works you see your prompt (what it is working on); once it finishes, asks, or fails you see its reply
-(what came back). Identical rule to the jumplist.</p>
+<p>The line under each name follows the one-line preview rule from
+<a href="agent-markdown.md">agent-markdown.md</a>: take the first paragraph, keep inline styles, and
+collapse whitespace to one line. While a session works you see your prompt (what it is working on);
+once it finishes, asks, or fails you see its reply (what came back). Identical rule to the jumplist.</p>
 
 <h3>Host</h3>
 <p>A row shows the machine it lives on <b>when more than one machine is on the board</b>. The machine
@@ -410,10 +441,10 @@ power user pairs - and deliberately do not send them to Settings, which only rep
 <table>
   <tr><th>Gesture</th><th>Action</th></tr>
   <tr><td>Tap a card</td><td>Expand the preview in place, to a few lines. It never marks the session seen.</td></tr>
-  <tr><td>The <span class="blue">arrow</span>, or swipe right, <span class="blue">Jump</span></td><td>Ask the owning machine to raise the window. Only on a row that can be jumped to.</td></tr>
+  <tr><td>The <span class="blue">arrow</span>, or swipe right, <span class="blue">Jump</span></td><td>Shown on every visible machine row. A tmux or cursor origin asks the owning machine to raise its window. With no usable origin, it shows <b>Jump not supported</b>: "This session is running in a plain terminal - jump is not supported yet. Submit feedback if you would find this useful." <b>Submit feedback</b> opens <a href="https://github.com/dwmkerr/signalbox/issues/67">issue 67</a>, and <b>Cancel</b> dismisses the alert. URL-only CI and GitHub rows are information-only and offer neither the arrow nor the Jump swipe action.</td></tr>
   <tr><td>Swipe left, <span class="amber">Seen</span></td><td>Fire <code>seen</code>. The row goes quiet everywhere, on every surface. <span class="chip built">built</span> Offered only on an unread row; a quiet, already-acked row offers no no-op (the Mail rule: "Mark Read" appears only on unread mail).</td></tr>
   <tr><td>Swipe left, Hide</td><td>Fire <code>hide</code>. The row leaves the main list for the collapsed Hidden section until the session speaks again, or until unhidden there.</td></tr>
-  <tr><td>Long-press <span class="chip built">built</span></td><td>Context menu: <b>Pin</b> / <b>Unpin</b> (see Pinned above).</td></tr>
+  <tr><td>Long-press <span class="chip built">built</span></td><td>Context menu: <b>Pin</b> / <b>Unpin</b> (see Pinned above) and <b>Show Chat</b> (see Chat below).</td></tr>
   <tr><td>Pull down a little</td><td>Reveal the search field.</td></tr>
   <tr><td>Pull down further</td><td>Force a full <code>/state</code> resync. The escape hatch when a stream has gone strange.</td></tr>
 </table>
@@ -422,6 +453,55 @@ at the pane is seeing it. On a phone, reading a breadcrumb is not dealing with t
 seen is always deliberate here.</p>
 <p>The board offers no way to remove a session. Removal is destructive and irreversible from the
 phone.</p>
+
+<h2>Chat</h2>
+<p>Long-press a session row and choose <b>Show Chat</b> to open its history as a conversation.</p>
+
+<div class="phones">
+  <div class="phonewrap">
+    <div class="phone"><div class="screen">
+      <div class="island"></div>
+      <div class="sbar"><span>9:41</span><span class="right">
+        <svg width="15" height="11" viewBox="0 0 16 12" fill="#EDEDED"><path d="M8 9.6a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM8 6c1.7 0 3.2.7 4.3 1.8l-1.4 1.4A4.1 4.1 0 0 0 8 8.1c-1.1 0-2.1.4-2.9 1.1L3.7 7.8A6 6 0 0 1 8 6zM8 2.2c2.7 0 5.2 1.1 7 2.9l-1.4 1.4A7.9 7.9 0 0 0 8 4.2c-2.2 0-4.2.9-5.6 2.3L1 5.1a9.9 9.9 0 0 1 7-2.9z"/></svg>
+        <svg width="22" height="11" viewBox="0 0 25 12"><rect x="0.5" y="0.5" width="21" height="11" rx="3" fill="none" stroke="#EDEDED" stroke-opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="#EDEDED"/><rect x="22.5" y="4" width="2" height="4" rx="1" fill="#EDEDED" fill-opacity=".6"/></svg>
+      </span></div>
+      <div class="chatnav"><span class="back">&#8249;</span><span class="chatname">writing-studio</span></div>
+      <div class="chat">
+        <div class="older">&hellip;<small>older</small></div>
+        <div class="turn">
+          <div class="bubble prompt">Update the history reducer and its tests.</div>
+          <div class="chat-time prompt">9:31</div>
+          <div class="bubble reply"><b>Done.</b> The reducer now keeps each session's exchanges in a bounded ring.</div>
+          <div class="chat-time reply">9:31</div>
+        </div>
+        <div class="turn">
+          <div class="bubble prompt">Add the read endpoint.</div>
+          <div class="chat-time prompt">9:35</div>
+          <div class="bubble reply">Added <code>GET /exchanges</code> with limit and before paging.</div>
+          <div class="chat-time reply">9:36</div>
+        </div>
+        <div class="turn">
+          <div class="bubble prompt">Build the iOS chat page.</div>
+          <div class="chat-time prompt">9:40</div>
+          <div class="bubble reply"><b>Chat is ready.</b><br>- Markdown renders<br>- Older turns page from the top&hellip;</div>
+          <div class="chat-time reply">9:41</div>
+        </div>
+      </div>
+    </div></div>
+    <div class="phonecap">The newest three exchanges. Prompts sit right, replies sit left, and
+      the top &hellip; loads older turns only while another page may exist.</div>
+  </div>
+</div>
+
+<p>Each prompt and reply carries a short timestamp below it. Markdown is rendered according to
+<a href="agent-markdown.md">agent-markdown.md</a>, including headings, emphasis, links, lists, code
+and tables. A cropped exchange ends in <code>&hellip;</code>. The page opens with the newest three
+exchanges; when all three slots are filled, the <b>&hellip; older</b> affordance at the top requests the
+previous page and prepends it. A shorter page removes the affordance because it proves the start of
+history has been reached.</p>
+<p>An empty history reads <b>No history yet</b>. A failed request reads <b>Could not load the chat</b>
+and offers <b>Retry</b>. The page is read-only: opening or reading it never acks, hides, or jumps a
+session.</p>
 
 <h2>Connection state</h2>
 <p>A remote hub needs the network, so the app always says what it is showing. The state line under the
@@ -654,8 +734,8 @@ tailnet, and the hub sends outbound to the push service, so no tier of
   <li><b>No product logic.</b> The hub decides order, <code>acked</code>, <code>hidden</code> and
   naming; the app renders. A stream event triggers a <code>/state</code> resync, so the app never
   re-derives state and drifts from the hub. Events are small and rare, so refetching is cheap.</li>
-  <li><b>No transcripts.</b> The breadcrumb is two cropped lines and that is the privacy contract;
-  the app shows what the hub sends and never asks for more.</li>
+  <li><b>No direct or unbounded history.</b> The app shows what the hub sends, never asks an agent
+  directly, stores no second copy of the history, and renders no more than the hub's ring holds.</li>
   <li><b>No second source of truth.</b> No local event log, no offline queue of user actions. If a
   <code>seen</code> cannot be delivered, say so and let the user retry.</li>
 </ul>

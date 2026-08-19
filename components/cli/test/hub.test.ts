@@ -72,6 +72,15 @@ async function getState(hub: Hub): Promise<{ sessions: Event[] }> {
   return res.json();
 }
 
+// `query` is appended after the session param, so callers pass "&limit=2".
+async function getExchanges(hub: Hub, key: string, query = "", server = fakeServer): Promise<Response> {
+  const req = new Request(
+    `http://127.0.0.1:8377/exchanges?session=${encodeURIComponent(key)}${query}`,
+    { headers: { Host: "127.0.0.1:8377" } }
+  );
+  return (await hub.handle(req, server))!;
+}
+
 let hubs: Hub[] = [];
 afterEach(() => {
   for (const h of hubs) h.close();
@@ -179,6 +188,189 @@ describe("ingest and state", () => {
     const row = (await getState(hub)).sessions[0];
     expect(row.pinned).toBeUndefined();
     expect(row.hidden).toBe(true);
+  });
+});
+
+describe("exchanges", () => {
+  test("returns the session's exchanges oldest first", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const key = "h:script:1";
+    await post(hub, wireEvent(key, ev.Busy, { prompt: "fix the bug" }));
+    await post(hub, wireEvent(key, ev.Done, { reply: "fixed" }));
+
+    const body = await (await getExchanges(hub, key)).json();
+    expect(body.session_key).toBe(key);
+    expect(body.exchanges).toHaveLength(1);
+    expect(body.exchanges[0].prompt).toBe("fix the bug");
+    expect(body.exchanges[0].reply).toBe("fixed");
+  });
+
+  test("limit returns the newest N", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const key = "turns";
+    for (let i = 1; i <= 5; i++) {
+      await post(hub, wireEvent(key, ev.Busy, { prompt: `prompt ${i}` }));
+      await post(hub, wireEvent(key, ev.Done, { reply: `reply ${i}` }));
+    }
+
+    const body = await (await getExchanges(hub, key, "&limit=2")).json();
+    expect(body.exchanges.map((x: { prompt: string }) => x.prompt)).toEqual(["prompt 4", "prompt 5"]);
+  });
+
+  test("before pages backwards", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const key = "turns";
+    for (let i = 1; i <= 5; i++) {
+      await post(hub, wireEvent(key, ev.Busy, { prompt: `prompt ${i}` }));
+      await post(hub, wireEvent(key, ev.Done, { reply: `reply ${i}` }));
+    }
+
+    const first = await (await getExchanges(hub, key, "&limit=2")).json();
+    const second = await (await getExchanges(hub, key, `&limit=2&before=${first.next_before}`)).json();
+    expect(second.exchanges.map((x: { prompt: string }) => x.prompt)).toEqual(["prompt 2", "prompt 3"]);
+  });
+
+  test("paging to the start returns an empty list", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const key = "turns";
+    await post(hub, wireEvent(key, ev.Busy, { prompt: "prompt 1" }));
+    await post(hub, wireEvent(key, ev.Done, { reply: "reply 1" }));
+
+    const first = await (await getExchanges(hub, key)).json();
+    const empty = await (await getExchanges(hub, key, `&before=${first.next_before}`)).json();
+    expect(empty.exchanges).toEqual([]);
+    expect(empty.next_before).toBeNull();
+  });
+
+  test("limit is clamped to the history limit", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
+    const hub = track(new Hub(dir, "test", "", "127.0.0.1", "", 0, false, 0, 2));
+    const key = "turns";
+    for (let i = 1; i <= 5; i++) {
+      await post(hub, wireEvent(key, ev.Busy, { prompt: `prompt ${i}` }));
+      await post(hub, wireEvent(key, ev.Done, { reply: `reply ${i}` }));
+    }
+
+    const body = await (await getExchanges(hub, key, "&limit=100")).json();
+    expect(body.exchanges).toHaveLength(2);
+    expect(body.exchanges.map((x: { prompt: string }) => x.prompt)).toEqual(["prompt 4", "prompt 5"]);
+  });
+
+  test("an unknown session is 404", async () => {
+    const { hub } = newHub();
+    track(hub);
+    expect((await getExchanges(hub, "missing")).status).toBe(404);
+  });
+
+  test("a bad limit is 400", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const res = await getExchanges(hub, "missing", "&limit=0");
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("limit must be a positive integer");
+  });
+
+  test("garbage limit values are 400", async () => {
+    const { hub } = newHub();
+    track(hub);
+    for (const limit of ["20abc", "3.5", "1e2"]) {
+      expect((await getExchanges(hub, "missing", `&limit=${limit}`)).status).toBe(400);
+    }
+  });
+
+  test("a bad before is 400", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const res = await getExchanges(hub, "missing", "&before=-1");
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("before must be a non-negative integer seq");
+  });
+
+  test("garbage before values are 400", async () => {
+    const { hub } = newHub();
+    track(hub);
+    for (const before of ["5xyz", "1.5"]) {
+      expect((await getExchanges(hub, "missing", `&before=${before}`)).status).toBe(400);
+    }
+  });
+
+  test("a missing session param is 400", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const req = new Request("http://127.0.0.1:8377/exchanges", {
+      headers: { Host: "127.0.0.1:8377" },
+    });
+    const res = (await hub.handle(req, fakeServer))!;
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("session is required");
+  });
+
+  test("a session key containing ':' round-trips through the query param", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const key = "host:tmux:13";
+    await post(hub, wireEvent(key, ev.Busy, { prompt: "prompt" }));
+    await post(hub, wireEvent(key, ev.Done, { reply: "reply" }));
+
+    const body = await (await getExchanges(hub, key)).json();
+    expect(body.session_key).toBe(key);
+    expect(body.exchanges).toHaveLength(1);
+  });
+
+  test("no-store", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const key = "turns";
+    await post(hub, wireEvent(key, ev.Busy));
+    const res = await getExchanges(hub, key);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  test("a non-loopback peer without a bearer is 401", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
+    const hub = track(new Hub(dir, "test", "exchange-token"));
+    const key = "turns";
+    await post(hub, wireEvent(key, ev.Busy));
+    const peer = serverFrom("192.168.1.5");
+
+    const denied = await getExchanges(hub, key, "", peer);
+    expect(denied.status).toBe(401);
+    const req = new Request(
+      `http://127.0.0.1:8377/exchanges?session=${encodeURIComponent(key)}`,
+      { headers: { Host: "192.168.1.5:8377", Authorization: "Bearer exchange-token" } }
+    );
+    const allowed = (await hub.handle(req, peer))!;
+    expect(allowed.status).toBe(200);
+  });
+
+  test("history survives a hub restart", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
+    const first = track(new Hub(dir, "test"));
+    const key = "turns";
+    await post(first, wireEvent(key, ev.Busy, { prompt: "before restart" }));
+    await post(first, wireEvent(key, ev.Done, { reply: "rebuilt" }));
+    first.close();
+
+    const second = track(new Hub(dir, "test"));
+    const body = await (await getExchanges(second, key)).json();
+    expect(body.exchanges).toHaveLength(1);
+    expect(body.exchanges[0].prompt).toBe("before restart");
+    expect(body.exchanges[0].reply).toBe("rebuilt");
+  });
+
+  test("/state is unchanged by history", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const key = "turns";
+    await post(hub, wireEvent(key, ev.Busy, { prompt: "prompt" }));
+    await post(hub, wireEvent(key, ev.Done, { reply: "reply" }));
+
+    const row = (await getState(hub)).sessions[0];
+    expect(Object.hasOwn(row, "exchanges")).toBe(false);
   });
 });
 
@@ -907,5 +1099,36 @@ describe("sweeps", () => {
     await post(hub, recycled);
     hub.startLiveness(60 * 60 * 1000);
     expect((await getState(hub)).sessions.length).toBe(0);
+  });
+});
+
+describe("ingest dedupe", () => {
+  test("a redelivered event id is applied exactly once", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
+    const hub = track(new Hub(dir, "test"));
+    const key = "dedupe";
+    await post(hub, wireEvent(key, ev.Busy, { prompt: "p1" }));
+    const done = wireEvent(key, ev.Done, { prompt: "p1-again", reply: "r1" });
+    // The forwarder drain is at-least-once: the same event (same id) can be
+    // sent twice. Without ingest dedupe the ring would double-commit.
+    await post(hub, done);
+    await post(hub, { ...done });
+    const res = await getExchanges(hub, key);
+    const body = await res.json();
+    expect(body.exchanges.length).toBe(2);
+  });
+
+  test("the dedupe window survives a hub restart via log replay", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
+    const first = track(new Hub(dir, "test"));
+    const key = "dedupe-restart";
+    const done = wireEvent(key, ev.Done, { prompt: "p", reply: "r" });
+    await post(first, done);
+    first.close();
+    const second = track(new Hub(dir, "test"));
+    await post(second, { ...done });
+    const res = await getExchanges(second, key);
+    const body = await res.json();
+    expect(body.exchanges.length).toBe(1);
   });
 });

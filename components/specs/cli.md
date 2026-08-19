@@ -1,4 +1,4 @@
-signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) | [settings](https://dwmkerr.github.io/signalbox/specs/settings.html) | [menu bar](https://dwmkerr.github.io/signalbox/specs/menubar.html) | [ios](https://dwmkerr.github.io/signalbox/specs/ios.html) | [architecture](https://dwmkerr.github.io/signalbox/specs/architecture.html) | cli | [data model](events.md) | [agent integrations](adapters.md)
+signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) | [settings](https://dwmkerr.github.io/signalbox/specs/settings.html) | [menu bar](https://dwmkerr.github.io/signalbox/specs/menubar.html) | [ios](https://dwmkerr.github.io/signalbox/specs/ios.html) | [architecture](https://dwmkerr.github.io/signalbox/specs/architecture.html) | cli | [data model](events.md) | [agent integrations](adapters.md) | [agent markdown](agent-markdown.md)
 
 # Specification: signalbox CLI
 
@@ -162,10 +162,10 @@ signalbox fire --agent script --event busy \
   --session-key script:demo --title "demo run" --tag demo
 ```
 
-- Flags: `--agent` and `--event` (both required), `--reason`, `--title`, `--prompt`, `--reply`, `--session-key`, `--origin-url`, `--tag <t>` (repeatable), `--pid` (the agent process, for the hub's liveness sweep; `--pid-name` overrides the resolved name). Repeatable `--tag` fires one `tag` event immediately after the session event, carrying every tag and the same resolved session key, so `#tag` and `!tag` filters see it.
+- Flags: `--agent` and `--event` (both required), `--reason`, `--title`, `--prompt`, `--reply`, `--cropped` (the caller already cut the text at its own cap), `--session-key`, `--origin-url`, `--tag <t>` (repeatable), `--pid` (the agent process, for the hub's liveness sweep; `--pid-name` overrides the resolved name). Repeatable `--tag` fires one `tag` event immediately after the session event, carrying every tag and the same resolved session key, so `#tag` and `!tag` filters see it.
 - A missing `--agent` or an unknown `--event` warns on stderr - one line naming the valid events (`attention`, `error`, `done`, `busy`, `ended`, `seen`, `hide`, `show`, `pin`, `unpin`, `label`, `tag`, `untag`) - and still exits 0. fire is called from agent adapters and user hooks, so a usage mistake must be visible but never fatal to the caller; delivery failures likewise spool and exit 0, so scripts never break on a down hub.
 - Fired from inside tmux, the pane origin is captured automatically; from a VS Code / Cursor integrated terminal, an editor origin is captured instead, so `jump` can route back. tmux beats the editor check: a pane is a more precise jump target than an app window.
-- `--prompt` and `--reply` are cropped at the emitter (160 and 280 characters, one line). The full text never leaves the process. `--detail` is accepted as an alias for `--prompt`. See the [data model](events.md).
+- `--prompt` and `--reply` keep raw, multi-line markdown and are cropped in the event builder at 1,024 and 10,240 characters. The event gets `cropped` when either cap is hit or the caller passes `--cropped`. `--detail` is accepted as an alias for `--prompt`. See the [data model](events.md).
 
 `components/scripts/demo.sh` tags every session it seeds `demo`. Add `!demo` to
 the app's Additional filters to hide those sessions without removing them.
@@ -288,7 +288,7 @@ the copyable `signalbox pair --url <upstream>` command with the reason.
 
 ## config
 
-Persist how the hub binds or which upstream it forwards to, so it needs no flags or env. Values live in the settings file (`$XDG_CONFIG_HOME/signalbox/settings.json`, else `~/.config/signalbox/settings.json`; `SIGNALBOX_CONFIG` or the global `--config <path>` flag point at a different file) under a `hub` section and are read by every `signalbox hub` start (the [hub](#hub) section covers the resolution orders and the auto-token). A tiny three-key surface (`hub.bind`, `hub.token`, `hub.upstream`); the app owns everything else in that file.
+Persist how the hub binds or which upstream it forwards to, so it needs no flags or env. Values live in the settings file (`$XDG_CONFIG_HOME/signalbox/settings.json`, else `~/.config/signalbox/settings.json`; `SIGNALBOX_CONFIG` or the global `--config <path>` flag point at a different file) under a `hub` section and are read by every `signalbox hub` start (the [hub](#hub) section covers the resolution orders and the auto-token). A tiny five-key surface (`hub.bind`, `hub.token`, `hub.upstream`, `hub.historyLimit`, `hub.replyCap`); the app owns everything else in that file.
 
 ```bash
 signalbox config get                          # the effective hub config
@@ -300,12 +300,16 @@ signalbox config set hub.token --generate     # mint and store a random token
 signalbox config set hub.token ""             # empty value also mints one
 signalbox config set hub.upstream https://my-hub.fly.dev   # run as a forwarder
 signalbox config set hub.upstream ""          # clear it and own state locally
+signalbox config set hub.historyLimit 1000   # exchanges kept per session
+signalbox config set hub.replyCap 10240      # characters before the emitter crops
 ```
 
 ```text
 hub.bind:  0.0.0.0 (other devices may connect; this Mac is reachable at 192.168.1.94)
 hub.token: set
 hub.upstream: https://my-hub.fly.dev
+hub.historyLimit: 1000 (exchanges kept per session)
+hub.replyCap: 10240 (characters, before the emitter crops)
 ```
 
 `hub.bind` is stored as a literal address: what you set is what the hub binds. On `config set`, a few words are accepted as conveniences and normalized before saving:
@@ -318,6 +322,8 @@ hub.upstream: https://my-hub.fly.dev
 The `0.0.0.0` wildcard is preferred over a single pinned interface IP because the hub must keep answering loopback (local hooks and the menu bar app reach it there), and a fixed IP goes stale when DHCP moves the machine. For a wildcard bind, `config get` adds the LAN IPv4 a device would actually dial. `config get` prints only `set` or `none` for the token. Setting a non-loopback `hub.bind` does not itself write a token; the next `signalbox hub` generates and saves one (see [hub](#hub)).
 
 `hub.upstream` accepts the same origin-only URL as `hub --upstream`: `https`, or plain `http` only for `localhost`, `127.x.x.x` or `::1`. Saving canonicalizes it to the URL origin. An empty value clears it; a non-empty value makes a bare or app-spawned `signalbox hub` run as a forwarder.
+
+`hub.historyLimit` is how many exchanges the reducer keeps per session (default 1000, 1 to 100000). The ring is rebuilt from the event log on boot, so changing it costs a hub restart and nothing else. `hub.replyCap` is the emitter's cap on a reply in characters (default 10240, 1 to 1000000); the prompt cap is fixed at 1024. Both are CLI-only: the Settings window does not expose them.
 
 The app also writes `hub.remoteUrl` into the same section: the remote hub address it last confirmed, remembered so its Hub tab can offer it again. Nothing in the CLI reads it and it is not settable (`config set hub.remoteUrl` is an unknown key), because `hub.upstream` alone decides whether this hub forwards - switching the app to Local or LAN empties `hub.upstream` while `hub.remoteUrl` keeps the address for the next switch back. Like every app-owned key it survives `config set` untouched.
 

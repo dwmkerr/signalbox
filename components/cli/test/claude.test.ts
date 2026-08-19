@@ -83,15 +83,30 @@ describe("mapClaudeHook", () => {
     });
   }
 
-  test("UserPromptSubmit carries the cropped prompt", () => {
+  test("UserPromptSubmit carries the raw prompt", () => {
     const got = mapClaudeHook({ hook_event_name: "UserPromptSubmit", prompt: "fix\nthe bug" });
     expect(got?.eventType).toBe("busy");
-    expect(got?.detail).toBe("fix the bug");
+    expect(got?.detail).toBe("fix\nthe bug");
+    expect(got?.reply).toBeUndefined();
   });
 
   test("UserPromptSubmit falls back to raw_prompt", () => {
     const got = mapClaudeHook({ hook_event_name: "UserPromptSubmit", raw_prompt: "older payload" });
     expect(got?.detail).toBe("older payload");
+  });
+
+  test("UserPromptSubmit carries the previous assistant reply", () => {
+    const got = mapClaudeHook({
+      hook_event_name: "UserPromptSubmit",
+      prompt: "next task",
+      transcript_path: fixture,
+    });
+    expect(got).toEqual({
+      eventType: "busy",
+      reason: "",
+      detail: "next task",
+      reply: lastAssistantText(fixture),
+    });
   });
 
   test("SessionEnd reason clear ends by default", () => {
@@ -170,6 +185,13 @@ describe("lastAssistantText", () => {
 });
 
 describe("claudeReply", () => {
+  test("claude returns the reply as raw markdown", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sb-"));
+    const p = join(dir, "t.jsonl");
+    const reply = "Line one\n\n- bullet\n- bullet";
+    writeFileSync(p, JSON.stringify({ type: "assistant", message: { role: "assistant", content: reply } }));
+    expect(claudeReply({ hook_event_name: "Stop", transcript_path: p })).toBe(reply);
+  });
   test("Stop reads the transcript", () => {
     const got = claudeReply({ hook_event_name: "Stop", transcript_path: fixture });
     expect(got.startsWith("Done - both changes are in.")).toBe(true);

@@ -2,7 +2,7 @@
 // bounded transcript reads for reply capture and /rename session names.
 
 import { openSync, readSync, closeSync, fstatSync } from "node:fs";
-import { cropPrompt, cropReply, Busy, Done, Attention, Error as ErrorType, Ended } from "./event";
+import { cropTitle, Busy, Done, Attention, Error as ErrorType, Ended } from "./event";
 
 // Subset of Claude Code hook stdin JSON that signalbox consumes; unknown
 // fields are ignored so hook payload growth is harmless.
@@ -40,7 +40,7 @@ export function stripHarness(s: string): string {
 }
 
 function filterDetail(prompt: string): string {
-  return cropPrompt(stripHarness(prompt));
+  return stripHarness(prompt);
 }
 
 // isIdleNotification is the single "finished, over to you" test: a Notification
@@ -61,6 +61,7 @@ export interface Mapped {
   eventType: string;
   reason: string;
   detail: string;
+  reply?: string;
 }
 
 // mapClaudeHook translates a hook payload per the adapter table. null means
@@ -72,8 +73,17 @@ export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
   switch (h.hook_event_name) {
     case "SessionStart":
       return { eventType: Busy, reason: "session_start", detail: "" };
-    case "UserPromptSubmit":
-      return { eventType: Busy, reason: "", detail: filterDetail(h.prompt || h.raw_prompt || "") };
+    case "UserPromptSubmit": {
+      // The next prompt arrives after Claude appends the previous turn's final
+      // assistant entry, allowing the reducer to heal its reply.
+      const reply = h.transcript_path ? stripHarness(lastAssistantText(h.transcript_path)) : "";
+      return {
+        eventType: Busy,
+        reason: "",
+        detail: filterDetail(h.prompt || h.raw_prompt || ""),
+        ...(reply ? { reply } : {}),
+      };
+    }
     case "Stop":
       return { eventType: Done, reason: "stop", detail: "" };
     case "Notification": {
@@ -125,17 +135,17 @@ export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
 // mapClaudeHook uses, so typeless idle notifications on current Claude Code
 // refresh the reply too). Permission/attention notifications are excluded on
 // purpose: there the transcript's last line is stale, not the reply. Bounded
-// tail read, filtered like detail, cropped at this emitter; empty on any miss
-// so the reducer's carry keeps the previous reply.
+// tail read, filtered like detail; cropping happens once in buildEvent. Empty
+// on any miss so the reducer's carry keeps the previous reply.
 export function claudeReply(h: ClaudeHook): string {
   const speaking = h.hook_event_name === "Stop" || isIdleNotification(h);
   if (speaking && h.transcript_path) {
-    return cropReply(stripHarness(lastAssistantText(h.transcript_path)));
+    return stripHarness(lastAssistantText(h.transcript_path));
   }
-  // A pending tool call: the reply is the actual ask, formatted and cropped
-  // here at the emitter (asks travel to the phone - specs/adapters.md).
+  // A pending tool call: the reply is the actual ask, formatted here and then
+  // cropped once in buildEvent (asks travel to the phone - specs/adapters.md).
   if (h.hook_event_name === "PermissionRequest" || h.hook_event_name === "PreToolUse") {
-    return cropReply(formatAsk(h.tool_name ?? "", h.tool_input ?? {}));
+    return formatAsk(h.tool_name ?? "", h.tool_input ?? {});
   }
   // A permission/attention notification: show the notification message (it names
   // what Claude needs) rather than let the row fall back to a stale prompt. The
@@ -143,7 +153,7 @@ export function claudeReply(h: ClaudeHook): string {
   // line is stale, not the ask. Empty message keeps the prompt fallback. Rarely
   // seen when running with permissions bypassed.
   if (h.hook_event_name === "Notification" && !isIdleNotification(h)) {
-    return cropReply(stripHarness(h.message || ""));
+    return stripHarness(h.message || "");
   }
   return "";
 }
@@ -309,5 +319,5 @@ export function sessionName(path: string): string {
       if (idx >= 0) scan(text.slice(idx + 1));
     }
   }
-  return cropPrompt(name);
+  return cropTitle(name);
 }

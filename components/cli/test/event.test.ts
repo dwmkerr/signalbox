@@ -5,20 +5,41 @@ import { join } from "node:path";
 import * as ev from "../src/event";
 
 describe("crops", () => {
-  test("cropPrompt collapses whitespace to one line", () => {
-    expect(ev.cropPrompt("  fix\nthe\t login   bug  ")).toBe("fix the login bug");
+  test("cropText keeps newlines and markdown intact", () => {
+    expect(ev.cropText("# Heading\n\n- one\n- two", ev.PromptMax)).toEqual({
+      text: "# Heading\n\n- one\n- two",
+      cropped: false,
+    });
   });
-  test("cropPrompt crops to 160 code points", () => {
-    expect(Array.from(ev.cropPrompt("x".repeat(300))).length).toBe(160);
+  test("cropText trims surrounding whitespace only", () => {
+    expect(ev.cropText("  hi\nthere  ", ev.PromptMax)).toEqual({
+      text: "hi\nthere",
+      cropped: false,
+    });
   });
-  test("cropPrompt keeps multi-byte characters intact at the boundary", () => {
-    const s = "é".repeat(200);
-    const out = ev.cropPrompt(s);
-    expect(Array.from(out).length).toBe(160);
-    expect(out).toBe("é".repeat(160));
+  test("cropPrompt crops to 1024 code points and flags it", () => {
+    const out = ev.cropPrompt("x".repeat(2000));
+    expect(Array.from(out.text).length).toBe(1024);
+    expect(out.cropped).toBe(true);
   });
-  test("cropReply crops to 280", () => {
-    expect(Array.from(ev.cropReply("y".repeat(500))).length).toBe(280);
+  test("cropReply crops to 10240 code points and flags it", () => {
+    const out = ev.cropReply("y".repeat(20000));
+    expect(Array.from(out.text).length).toBe(10240);
+    expect(out.cropped).toBe(true);
+  });
+  test("cropReply honours an explicit cap", () => {
+    const out = ev.cropReply("y".repeat(50), 10);
+    expect(Array.from(out.text).length).toBe(10);
+    expect(out.cropped).toBe(true);
+  });
+  test("cropReply keeps multi-byte characters intact at the boundary", () => {
+    const cap = 10;
+    const out = ev.cropReply("😀".repeat(20), cap);
+    expect(Array.from(out.text).length).toBe(cap);
+    expect(Array.from(out.text).some((point) => point.length === 1 && /[\uD800-\uDFFF]/.test(point))).toBe(false);
+  });
+  test("cropTitle collapses whitespace to one line", () => {
+    expect(ev.cropTitle("  fix\nthe\t login   bug  ")).toBe("fix the login bug");
   });
   test("cropLabel crops to 80", () => {
     expect(Array.from(ev.cropLabel("z".repeat(200))).length).toBe(80);
@@ -152,6 +173,15 @@ describe("validate", () => {
 });
 
 describe("redact", () => {
+  test("drops cropped", async () => {
+    const e: ev.Event = {
+      v: 1, id: "x", ts: "t", host: "h", agent: "claude", event: "done",
+      session_key: "claude:secret-session-id", prompt: "prompt", reply: "reply", cropped: true,
+    };
+    await ev.redact(e);
+    expect(e.cropped).toBeUndefined();
+  });
+
   test("drops naming fields and hashes the session id", async () => {
     const e: ev.Event = {
       v: 1, id: "x", ts: "t", host: "h", agent: "claude", event: "done",

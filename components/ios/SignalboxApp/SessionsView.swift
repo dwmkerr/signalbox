@@ -9,6 +9,7 @@ import SwiftUI
 // A List rather than a ScrollView, because swipe actions are a List feature.
 // The cards are list rows dressed up.
 struct SessionsView: View {
+    @Environment(\.openURL) private var openURL
     @ObservedObject var hub: HubClient
     // The saved hub address, the same binding Settings drives. The board reads it
     // so its empty state agrees with Settings: a hub we set up but cannot reach is
@@ -29,6 +30,10 @@ struct SessionsView: View {
     // The same main-screen scan affordance every surface carries, presenting the
     // shared PairSheet so pairing is never buried in Settings.
     @State private var showPairSheet = false
+    @State private var chatSession: Session?
+    @State private var showUnsupportedJump = false
+
+    private static let feedbackURL = URL(string: "https://github.com/dwmkerr/signalbox/issues/67")!
 
     var body: some View {
         NavigationStack {
@@ -45,13 +50,9 @@ struct SessionsView: View {
                                 // Long-press for the pin/unpin menu, the Messages
                                 // gesture. The hub owns the partition, so this
                                 // only fires an event; it never re-sorts here.
-                                .contextMenu { pinMenu(session) }
-                                // Only a row with a window to raise offers Jump;
-                                // a CI run with a url origin is information, so it
-                                // has no jump gesture at all rather than a swipe
-                                // that quietly does nothing.
+                                .contextMenu { pinMenu(session); chatButton(session) }
                                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    if session.jumpable {
+                                    if !session.infoOnly {
                                         Button { jump(session) } label: { Label("Jump", systemImage: "arrow.uturn.forward") }
                                             .tint(Theme.blue)
                                     }
@@ -86,6 +87,7 @@ struct SessionsView: View {
                                         .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                                         .listRowSeparator(.hidden)
                                         .listRowBackground(Color.clear)
+                                        .contextMenu { pinMenu(session); chatButton(session) }
                                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                             Button { Task { await hub.unhide(session) } } label: { Label("Unhide", systemImage: "eye") }
                                                 .tint(Theme.blue)
@@ -108,6 +110,7 @@ struct SessionsView: View {
             .background(Theme.bg)
             .navigationTitle("Signalbox")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(item: $chatSession) { ChatView(hub: hub, session: $0) }
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 1) {
@@ -124,6 +127,12 @@ struct SessionsView: View {
             // The escape hatch when a stream has gone strange.
             .refreshable { try? await hub.resyncState() }
             .sheet(isPresented: $showPairSheet) { PairSheet() }
+            .alert("Jump not supported", isPresented: $showUnsupportedJump) {
+                Button("Submit feedback") { openURL(Self.feedbackURL) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This session is running in a plain terminal - jump is not supported yet. Submit feedback if you would find this useful.")
+            }
             // Same destructive Disconnect as Settings, behind the same confirm:
             // it deletes the token, so it says so before it acts.
             .confirmationDialog(
@@ -419,10 +428,7 @@ struct SessionsView: View {
                 }
             }
 
-            // The arrow only appears on a row that can be jumped to. A CI run has
-            // no machine to raise a window on, so it carries no button to press;
-            // a hidden row is silenced, so it does not offer to jump either.
-            if session.jumpable && !dimmed {
+            if !session.infoOnly && !dimmed {
                 Button { jump(session) } label: {
                     Image(systemName: "arrow.uturn.forward")
                         .font(.system(size: 15, weight: .semibold))
@@ -455,6 +461,13 @@ struct SessionsView: View {
         }
     }
 
+    @ViewBuilder
+    private func chatButton(_ session: Session) -> some View {
+        Button { chatSession = session } label: {
+            Label("Show Chat", systemImage: "bubble.left.and.bubble.right")
+        }
+    }
+
     // The quiet divider that gates the Hidden section. Tap toggles it open.
     private var hiddenDivider: some View {
         let empty = hiddenRows.isEmpty
@@ -479,6 +492,10 @@ struct SessionsView: View {
     }
 
     private func jump(_ session: Session) {
+        guard session.jumpable else {
+            if !session.infoOnly { showUnsupportedJump = true }
+            return
+        }
         pressed = session.key
         Task {
             await hub.jump(session)

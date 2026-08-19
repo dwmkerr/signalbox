@@ -1,8 +1,14 @@
-signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) | [settings](https://dwmkerr.github.io/signalbox/specs/settings.html) | [menu bar](https://dwmkerr.github.io/signalbox/specs/menubar.html) | [ios](https://dwmkerr.github.io/signalbox/specs/ios.html) | [architecture](https://dwmkerr.github.io/signalbox/specs/architecture.html) | [cli](cli.md) | [data model](events.md) | agent integrations
+signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) | [settings](https://dwmkerr.github.io/signalbox/specs/settings.html) | [menu bar](https://dwmkerr.github.io/signalbox/specs/menubar.html) | [ios](https://dwmkerr.github.io/signalbox/specs/ios.html) | [architecture](https://dwmkerr.github.io/signalbox/specs/architecture.html) | [cli](cli.md) | [data model](events.md) | agent integrations | [agent markdown](agent-markdown.md)
 
 # Specification: signalbox agent integrations
 
 How each coding agent connects to signalbox, and how its hooks map to events. Adapters live in `components/cli/adapters/`.
+
+Every adapter passes the agent's raw markdown without flattening it. The CLI's
+event builder applies the shared caps (1,024 characters for prompts and 10,240
+for replies) and sets `cropped`. The out-of-process OpenCode and pi plugins cut
+only at those same caps before building argv, then pass `--cropped` so the event
+builder preserves the marker.
 
 ## What each agent surfaces
 
@@ -68,7 +74,7 @@ signalbox init --agent claude
 | Hook input | Event |
 |---|---|
 | `SessionStart` | busy (reason `session_start`) |
-| `UserPromptSubmit` | busy + `prompt` = cropped prompt text |
+| `UserPromptSubmit` | busy + `prompt` = the raw prompt text + `reply` = the previous turn's final assistant text when present. Claude's transcript is append-only, so by the next prompt the previous final entry is guaranteed to be available. |
 | `Stop` | done (reason `stop`) |
 | `Notification` - idle | done (reason `idle`). Matched by `notification_type: idle_prompt`, or (current Claude Code sends no type) by a typeless `message` mentioning idle/finished/"waiting for your input"/"no longer" (case-insensitive). |
 | `Notification` - anything else (permission prompt, elicitation, unknown type, or a typeless permission `message`) | attention. Claude is blocked waiting on you. Defaulting to attention keeps the needs-you state correct across Claude Code versions that change these payloads. On versions with `PermissionRequest` this is the bare duplicate of an enriched ask (the reducer's no-clobber rule keeps the rich one); on older versions it is the whole signal, exactly as before. |
@@ -83,7 +89,7 @@ signalbox init --agent claude
 - Title: explicit `/rename` from the transcript's `custom-title` entries (bounded head+tail read, last one wins) beats the cwd basename. The `claudeRenameTitle` setting turns the `/rename` lookup off; your own jumplist rename (a label event) overrides either.
 - `reply`: final assistant text from the transcript (bounded tail read of `transcript_path`, never the full file). Captured on `Stop` and on **any idle notification** - by the same idle test the mapping uses, so a typeless idle `message` on current Claude Code refreshes the reply just like a typed `idle_prompt`. **Not** captured on permission/attention notifications, where the transcript's last line is stale. Filtered like the prompt; empty on any miss, so the previous reply carries.
 - Prompt filter (shared with reply): strip leading bracket-tag prefixes (`[Image #1]` etc.); skip text that then starts with `<` (harness XML) - detail is the last *human* prompt.
-- Ask formatting: `reply` for an ask is formatted and cropped at the emitter like every other reply (asks travel to the phone; hub-side cropping would be after the wire). Never file contents - a `Write`/`Edit` input is summarized to its path.
+- Ask formatting: `reply` for an ask is still formatted at the emitter (never file contents; a `Write`/`Edit` input is summarized to its path), but it is no longer cropped there. Cropping happens once in the event builder against the configured caps.
 - Ask dedup: one dialog can produce both a `PermissionRequest` and a `Notification`. Both map to attention for the same session; the reducer's no-clobber rule ([events.md](events.md)) keeps the enriched reply regardless of arrival order.
 - Hooks run under a transient shell (`sh -c`, or a dispatcher script), so the hook's parent is walked past shell wrappers (bounded) to the agent process, captured as `proc` for the liveness sweep.
 - `SIGNALBOX_RAW` (diagnostic, off by default): attaches the untouched hook payload to the event as `raw`, so it can be inspected in the hub's own event log (`state --json` / events.jsonl). Stripped by the redacted profile; never sent in normal operation. Applies to `hook cursor` too.
@@ -197,7 +203,7 @@ signalbox init --agent opencode
 
 
 `session.status busy|retry` → busy (reason `retry` when retrying) · `session.idle` → done · `permission.asked` (or `permission.updated`, which opencode 1.17 emits for the same signal) → attention (reason `permission_prompt`) · `session.error` → error (reason = the error's name) · `session.deleted` → ended.
-`session_key = opencode:<sessionID>`; title from session info (cwd basename fallback); detail = last user prompt and reply = last assistant text part, both cached from the message events and cropped at the emitter.
+`session_key = opencode:<sessionID>`; title from session info (cwd basename fallback); detail = last user prompt and reply = last assistant text part, both cached from the message events and passed through raw; the plugin cuts only at the shared caps and then passes `--cropped`.
 
 ## pi (extension, `components/cli/adapters/pi/signalbox.ts`)
 
@@ -209,7 +215,7 @@ signalbox init --agent pi
 
 
 `agent_start` → busy · `agent_end` → done · `session_shutdown` → ended.
-`session_key = pi:<session id>`; title = pi's session name (cwd basename fallback); detail = the last prompt, cached from the `input` event (`agent_start` carries no payload); reply from `agent_end`'s messages. pi exposes no error or permission events, so a pi session shows only busy, done, or ended.
+`session_key = pi:<session id>`; title = pi's session name (cwd basename fallback); detail = the last prompt, cached from the `input` event (`agent_start` carries no payload); reply from `agent_end`'s messages - both passed through raw; the extension cuts only at the shared caps and then passes `--cropped`, exactly like the OpenCode plugin. pi exposes no error or permission events, so a pi session shows only busy, done, or ended.
 
 **Serialize fires** in any adapter that spawns the CLI per event: spawn the next CLI only after the previous exits. The hub applies events in arrival order, and `agent_end`/`session_shutdown` fire back-to-back - concurrent processes could deliver `ended` before `done` and resurrect a removed session. These in-process adapters (opencode, pi) also pass their own `--pid`/`--pid-name` on every fire, so the hub's liveness sweep can end sessions whose agent died without an exit event.
 

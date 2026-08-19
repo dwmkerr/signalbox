@@ -7,7 +7,7 @@
 import { existsSync, opendirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { cropPrompt, cropReply, Busy, Done, Attention, Ended } from "./event";
+import { cropTitle, Busy, Done, Attention, Ended } from "./event";
 import { stripHarness } from "./claude";
 
 // Subset of the Codex hook stdin JSON that signalbox consumes; unknown fields
@@ -45,7 +45,7 @@ export function mapCodexHook(h: CodexHook, clearEnds = true): Mapped | null {
     case "SessionStart":
       return { eventType: Busy, reason: "session_start", detail: "" };
     case "UserPromptSubmit":
-      return { eventType: Busy, reason: "", detail: cropPrompt(stripHarness(h.prompt || "")) };
+      return { eventType: Busy, reason: "", detail: stripHarness(h.prompt || "") };
     case "Stop":
       return { eventType: Done, reason: "stop", detail: "" };
     case "PermissionRequest":
@@ -69,10 +69,10 @@ export function mapCodexHook(h: CodexHook, clearEnds = true): Mapped | null {
 export function codexReply(h: CodexHook): string {
   if (h.hook_event_name === "Stop") {
     const msg = h.last_assistant_message;
-    return msg ? cropReply(stripHarness(msg)) : "";
+    return msg ? stripHarness(msg) : "";
   }
   if (h.hook_event_name === "PermissionRequest") {
-    return cropReply(permissionAsk(h));
+    return permissionAsk(h);
   }
   return "";
 }
@@ -226,5 +226,5 @@ export function codexSessionName(sessionId: string, indexPath?: string): string 
       // partial or malformed line - skip
     }
   }
-  return cropPrompt(name.trim());
+  return cropTitle(name.trim());
 }

@@ -33,12 +33,21 @@ signalbox fire --agent github --event done \
   --origin-url "https://github.com/dwmkerr/signalbox/actions/runs/9182"
 ```
 
-The full event → state contract, and exactly what each adapter maps, is in
-[specs/adapters.md](../components/specs/adapters.md) and [specs/events.md](../components/specs/events.md).
+The complete event-to-state contract and adapter mappings are in
+[specs/events.md](../components/specs/events.md) and
+[specs/adapters.md](../components/specs/adapters.md). The
+[Agent Markdown specification](../components/specs/agent-markdown.md) defines
+the shared grammar, one-line preview rule, and crop marker.
 
 ## Privacy
 
-signalbox sends signals and a short breadcrumb of the exchange (your last prompt,
-the agent's last message) - never full transcripts, and both are cropped at the
-emitter. On machines where even that must not leave, `SIGNALBOX_PROFILE=redacted`
-drops the cwd, title, prompt and reply and hashes the session id.
+Signalbox preserves raw multiline Markdown in prompts and replies and sends it
+to the configured hub. Emitters cap prompts at 1,024 characters and replies at
+10,240 characters. An event with `cropped: true` reports that one of those
+values was cut. The configured hub keeps a bounded per-session ring of
+exchanges.
+
+A local hub retains this data on the local machine. A remote configuration
+sends it to the remote host. Set `SIGNALBOX_PROFILE=redacted` when session
+content must not leave a machine. The redacted profile removes `cwd`, `title`,
+`prompt`, `reply`, `cropped`, and `raw`, and hashes `session_key`.
