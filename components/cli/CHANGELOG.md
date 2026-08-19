@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.7](https://github.com/dwmkerr/signalbox/compare/v0.1.6...v0.1.7) (2026-08-19)
+
+
+### Features
+
+* agent chat history, terminal markdown rendering, and universal jump ([#68](https://github.com/dwmkerr/signalbox/issues/68)) ([852bbc6](https://github.com/dwmkerr/signalbox/commit/852bbc6679ab23194ef3360a83a90e390da3479b))
+* integration-test skill with HTML evidence report ([#55](https://github.com/dwmkerr/signalbox/issues/55)) ([22e921f](https://github.com/dwmkerr/signalbox/commit/22e921fe1d4d30d28bb601c4e8bc27a7ec108ab6))
+
+
+### Bug Fixes
+
+* iOS connection flap on pinned LAN hubs - per-attempt sessions, uncached probes ([#57](https://github.com/dwmkerr/signalbox/issues/57)) ([c9a2070](https://github.com/dwmkerr/signalbox/commit/c9a2070b7ac129cd82618542d5ad1191300de26d)), closes [#54](https://github.com/dwmkerr/signalbox/issues/54)
+* menu overflow, logs pane, shortcut recorder, and seq-domain staleness ([#65](https://github.com/dwmkerr/signalbox/issues/65)) ([0d6a73a](https://github.com/dwmkerr/signalbox/commit/0d6a73ab3966ca5830809b9fdd6df518c705b5a1))
+
 ## [0.1.6](https://github.com/dwmkerr/signalbox/compare/v0.1.5...v0.1.6) (2026-08-01)
 
 
