@@ -7,13 +7,44 @@ signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/h
 
 Search indexes complete local agent conversations so a query can find live and ended sessions. It indexes user prompts and assistant replies, not raw transcript records.
 
-## Local-only privacy boundary
+## Why transcripts, and not the exchange ring
 
-The existing event contract promises "signals and a two-line breadcrumb of the exchange, never transcripts - crops happen at the emitter, the full text never leaves the machine that produced it" (`components/cli/src/event.ts:31`). Search preserves that hard boundary.
+The hub already keeps a per-session ring of exchanges and serves it over
+[`GET /exchanges`](events.md#the-hub-api). Search does not use it. The ring is
+bounded (`hub.historyLimit`, 1,000 exchanges per session by default) and exists
+only for sessions the hub currently knows about, so it cannot answer the
+question this feature is for: finding a session that ended weeks ago and left
+the board. Transcripts on disk are the complete archive, which is why they are
+the corpus. The two stores are complementary, not alternatives.
 
-The index never leaves the machine that owns the transcripts. A forwarder does not serve `/search`. A hub answers `/search` only from its own local index and never on behalf of a forwarding machine.
+## Local-only boundary
 
-Remote fan-out remains technically reachable: the hub already broadcasts commands downstream to forwarders (`components/cli/src/forwarder.ts:286`), and forwarders handle those frames at `components/cli/src/forwarder.ts:400`. Remote search would also need a reply path and a separate privacy decision. It is out of scope for this version.
+The index never leaves the machine that owns the transcripts. A forwarder does
+not serve `/search`. A hub answers `/search` only from its own local index and
+never on behalf of a forwarding machine.
+
+This is a deliberate scope and privacy decision for this version, not an
+inherited invariant. Signalbox does send conversation content to a configured
+remote hub: `prompt` and `reply` carry raw Markdown up to their caps, and
+`/exchanges` serves that history to clients. The transcript index is held to a
+stricter rule than that content for three reasons:
+
+1. It covers sessions that are not on the board at all, including work the hub
+   has never seen and has no other reason to hold.
+2. It covers the whole archive rather than a bounded recent ring, so the volume
+   and the spread across unrelated projects are of a different order.
+3. A remote hub cannot read another machine's transcripts in any case, so
+   serving them would require a query fan-out that does not exist.
+
+Remote fan-out remains technically reachable: the hub already broadcasts
+commands downstream to forwarders (`components/cli/src/forwarder.ts`), and
+forwarders handle those frames. Remote search would also need a reply path,
+which commands do not have, plus a separate privacy decision. It is out of
+scope for this version.
+
+The `transcript` path field on events is held to the same rule: `redact()`
+strips it, and every forwarder strips it on the uplink for all profiles
+(see [events.md](events.md#privacy)).
 
 ## Index location
 

@@ -10,9 +10,9 @@ import {
   type TranscriptAgent,
   type TranscriptFile,
   type Turn,
-} from "../src/transcripts";
+} from "./transcripts";
 
-const fixtures = join(import.meta.dir, "testdata", "transcripts");
+const fixtures = join(import.meta.dir, "testdata");
 const claudeUuid = "11111111-1111-4111-8111-111111111111";
 const codexUuid = "22222222-2222-4222-8222-222222222222";
 const cursorUuid = "33333333-3333-4333-8333-333333333333";
