@@ -36,6 +36,10 @@ describe("mapCodexHook", () => {
 });
 
 describe("codexReply", () => {
+  test("codex returns the reply as raw markdown", () => {
+    const reply = "Line one\n\n- bullet\n- bullet";
+    expect(codexReply({ hook_event_name: "Stop", last_assistant_message: reply })).toBe(reply);
+  });
   test("Stop returns the inline last_assistant_message", () => {
     expect(codexReply({ hook_event_name: "Stop", last_assistant_message: "all done" })).toBe("all done");
   });

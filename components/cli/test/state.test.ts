@@ -16,6 +16,11 @@ function mkReason(key: string, eventType: string, reason: string, ts: string, se
 
 const t = (m: number) => `2026-07-07T10:${String(m).padStart(2, "0")}:00Z`;
 
+function applyTurn(s: Store, key: string, turn: number): void {
+  s.apply({ ...mk(key, ev.Busy, t(turn * 2 - 1), turn * 2 - 1), prompt: `prompt ${turn}` });
+  s.apply({ ...mkReason(key, ev.Done, "stop", t(turn * 2), turn * 2), reply: `reply ${turn}` });
+}
+
 function keys(s: Store): string[] {
   return s.list().map((e) => e.session_key);
 }
@@ -413,5 +418,267 @@ describe("ask no-clobber", () => {
     const row = s.list()[0];
     expect(row.reason).toBe("notification");
     expect(row.reply).toBe("Claude needs your permission");
+  });
+});
+
+describe("exchange history", () => {
+  test("a full turn commits one exchange", () => {
+    const s = new Store();
+    s.apply(mkReason("a", ev.Busy, "session_start", t(0), 1));
+    s.apply({ ...mk("a", ev.Busy, t(1), 2), prompt: "fix the bug" });
+    s.apply({ ...mkReason("a", ev.Done, "stop", t(2), 3), reply: "fixed" });
+
+    const history = s.exchanges("a", { limit: 10 });
+    expect(history).toHaveLength(1);
+    expect(history?.[0].prompt).toBe("fix the bug");
+    expect(history?.[0].reply).toBe("fixed");
+  });
+
+  test("a later reply-only event amends the last committed exchange", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p1" });
+    s.apply({ ...mk("a", ev.Done, t(1), 2), reply: "r1-stale" });
+    s.apply({ ...mkReason("a", ev.Done, "idle", t(2), 3), reply: "r1-final" });
+
+    const history = s.exchanges("a", { limit: 10 });
+    expect(history).toHaveLength(1);
+    expect(history?.[0]).toMatchObject({ prompt: "p1", reply: "r1-final", seq: 2 });
+  });
+
+  test("a busy carrying prompt and reply heals the previous exchange", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p1" });
+    s.apply({ ...mk("a", ev.Done, t(1), 2), reply: "r1-stale" });
+    s.apply({ ...mk("a", ev.Busy, t(2), 3), prompt: "p2", reply: "r1-final" });
+    s.apply({ ...mk("a", ev.Done, t(3), 4), reply: "r2" });
+
+    expect(s.exchanges("a", { limit: 10 })?.map((x) => ({ prompt: x.prompt, reply: x.reply }))).toEqual([
+      { prompt: "p1", reply: "r1-final" },
+      { prompt: "p2", reply: "r2" },
+    ]);
+  });
+
+  test("a busy reply fills an open prompt-only pending before the new prompt displaces it", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p1" });
+    // No done ever arrived for p1 - the busy's reply must heal the OPEN
+    // pending, not amend history, and displacement commits the healed pair.
+    s.apply({ ...mk("a", ev.Busy, t(1), 2), prompt: "p2", reply: "r1-final" });
+    s.apply({ ...mk("a", ev.Done, t(2), 3), reply: "r2" });
+
+    expect(s.exchanges("a", { limit: 10 })?.map((x) => ({ prompt: x.prompt, reply: x.reply }))).toEqual([
+      { prompt: "p1", reply: "r1-final" },
+      { prompt: "p2", reply: "r2" },
+    ]);
+  });
+
+  test("amend ORs cropped", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p1" });
+    s.apply({ ...mk("a", ev.Done, t(1), 2), reply: "r1" });
+    s.apply({ ...mk("a", ev.Done, t(2), 3), reply: "r1", cropped: true });
+
+    expect(s.exchanges("a", { limit: 10 })?.[0].cropped).toBe(true);
+  });
+
+  test("amend is idempotent", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p1" });
+    s.apply({ ...mk("a", ev.Done, t(1), 2), reply: "r1-stale" });
+    const final = { ...mk("a", ev.Done, t(2), 3), reply: "r1-final" };
+    s.apply(final);
+    s.apply(final);
+
+    const history = s.exchanges("a", { limit: 10 });
+    expect(history).toHaveLength(1);
+    expect(history?.[0].reply).toBe("r1-final");
+  });
+
+  test("attention still never amends", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p1" });
+    s.apply({ ...mk("a", ev.Done, t(1), 2), reply: "r1" });
+    s.apply({ ...mk("a", ev.Attention, t(2), 3), reply: "ask-text" });
+
+    expect(s.exchanges("a", { limit: 10 })?.[0].reply).toBe("r1");
+  });
+
+  test("reply-only with empty history still opens a pending", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Done, t(0), 1), reply: "old-reply" });
+    s.apply({ ...mk("a", ev.Busy, t(1), 2), prompt: "p1" });
+    s.apply({ ...mk("a", ev.Done, t(2), 3), reply: "r1" });
+
+    expect(s.exchanges("a", { limit: 10 })?.map((x) => ({ prompt: x.prompt, reply: x.reply }))).toEqual([
+      { prompt: undefined, reply: "old-reply" },
+      { prompt: "p1", reply: "r1" },
+    ]);
+  });
+
+  test("attention asks do not create history entries", () => {
+    const s = new Store();
+    s.apply(mkReason("a", ev.Busy, "session_start", t(0), 1));
+    s.apply({ ...mk("a", ev.Busy, t(1), 2), prompt: "fix the bug" });
+    s.apply({
+      ...mkReason("a", ev.Attention, "permission_request", t(2), 3),
+      reply: "Bash: git push",
+    });
+    s.apply(mkReason("a", ev.Attention, "notification", t(3), 4));
+    s.apply({ ...mkReason("a", ev.Done, "stop", t(4), 5), reply: "fixed" });
+
+    const history = s.exchanges("a", { limit: 10 });
+    expect(history).toHaveLength(1);
+    expect(history?.[0].reply).toBe("fixed");
+  });
+
+  test("an enriched ask with no pending never enters history", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p1" });
+    s.apply({ ...mk("a", ev.Done, t(1), 2), reply: "r1" });
+    s.apply({
+      ...mkReason("a", ev.Attention, "permission_request", t(2), 3),
+      reply: "Bash: git push",
+    });
+    s.apply({ ...mk("a", ev.Busy, t(3), 4), prompt: "p2" });
+    s.apply({ ...mk("a", ev.Done, t(4), 5), reply: "r2" });
+
+    const history = s.exchanges("a", { limit: 10 });
+    expect(history?.map((x) => ({ prompt: x.prompt, reply: x.reply }))).toEqual([
+      { prompt: "p1", reply: "r1" },
+      { prompt: "p2", reply: "r2" },
+    ]);
+    expect(JSON.stringify(history)).not.toContain("Bash: git push");
+  });
+
+  test("an abandoned ask does not commit ask text", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p1" });
+    s.apply({
+      ...mkReason("a", ev.Attention, "permission_request", t(1), 2),
+      reply: "Claude needs your permission",
+    });
+    s.apply({ ...mk("a", ev.Busy, t(2), 3), prompt: "p2" });
+    s.apply({ ...mk("a", ev.Done, t(3), 4), reply: "r2" });
+
+    const history = s.exchanges("a", { limit: 10 });
+    expect(history?.map((x) => ({ prompt: x.prompt, reply: x.reply }))).toEqual([
+      { prompt: "p1", reply: undefined },
+      { prompt: "p2", reply: "r2" },
+    ]);
+    expect(JSON.stringify(history)).not.toContain("Claude needs your permission");
+  });
+
+  test("an error event closes a pending exchange", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p" });
+    s.apply({ ...mk("a", ev.Error, t(1), 2), reply: "boom" });
+
+    expect(s.exchanges("a", { limit: 10 })?.map((x) => ({ prompt: x.prompt, reply: x.reply }))).toEqual([
+      { prompt: "p", reply: "boom" },
+    ]);
+  });
+
+  test("a returned exchange is a copy", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p" });
+    s.apply({ ...mk("a", ev.Done, t(1), 2), reply: "r" });
+
+    const history = s.exchanges("a", { limit: 10 })!;
+    history[0].reply = "changed";
+
+    expect(s.exchanges("a", { limit: 10 })?.[0].reply).toBe("r");
+  });
+
+  test("a second prompt closes the previous exchange", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "a" });
+    s.apply({ ...mk("a", ev.Busy, t(1), 2), prompt: "b" });
+    s.apply({ ...mk("a", ev.Done, t(2), 3), reply: "R" });
+
+    expect(s.exchanges("a", { limit: 10 })?.map((x) => ({ prompt: x.prompt, reply: x.reply }))).toEqual([
+      { prompt: "a", reply: undefined },
+      { prompt: "b", reply: "R" },
+    ]);
+  });
+
+  test("carried breadcrumbs do not duplicate history", () => {
+    const s = new Store();
+    applyTurn(s, "a", 1);
+    s.apply(mk("a", ev.Done, t(3), 3));
+
+    expect(s.exchanges("a", { limit: 10 })).toHaveLength(1);
+  });
+
+  test("cropped rides along", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "fix the bug" });
+    s.apply({ ...mk("a", ev.Done, t(1), 2), reply: "fixed", cropped: true });
+
+    expect(s.exchanges("a", { limit: 10 })?.[0].cropped).toBe(true);
+  });
+
+  test("the ring evicts the oldest at the limit", () => {
+    const s = new Store(3);
+    for (let turn = 1; turn <= 5; turn++) applyTurn(s, "a", turn);
+
+    expect(s.exchanges("a", { limit: 10 })?.map((x) => x.prompt)).toEqual([
+      "prompt 3",
+      "prompt 4",
+      "prompt 5",
+    ]);
+  });
+
+  test("exchanges returns the newest limit, oldest first", () => {
+    const s = new Store();
+    for (let turn = 1; turn <= 5; turn++) applyTurn(s, "a", turn);
+
+    expect(s.exchanges("a", { limit: 2 })?.map((x) => x.prompt)).toEqual(["prompt 4", "prompt 5"]);
+  });
+
+  test("before pages backwards", () => {
+    const s = new Store();
+    for (let turn = 1; turn <= 5; turn++) applyTurn(s, "a", turn);
+    const all = s.exchanges("a", { limit: 5 })!;
+
+    expect(s.exchanges("a", { limit: 2, before: all[3].seq })?.map((x) => x.prompt)).toEqual([
+      "prompt 2",
+      "prompt 3",
+    ]);
+  });
+
+  test("exchanges returns null for an unknown session", () => {
+    expect(new Store().exchanges("ghost", { limit: 10 })).toBeNull();
+  });
+
+  test("ended clears history", () => {
+    const s = new Store();
+    applyTurn(s, "a", 1);
+    s.apply(mk("a", ev.Ended, t(3), 3));
+    s.apply(mk("a", ev.Busy, t(4), 4));
+
+    expect(s.exchanges("a", { limit: 10 })).toEqual([]);
+  });
+
+  test("user actions never touch history", () => {
+    const s = new Store();
+    applyTurn(s, "a", 1);
+    const before = s.exchanges("a", { limit: 10 });
+
+    s.apply(ev.newSeen("a"));
+    s.apply(ev.newPin("a"));
+    s.apply(ev.newLabel("a", "named"));
+    s.apply(ev.newTag("a", "work"));
+
+    expect(s.exchanges("a", { limit: 10 })).toEqual(before);
+  });
+
+  test("/state is unchanged", () => {
+    const s = new Store();
+    applyTurn(s, "a", 1);
+    const state = JSON.stringify(s.list());
+
+    expect(state).not.toContain('"history"');
+    expect(state).not.toContain('"exchanges"');
+    expect(state).not.toContain('"pending"');
   });
 });

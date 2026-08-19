@@ -2,7 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { normalizeBindInput, normalizeUpstreamInput, shouldGenerateToken, generateToken } from "../src/config";
+import {
+  normalizeBindInput,
+  normalizeIntInput,
+  normalizeUpstreamInput,
+  shouldGenerateToken,
+  generateToken,
+} from "../src/config";
 
 // loadSettings and saveSettings resolve the file under $HOME (via os.homedir()),
 // which Bun fixes at process start - so the file-backed cases run in a child
@@ -60,19 +66,64 @@ describe("claudeRenameTitle", () => {
 describe("hub settings", () => {
   test("defaults to loopback and no token when the file is missing", () => {
     const out = inHome(freshHome(), `process.stdout.write(JSON.stringify(c.loadSettings().hub));`);
-    expect(JSON.parse(out)).toEqual({ bind: "127.0.0.1", token: "", upstream: "" });
+    expect(JSON.parse(out)).toEqual({
+      bind: "127.0.0.1",
+      token: "",
+      upstream: "",
+      historyLimit: 1000,
+      replyCap: 10240,
+    });
+  });
+
+  test("historyLimit and replyCap default to 1000 and 10240", () => {
+    const out = inHome(freshHome(), `process.stdout.write(JSON.stringify(c.loadSettings().hub));`);
+    const hub = JSON.parse(out);
+    expect(hub.historyLimit).toBe(1000);
+    expect(hub.replyCap).toBe(10240);
+  });
+
+  test("a file value overrides the default", () => {
+    const home = freshHome({ hub: { historyLimit: 250, replyCap: 4096 } });
+    const out = inHome(home, `process.stdout.write(JSON.stringify(c.loadSettings().hub));`);
+    const hub = JSON.parse(out);
+    expect(hub.historyLimit).toBe(250);
+    expect(hub.replyCap).toBe(4096);
+  });
+
+  test("a non-numeric historyLimit falls back to the default", () => {
+    const home = freshHome({ hub: { historyLimit: "many" } });
+    const out = inHome(home, `process.stdout.write(String(c.loadSettings().hub.historyLimit));`);
+    expect(out).toBe("1000");
+  });
+
+  test("an out-of-range replyCap falls back to the default", () => {
+    const home = freshHome({ hub: { replyCap: 1000001 } });
+    const out = inHome(home, `process.stdout.write(String(c.loadSettings().hub.replyCap));`);
+    expect(out).toBe("10240");
   });
 
   test("reads hub.bind and hub.token from settings.json", () => {
     const home = freshHome({ hub: { bind: "0.0.0.0", token: "abc123" } });
     const out = inHome(home, `process.stdout.write(JSON.stringify(c.loadSettings().hub));`);
-    expect(JSON.parse(out)).toEqual({ bind: "0.0.0.0", token: "abc123", upstream: "" });
+    expect(JSON.parse(out)).toEqual({
+      bind: "0.0.0.0",
+      token: "abc123",
+      upstream: "",
+      historyLimit: 1000,
+      replyCap: 10240,
+    });
   });
 
   test("a partial hub section still gets the missing key's default", () => {
     const home = freshHome({ hub: { bind: "0.0.0.0" } });
     const out = inHome(home, `process.stdout.write(JSON.stringify(c.loadSettings().hub));`);
-    expect(JSON.parse(out)).toEqual({ bind: "0.0.0.0", token: "", upstream: "" });
+    expect(JSON.parse(out)).toEqual({
+      bind: "0.0.0.0",
+      token: "",
+      upstream: "",
+      historyLimit: 1000,
+      replyCap: 10240,
+    });
   });
 });
 
@@ -84,7 +135,26 @@ describe("saveSettings", () => {
       `c.saveSettings({ hub: { token: "deadbeef" } });` +
         `const s = c.loadSettings(); process.stdout.write(JSON.stringify({ clear: s.claudeClearEnds, hub: s.hub }));`
     );
-    expect(JSON.parse(out)).toEqual({ clear: false, hub: { bind: "127.0.0.1", token: "deadbeef", upstream: "" } });
+    expect(JSON.parse(out)).toEqual({
+      clear: false,
+      hub: {
+        bind: "127.0.0.1",
+        token: "deadbeef",
+        upstream: "",
+        historyLimit: 1000,
+        replyCap: 10240,
+      },
+    });
+  });
+
+  test("preserves app-owned keys when writing historyLimit", () => {
+    const home = freshHome({ claudeClearEnds: false, unknownAppKey: { enabled: true } });
+    inHome(home, `c.saveSettings({ hub: { historyLimit: 250 } });`);
+    const path = join(home, ".config", "signalbox", "settings.json");
+    const saved = JSON.parse(readFileSync(path, "utf8"));
+    expect(saved.claudeClearEnds).toBe(false);
+    expect(saved.unknownAppKey).toEqual({ enabled: true });
+    expect(saved.hub.historyLimit).toBe(250);
   });
 
   test("creates the config dir and file when absent, pretty-printed", () => {
@@ -128,7 +198,18 @@ describe("saveSettings", () => {
       bind: "127.0.0.1",
       token: "existing-token",
       upstream: "https://x.example",
+      historyLimit: 1000,
+      replyCap: 10240,
     });
+  });
+});
+
+describe("normalizeIntInput", () => {
+  test("rejects a non-integer and accepts a bounded integer", () => {
+    expect(normalizeIntInput("1.5", 1, 100000)).toEqual({
+      error: "expected a whole number between 1 and 100000",
+    });
+    expect(normalizeIntInput("250", 1, 100000)).toEqual({ value: 250 });
   });
 });
 

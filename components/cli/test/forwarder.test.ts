@@ -25,6 +25,7 @@ function newForwarder(): { forwarder: Forwarder; dir: string } {
     stateDir: dir,
     version: "test",
     port,
+    historyLimit: 1000,
   }));
   return { forwarder, dir };
 }

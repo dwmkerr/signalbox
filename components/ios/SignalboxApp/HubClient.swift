@@ -381,6 +381,25 @@ final class HubClient: ObservableObject {
         lastSeen = Date()
     }
 
+    // History for one session's chat page. A failure here is local to that page,
+    // so it never touches `connection`: the board is still live.
+    func exchanges(for key: String, limit: Int, before: Int? = nil) async throws -> ExchangesDoc {
+        var query = [
+            URLQueryItem(name: "session", value: key),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        if let before { query.append(URLQueryItem(name: "before", value: String(before))) }
+        guard var request = request("exchanges", query: query) else { throw URLError(.badURL) }
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        let session = makeSession(timeout: 10)
+        defer { session.finishTasksAndInvalidate() }
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+        return try JSONDecoder().decode(ExchangesDoc.self, from: data)
+    }
+
     private func readStream() async throws {
         guard var request = request("stream", query: [URLQueryItem(name: "since", value: String(lastSeq))])
         else { throw URLError(.badURL) }
@@ -436,6 +455,7 @@ final class HubClient: ObservableObject {
             // visible rows, and the connection line's machine count is the
             // visible board's, not a fleet that includes silenced machines.
             if event.hidden != true, !seenHosts.contains(host) { seenHosts.append(host) }
+            let jumpable = event.origin?.tmux != nil || event.origin?.cursor != nil
             rows.append(Session(
                 key: event.sessionKey,
                 agent: event.agent,
@@ -449,9 +469,8 @@ final class HubClient: ObservableObject {
                 acked: event.acked ?? false,
                 hidden: event.hidden ?? false,
                 pinned: event.pinned ?? false,
-                // A url origin (a CI run) has no machine to jump on. Rows with
-                // no origin at all cannot be jumped to either.
-                jumpable: event.origin?.tmux != nil || event.origin?.cursor != nil
+                jumpable: jumpable,
+                infoOnly: !jumpable && event.origin?.url != nil
             ))
             if let seq = event.seq { snapshotSeq = max(snapshotSeq, seq) }
         }

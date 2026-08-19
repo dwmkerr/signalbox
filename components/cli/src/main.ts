@@ -21,7 +21,7 @@ import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle
 import { mapCodexHook, codexReply, codexSessionName, type CodexHook } from "./codex";
 import {
   loadSettings, saveSettings, settingsPath, normalizeBindInput, lanHint,
-  normalizeUpstreamInput, shouldGenerateToken, generateToken,
+  normalizeIntInput, normalizeUpstreamInput, shouldGenerateToken, generateToken,
 } from "./config";
 import { runSetup } from "./setup";
 import {
@@ -86,11 +86,14 @@ usage: signalbox <command> [flags]
                                                 any = every interface, incl. VPN)
                config set hub.token <value>     ("" or --generate mints one)
                config set hub.upstream <url|"">   forward to a remote hub (empty clears)
+               config set hub.historyLimit <1-100000>  exchanges kept per session
+               config set hub.replyCap <1-1000000>     reply character cap
   state        show the board [--json] [--all] [--tag T] [--exclude-tag T]
   jump <key>   jump to a session's origin (tmux pane or URL) and mark it seen
   pick         pick a waiting session interactively and jump to it
   fire         fire an event: --agent A --event E [--reason R] [--title T]
-               [--prompt P] [--reply R] [--session-key K] [--origin-url U]
+               [--prompt P] [--reply R] [--cropped] [--session-key K] [--origin-url U]
+               --cropped  the caller already cut the text at its own cap
                [--tag T] (repeatable)
                [--pid P [--pid-name N]] (pid = the agent process, for the
                hub's liveness sweep; name resolved from the pid when omitted)
@@ -200,6 +203,8 @@ async function buildEvent(opts: {
   title?: string;
   prompt?: string;
   reply?: string;
+  cropped?: boolean;
+  replyCap?: number;
   sessionKey?: string;
   originURL?: string;
   origin?: Origin | null;
@@ -236,12 +241,14 @@ async function buildEvent(opts: {
   };
   if (opts.reason) e.reason = opts.reason;
   if (opts.title) e.title = opts.title;
-  // Crop at the emitter, whatever the source: the full text must never
-  // leave this process.
+  // The single crop site: whatever the source, the cap and the `cropped`
+  // marker are decided once here, so no adapter can disagree about them.
+  const replyCap = opts.replyCap ?? loadSettings().hub.replyCap;
   const prompt = ev.cropPrompt(opts.prompt ?? "");
-  if (prompt) e.prompt = prompt;
-  const reply = ev.cropReply(opts.reply ?? "");
-  if (reply) e.reply = reply;
+  if (prompt.text) e.prompt = prompt.text;
+  const reply = ev.cropReply(opts.reply ?? "", replyCap);
+  if (reply.text) e.reply = reply.text;
+  if (prompt.cropped || reply.cropped || opts.cropped) e.cropped = true;
   if (origin) e.origin = origin;
   if (opts.proc) e.proc = opts.proc;
   if (process.env.SIGNALBOX_PROFILE === "redacted") await ev.redact(e);
@@ -268,7 +275,7 @@ async function fireEvent(e: Event): Promise<void> {
 }
 
 async function runFire(args: string[]): Promise<void> {
-  const { flags } = parseFlags(args);
+  const { flags } = parseFlags(args, ["cropped"]);
   const agent = flags["agent"] ?? "";
   const eventType = flags["event"] ?? "";
   if (!agent || !ev.validType(eventType)) {
@@ -294,6 +301,7 @@ async function runFire(args: string[]): Promise<void> {
     title: flags["title"],
     prompt: flags["prompt"] ?? flags["detail"],
     reply: flags["reply"],
+    cropped: flags["cropped"] === "true",
     sessionKey: flags["session-key"],
     originURL: flags["origin-url"],
     proc,
@@ -471,7 +479,8 @@ async function runClaudeHook(): Promise<void> {
     reason: mapped.reason,
     title,
     prompt: mapped.detail,
-    reply: claudeReply(payload),
+    reply: mapped.reply ?? claudeReply(payload),
+    replyCap: settings.hub.replyCap,
     sessionKey: key,
     cwd: payload.cwd,
     proc,
@@ -565,6 +574,7 @@ async function runCodexHook(): Promise<void> {
     title,
     prompt: mapped.detail,
     reply: codexReply(payload),
+    replyCap: settings.hub.replyCap,
     sessionKey: key,
     cwd: payload.cwd,
     proc,
@@ -632,7 +642,14 @@ function runHub(args: string[]): void {
       );
     }
     const fwdStateDir = stateDir();
-    const fwd = new Forwarder({ upstream, token, stateDir: fwdStateDir, version, port });
+    const fwd = new Forwarder({
+      upstream,
+      token,
+      stateDir: fwdStateDir,
+      version,
+      port,
+      historyLimit: settings.hub.historyLimit,
+    });
     listen(fwd, port, "127.0.0.1");
     fwd.start();
     // PID 1 has no default SIGTERM disposition, so stop the uplink and spool
@@ -715,7 +732,8 @@ function runHub(args: string[]): void {
     tls?.fingerprint ?? "",
     tls ? tlsPort : 0,
     remote,
-    port
+    port,
+    settings.hub.historyLimit
   );
   const expire = expireAgeMs();
   hub.startExpiry(10 * 60 * 1000, expire);
@@ -760,9 +778,8 @@ function runHub(args: string[]): void {
 
 // ---- config ----------------------------------------------------------------
 
-// runConfig reads and writes the persistent hub network settings that runHub
-// (and the app-spawned hub) honor. A deliberately tiny three-key surface, not
-// a general config editor: the app owns everything else in settings.json.
+// runConfig reads and writes the supported hub settings. The app owns all
+// other values in settings.json.
 function runConfig(args: string[]): void {
   const { flags, rest } = parseFlags(args, ["generate"]);
   const sub = rest[0] ?? "get";
@@ -789,6 +806,8 @@ function runConfig(args: string[]): void {
     console.log(`hub.bind:  ${bind} (${reach})`);
     console.log(`hub.token: ${s.hub.token ? "set" : "none"}`);
     console.log(`hub.upstream: ${s.hub.upstream || "none (this hub owns its state)"}`);
+    console.log(`hub.historyLimit: ${s.hub.historyLimit} (exchanges kept per session)`);
+    console.log(`hub.replyCap: ${s.hub.replyCap} (characters, before the emitter crops)`);
     return;
   }
   if (sub === "set") {
@@ -818,9 +837,23 @@ function runConfig(args: string[]): void {
       console.log(norm.value ? `hub.upstream set to ${norm.value}` : "hub.upstream cleared");
       return;
     }
-    fatal(`unknown config key ${JSON.stringify(key)} (settable: hub.bind, hub.token, hub.upstream)`);
+    if (key === "hub.historyLimit") {
+      const norm = normalizeIntInput(value, 1, 100000);
+      if (norm.error) fatal(norm.error);
+      saveSettings({ hub: { historyLimit: norm.value! } });
+      console.log(`hub.historyLimit set to ${norm.value}`);
+      return;
+    }
+    if (key === "hub.replyCap") {
+      const norm = normalizeIntInput(value, 1, 1000000);
+      if (norm.error) fatal(norm.error);
+      saveSettings({ hub: { replyCap: norm.value! } });
+      console.log(`hub.replyCap set to ${norm.value}`);
+      return;
+    }
+    fatal(`unknown config key ${JSON.stringify(key)} (settable: hub.bind, hub.token, hub.upstream, hub.historyLimit, hub.replyCap)`);
   }
-  fatal(`unknown config subcommand ${JSON.stringify(sub)} (try: config get, config set hub.bind <value>, config set hub.token <value|--generate>, config set hub.upstream <url|"">)`);
+  fatal(`unknown config subcommand ${JSON.stringify(sub)} (try: config get or config set <key> <value>; settable: hub.bind, hub.token, hub.upstream, hub.historyLimit, hub.replyCap)`);
 }
 
 // ---- state / pick / tmux-status / drain -------------------------------------------

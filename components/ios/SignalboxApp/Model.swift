@@ -106,9 +106,47 @@ struct StateDoc: Decodable {
     let sessions: [SessionEvent]
 }
 
+// One turn from GET /exchanges?session=K (specs/events.md).
+struct Exchange: Decodable, Identifiable, Hashable {
+    let prompt: String?
+    let reply: String?
+    let ts: String
+    let cropped: Bool
+    let seq: Int
+
+    var id: Int { seq }
+
+    // The hub omits cropped when false, so defaults keep ordinary exchanges decodable.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        prompt = try? container.decodeIfPresent(String.self, forKey: .prompt)
+        reply = try? container.decodeIfPresent(String.self, forKey: .reply)
+        ts = (try? container.decodeIfPresent(String.self, forKey: .ts)) ?? ""
+        cropped = (try? container.decodeIfPresent(Bool.self, forKey: .cropped)) ?? false
+        seq = (try? container.decodeIfPresent(Int.self, forKey: .seq)) ?? 0
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case prompt, reply, ts, cropped, seq
+    }
+}
+
+struct ExchangesDoc: Decodable {
+    let sessionKey: String
+    let exchanges: [Exchange]
+    let nextBefore: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionKey = "session_key"
+        case exchanges
+        case nextBefore = "next_before"
+    }
+}
+
 // A session row: the hub's own view, adopted rather than re-derived. The hub
 // owns order, acked and hidden - this app renders, it does not reduce.
-struct Session: Identifiable, Equatable {
+// Hashable so a row can be a navigation destination.
+struct Session: Identifiable, Hashable {
     let key: String
     let agent: String
     let event: String
@@ -126,6 +164,9 @@ struct Session: Identifiable, Equatable {
     // Whether this row can be jumped to at all: a github/CI row has no machine
     // to jump on, so it is information rather than an action.
     let jumpable: Bool
+    // URL-only origins describe remote work rather than a window. Originless
+    // rows stay actionable so the unsupported-terminal notice is discoverable.
+    let infoOnly: Bool
 
     var id: String { key }
 
