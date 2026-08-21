@@ -323,8 +323,9 @@
   text is selectable for copying, and a rendered link opens in the browser when clicked. A cropped
   exchange ends in <code>…</code>. The newest exchange alone keeps the live working line and bullet
   temperature: amber for asks, blue for finished work, red for failure and dim for read.</p>
-  <p>The action row above the footer is shown on every machine row. For a tmux or cursor origin it says
-  exactly where <kbd>↩</kbd> takes you, for example "Jump to iTerm (tmux dwmkerr:1) on localhost". An
+  <p>The action row above the footer is shown on every machine row. For a tmux, cursor, or native iTerm
+  origin it says exactly where <kbd>↩</kbd> takes you, for example "Jump to iTerm (tmux dwmkerr:1) on
+  localhost" or "Jump to iTerm (native session) on localhost". An
   originless machine row initially says "Jump to session". Pressing <kbd>↩</kbd> replaces that text
   with "Jump not supported for this session yet (plain terminal). Press F to send feedback." While
   that notice is shown, <kbd>F</kbd> opens
@@ -335,7 +336,7 @@
   <p>Typing is searching, so list commands use the control key:</p>
   <table>
     <tr><th>Keys</th><th>Action</th></tr>
-    <tr><td><kbd>↩</kbd></td><td>Jump to the selected machine session; a successful jump marks it seen. On an originless machine row, show "Jump not supported for this session yet (plain terminal). Press F to send feedback." URL-only rows do nothing.</td></tr>
+    <tr><td><kbd>↩</kbd></td><td>Jump to the selected tmux, cursor, or native iTerm session; a successful jump marks it seen. On an originless machine row, show "Jump not supported for this session yet (plain terminal). Press F to send feedback." URL-only rows do nothing.</td></tr>
     <tr><td><kbd>F</kbd></td><td>While the unsupported-jump notice is shown, open <a href="https://github.com/dwmkerr/signalbox/issues/67">issue 67</a></td></tr>
     <tr><td><kbd>⌃J</kbd> <kbd>⌃K</kbd> or arrows</td><td>Down / up</td></tr>
     <tr><td><kbd>⌃1</kbd> <kbd>⌃2</kbd> …</td><td>Jump directly to a session</td></tr>

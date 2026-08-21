@@ -16,11 +16,11 @@ An adapter can only surface what its agent's hooks emit, so the board shows diff
 
 | Agent | Live status | Prompt + reply | Permission ask | Question ask | Errors | Jump-back |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
-| Claude Code | yes | yes | command shown | yes, with options | yes | tmux / editor |
-| Codex | yes | yes | command shown | - | - `*` | tmux / Cursor |
+| Claude Code | yes | yes | command shown | yes, with options | yes | tmux / editor / iTerm |
+| Codex | yes | yes | command shown | - | - `*` | tmux / Cursor / iTerm |
 | Cursor | yes | yes | yes (shell / MCP) | - | yes | Cursor window |
-| OpenCode | yes | yes | yes | - | yes | tmux |
-| pi | yes | yes | - | - | - | tmux |
+| OpenCode | yes | yes | yes | - | yes | tmux / iTerm |
+| pi | yes | yes | - | - | - | tmux / iTerm |
 | GitHub Actions | as fired | as fired | - | - | yes (fire) | opens on GitHub |
 
 - **Question ask** is Claude Code's `AskUserQuestion` (the agent asks you to pick an option); no other agent has an equivalent tool, so the column is Claude-only by nature.

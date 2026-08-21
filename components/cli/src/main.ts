@@ -18,6 +18,7 @@ import { runPair, lanIPv4 } from "./pair";
 import { captureProc, captureAgentProc } from "./proc";
 import { mapClaudeHook, claudeReply, sessionName, type ClaudeHook } from "./claude";
 import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle, editorTerminalOrigin, hostPrefixedAgent, type CursorHook } from "./cursor";
+import { iTermOrigin } from "./iterm";
 import { mapCodexHook, codexReply, codexSessionName, type CodexHook } from "./codex";
 import {
   loadSettings, saveSettings, settingsPath, normalizeBindInput, lanHint,
@@ -89,7 +90,7 @@ usage: signalbox <command> [flags]
                config set hub.historyLimit <1-100000>  exchanges kept per session
                config set hub.replyCap <1-1000000>     reply character cap
   state        show the board [--json] [--all] [--tag T] [--exclude-tag T]
-  jump <key>   jump to a session's origin (tmux pane or URL) and mark it seen
+  jump <key>   jump to a session's origin (tmux, iTerm, editor, or URL) and mark it seen
   pick         pick a waiting session interactively and jump to it
   fire         fire an event: --agent A --event E [--reason R] [--title T]
                [--prompt P] [--reply R] [--cropped] [--session-key K] [--origin-url U]
@@ -215,11 +216,11 @@ async function buildEvent(opts: {
   let origin: Origin | null = null;
   // An explicit origin (e.g. a Cursor session, which runs no tmux pane) wins;
   // otherwise a URL origin, otherwise the calling tmux pane, otherwise an
-  // editor's integrated terminal (VS Code / Cursor). tmux beats the editor
-  // check: a pane is a more precise jump target than an app window.
+  // editor's integrated terminal (VS Code / Cursor), otherwise a native iTerm
+  // session. tmux beats both: a pane is the more precise, portable target.
   if (opts.origin) origin = opts.origin;
   else if (opts.originURL) origin = { kind: "url", url: opts.originURL };
-  else origin = tmux.currentOrigin() ?? editorTerminalOrigin(process.env);
+  else origin = tmux.currentOrigin() ?? editorTerminalOrigin(process.env) ?? iTermOrigin(process.env);
   let sessionKey = opts.sessionKey ?? "";
   if (!sessionKey) {
     // Key on the agent family, never the host-prefixed display name: a

@@ -57,15 +57,22 @@ export interface CursorOrigin {
   bundle?: string;
 }
 
+// A native iTerm session. ITERM_SESSION_ID supplies the GUID while the hook is
+// running; jump passes it as an AppleScript argument and never interpolates it.
+export interface ITermOrigin {
+  session: string;
+}
+
 // A jump target. `kind` discriminates the union so new origin kinds (ssh,
 // editor windows, a remote host) can be added without guessing from which
 // field is set. Optional on read for old events, where it is inferred.
-export type OriginKind = "tmux" | "url" | "cursor";
+export type OriginKind = "tmux" | "url" | "cursor" | "iterm";
 export interface Origin {
   kind?: OriginKind;
   tmux?: TmuxOrigin;
   url?: string;
   cursor?: CursorOrigin;
+  iterm?: ITermOrigin;
 }
 
 // Process behind the session, captured at fire time for the liveness sweep.
@@ -341,6 +348,7 @@ export function normalizeInbound(e: Event): void {
     if (e.origin.tmux) e.origin.kind = "tmux";
     else if (e.origin.url) e.origin.kind = "url";
     else if (e.origin.cursor) e.origin.kind = "cursor";
+    else if (e.origin.iterm) e.origin.kind = "iterm";
   }
 }
 
@@ -353,8 +361,8 @@ export function validate(e: Event): string | null {
   if (!validType(e.event)) return `unknown event type ${JSON.stringify(e.event)}`;
   if (!e.session_key) return "session_key is required";
   if (e.origin) {
-    const set = [e.origin.tmux, e.origin.url, e.origin.cursor].filter(Boolean).length;
-    if (set > 1) return "origin is a union: set exactly one of tmux, url, cursor";
+    const set = [e.origin.tmux, e.origin.url, e.origin.cursor, e.origin.iterm].filter(Boolean).length;
+    if (set > 1) return "origin is a union: set exactly one of tmux, url, cursor, iterm";
     if (set === 0) return "origin present but empty";
   }
   return null;

@@ -97,9 +97,9 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   "cropped": true,
 
   // Where to jump to. `kind` names the origin type so more can be added
-  // later (ssh); today tmux, url, or cursor (an editor window - the kind
-  // covers every VS Code-family editor: Cursor, VS Code, other Electron
-  // forks). Exactly one of the payload fields may be set; old events
+  // later (ssh); today tmux, url, cursor (an editor window - the kind covers
+  // every VS Code-family editor), or iterm (a native iTerm session). Exactly
+  // one of the payload fields may be set; old events
   // without `kind` get it inferred from whichever field that is. Captured
   // when the event fires, so jumping never depends on the local setup.
   "origin": {
@@ -113,6 +113,8 @@ Every field explained in place. Optional fields are omitted from the JSON when e
     // or: "cursor": { "bundle": "com.todesktop.230313mzl4w4u92" } - just the
     // editor's bundle id; jump finds the window by app plus the event's cwd,
     // so redact has nothing extra to strip.
+    // or: "iterm": { "session": "3F5B31CC-..." } - the stable session GUID
+    // from ITERM_SESSION_ID; jump selects that exact tab or split session.
   },
 
   // The agent's process, so the hub can end sessions whose process died
