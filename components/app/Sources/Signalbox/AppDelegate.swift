@@ -242,6 +242,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return doc.exchanges
     }
 
+    // Search answers only from the local machine's own index, so unlike
+    // /exchanges this call means something different depending on which hub is
+    // behind it: a forwarder refuses it outright. The three failure states are
+    // carried back separately rather than collapsed into an empty list.
+    func fetchSearch(query: String, limit: Int) async -> SearchAvailability {
+        var components = URLComponents(string: "\(hubURL)/search")
+        components?.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        guard let url = components?.url else { return .unreachable }
+        var request = HubAuth.request(url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        guard let (data, response) = try? await urlSession.data(for: request),
+              let http = response as? HTTPURLResponse
+        else { return .unreachable }
+        switch http.statusCode {
+        case 200:
+            guard let doc = try? JSONDecoder().decode(SearchDoc.self, from: data) else {
+                return .unreachable
+            }
+            return .available(doc.results)
+        case 409: return .disabled
+        case 501: return .notSupported
+        default: return .unreachable
+        }
+    }
+
+    // The hit count shown on the promotion row. It runs while the user types,
+    // so it asks for a single result and reads only the count.
+    func fetchSearchStatus() async -> SearchIndexStatus? {
+        guard let url = URL(string: "\(hubURL)/search/status") else { return nil }
+        var request = HubAuth.request(url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        guard let (data, response) = try? await urlSession.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let doc = try? JSONDecoder().decode(SearchStatusDoc.self, from: data)
+        else { return nil }
+        return doc.status
+    }
+
     private func consumeStream() async throws {
         guard var components = URLComponents(
             url: hubURL.appendingPathComponent("stream"),
@@ -580,6 +621,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         palette?.exchangeProvider = { [weak self] key, limit in
             await self?.fetchExchanges(sessionKey: key, limit: limit) ?? []
+        }
+        palette?.searchProvider = { [weak self] query, limit in
+            await self?.fetchSearch(query: query, limit: limit) ?? .unreachable
         }
         KeyboardShortcuts.onKeyDown(for: .openJumplist) { [weak self] in self?.palette?.toggle() }
     }

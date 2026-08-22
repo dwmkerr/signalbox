@@ -15,9 +15,9 @@ import { buildStamp } from "./build";
 import { openIndex, type SearchIndex } from "./searchindex";
 
 const heartbeatMs = 15_000;
-const searchSweepIntervalMs = 250;
-const searchSweepBudgetMs = 10;
-const searchResultLimit = 50;
+export const searchSweepIntervalMs = 250;
+export const searchSweepBudgetMs = 10;
+export const searchResultLimit = 50;
 // Bounds a single POST body; events are tiny, so anything bigger is junk.
 const maxBodyBytes = 1 << 20;
 
@@ -660,7 +660,7 @@ function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
 }
 
-function noStoreJSON(body: unknown, status: number = 200): Response {
+export function noStoreJSON(body: unknown, status: number = 200): Response {
   return Response.json(body, {
     status,
     headers: { "Cache-Control": "no-store" },

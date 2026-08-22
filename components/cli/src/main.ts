@@ -662,9 +662,11 @@ function runHub(args: string[]): void {
       version,
       port,
       historyLimit: settings.hub.historyLimit,
+      searchEnabled: settings.searchEnabled,
     });
     listen(fwd, port, "127.0.0.1");
     fwd.start();
+    fwd.startSearch();
     // PID 1 has no default SIGTERM disposition, so stop the uplink and spool
     // work before the platform stops the container.
     process.on("SIGTERM", () => { fwd.close(); process.exit(0); });

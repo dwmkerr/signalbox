@@ -8,10 +8,14 @@ import type { Command } from "./command";
 import { logTo } from "./client";
 import * as ev from "./event";
 import type { Event } from "./event";
-import { parseExchangeQuery, exchangesBody, isLoopbackHost } from "./hub";
+import {
+  parseExchangeQuery, exchangesBody, isLoopbackHost, noStoreJSON,
+  searchResultLimit, searchSweepBudgetMs, searchSweepIntervalMs,
+} from "./hub";
 import type { RequestHandler } from "./hub";
 import { PermanentError, Spool } from "./spool";
 import { Store } from "./state";
+import { openIndex, type SearchIndex } from "./searchindex";
 import { buildStamp } from "./build";
 import { hubLog } from "./log";
 
@@ -60,6 +64,8 @@ export interface ForwarderOptions {
   version: string;
   port: number;
   historyLimit: number;
+  /** Index local transcripts and serve /search from them. Off by default. */
+  searchEnabled?: boolean;
 }
 
 export class Forwarder implements RequestHandler {
@@ -74,15 +80,21 @@ export class Forwarder implements RequestHandler {
   private closed = false;
   private started = false;
   private uplinkController: AbortController | null = null;
+  // The local transcript index. A forwarder owns no session state, but the
+  // transcripts live on ITS machine, so it is the only process that can answer
+  // a contents search for them without the text crossing to another machine.
+  private searchIndex: SearchIndex | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectResolve: (() => void) | null = null;
   private drainTimer: ReturnType<typeof setInterval> | null = null;
+  private searchTimer: ReturnType<typeof setInterval> | null = null;
   private streamCleanups = new Set<() => void>();
   private failureLogged = false;
 
   constructor(private opts: ForwarderOptions) {
     this.store = new Store(opts.historyLimit);
+    if (opts.searchEnabled) this.searchIndex = openIndex(opts.stateDir);
     this.spool = new Spool(
       opts.stateDir,
       "forward-spool.jsonl",
@@ -127,17 +139,11 @@ export class Forwarder implements RequestHandler {
     if (req.method === "GET" && url.pathname === "/exchanges") {
       return this.handleExchanges(url);
     }
-    if (
-      req.method === "GET"
-      && (url.pathname === "/search" || url.pathname === "/search/status")
-    ) {
-      // A forwarder cannot answer from an upstream index without making
-      // transcript-derived text cross machines, which violates the local-only
-      // search boundary.
-      return Response.json(
-        { error: "search_not_supported", mode: "forwarder" },
-        { status: 501, headers: { "Cache-Control": "no-store" } },
-      );
+    if (req.method === "GET" && url.pathname === "/search/status") {
+      return this.handleSearchStatus();
+    }
+    if (req.method === "GET" && url.pathname === "/search") {
+      return this.handleSearch(url);
     }
     if (req.method === "GET" && url.pathname === "/stream") {
       return this.handleStream(req, url, server);
@@ -237,6 +243,38 @@ export class Forwarder implements RequestHandler {
     }
     this.kickDrain();
     return Response.json({ spooled: true }, { status: 202 });
+  }
+
+  private handleSearch(url: URL): Response {
+    if (!this.searchIndex) {
+      return noStoreJSON({ error: "search_disabled", enabled: false }, 409);
+    }
+    const query = url.searchParams.get("q");
+    if (!query) return noStoreJSON({ error: "q is required" }, 400);
+    return noStoreJSON({
+      enabled: true,
+      query,
+      results: this.searchIndex.search(query, searchResultLimit, this.store.list()),
+    });
+  }
+
+  private handleSearchStatus(): Response {
+    if (!this.searchIndex) {
+      return noStoreJSON({ enabled: false, status: "disabled" });
+    }
+    return noStoreJSON({ enabled: true, status: this.searchIndex.status() });
+  }
+
+  // startSearch runs the same bounded sweep the hub runs. Discovery walks this
+  // machine's transcript directories, so the index it builds is local by
+  // construction.
+  startSearch(): void {
+    const index = this.searchIndex;
+    if (!index) return;
+    this.searchTimer = setInterval(
+      () => index.sweep({ budgetMs: searchSweepBudgetMs }),
+      searchSweepIntervalMs,
+    );
   }
 
   private async handleCommand(req: Request): Promise<Response> {

@@ -19,9 +19,17 @@ the corpus. The two stores are complementary, not alternatives.
 
 ## Local-only boundary
 
-The index never leaves the machine that owns the transcripts. A forwarder does
-not serve `/search`. A hub answers `/search` only from its own local index and
-never on behalf of a forwarding machine.
+Search is answered only from the index of the machine the hub process is
+running on, and that index is built only from that machine's own transcripts.
+No process ever answers a contents search on behalf of another machine.
+
+This holds for a forwarder too, and a forwarder therefore DOES serve `/search`.
+A forwarder is a local process on the machine that owns the transcripts,
+answering a client on that same machine, so nothing crosses a machine boundary.
+Refusing it would break search for every remote-mode user while protecting
+nothing: the transcripts, the index and the reader are all on one machine. What
+a forwarder must never do is proxy a search upstream or answer one from the
+upstream hub, and it does neither.
 
 This is a deliberate scope and privacy decision for this version, not an
 inherited invariant. Signalbox does send conversation content to a configured
@@ -156,10 +164,11 @@ with `Cache-Control: no-store`. When enabled, its body is `{"enabled":true,
 "status":STATUS}`, where `STATUS` is the index status described below. When
 off, its body is `{"enabled":false,"status":"disabled"}`.
 
-A forwarder returns `501` for both routes with
-`{"error":"search_not_supported","mode":"forwarder"}` and
-`Cache-Control: no-store`. It never proxies either route because doing so would
-make transcript-derived text cross machines.
+A forwarder serves both routes exactly as a hub does, from the index of its own
+machine. What it never does is proxy either route upstream or answer from the
+upstream hub: the answer always comes from the local index or not at all. A
+forwarder with search off answers `409` like any other hub, not a
+forwarder-specific status, because the reason is the same one.
 
 ## Turn extraction
 

@@ -17,7 +17,9 @@ const fakeServer = serverFrom("127.0.0.1");
 const upstream = "http://127.0.0.1:1";
 const port = 8377;
 
-function newForwarder(): { forwarder: Forwarder; dir: string } {
+function newForwarder(
+  extra: { searchEnabled?: boolean } = {}
+): { forwarder: Forwarder; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "sbforwarder-"));
   const forwarder = track(new Forwarder({
     upstream,
@@ -26,6 +28,7 @@ function newForwarder(): { forwarder: Forwarder; dir: string } {
     version: "test",
     port,
     historyLimit: 1000,
+    ...extra,
   }));
   return { forwarder, dir };
 }
@@ -108,17 +111,34 @@ describe("forwarder routes", () => {
     expect(res.status).toBe(403);
   });
 
-  test("refuses local transcript search explicitly", async () => {
+  // A forwarder answers search from the index of the machine it runs on, the
+  // same machine that owns the transcripts, so nothing crosses a machine
+  // boundary. Refusing outright would break search for every remote-mode user
+  // while protecting nothing.
+  test("search is disabled by default, exactly as on a hub", async () => {
     const { forwarder } = newForwarder();
     for (const path of ["/search?q=needle", "/search/status"]) {
       const res = (await forwarder.handle(request(path), fakeServer))!;
-      expect(res.status).toBe(501);
       expect(res.headers.get("Cache-Control")).toBe("no-store");
-      expect(await res.json()).toEqual({
-        error: "search_not_supported",
-        mode: "forwarder",
-      });
+      const body = await res.json() as { enabled: boolean };
+      expect(body.enabled).toBe(false);
     }
+  });
+
+  test("search serves the forwarder's own local index when enabled", async () => {
+    const { forwarder } = newForwarder({ searchEnabled: true });
+    const res = (await forwarder.handle(request("/search?q=needle"), fakeServer))!;
+    expect(res.status).toBe(200);
+    const body = await res.json() as { enabled: boolean; query: string; results: unknown[] };
+    expect(body.enabled).toBe(true);
+    expect(body.query).toBe("needle");
+    expect(Array.isArray(body.results)).toBe(true);
+  });
+
+  test("search requires a query", async () => {
+    const { forwarder } = newForwarder({ searchEnabled: true });
+    const res = (await forwarder.handle(request("/search"), fakeServer))!;
+    expect(res.status).toBe(400);
   });
 
   test("POST /events appends one event and returns immediately", async () => {

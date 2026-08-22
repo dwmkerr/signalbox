@@ -50,6 +50,11 @@ struct PaletteRow {
     // toggles the section open on click.
     var isDivider = false
     var hiddenCount = 0
+    // The trailing row that promotes the typed query to a contents search. Not
+    // a session; carries the hit count so the cost of promoting is visible
+    // before committing to it.
+    var isFallback = false
+    var fallbackHits: Int?
 }
 
 // Mark tints per the amber scheme: amber = needs your input (act), blue =
@@ -790,6 +795,10 @@ final class PaletteController: NSObject {
     // Desired pinned state (true = pin, false = unpin) for the given session.
     private let onPin: @MainActor (String, Bool) -> Void
     private let onSettings: @MainActor (SettingsTab?) -> Void
+    // Runs a contents search against the hub. Returns why there are no results
+    // as well as the results themselves, so the panel can tell "off" and "this
+    // hub does not serve search" apart from "nothing matched".
+    var searchProvider: (@MainActor (String, Int) async -> SearchAvailability)?
 
     // All rows from the provider, and the slice that survives the search
     // filter - every selection/cycle operation works on the filtered view.
@@ -801,6 +810,26 @@ final class PaletteController: NSObject {
     // Whether the Hidden section is expanded. A search reveals it regardless.
     private var hiddenExpanded = false
     private var query = ""
+    // Contents search. The panel has two modes: filtering the board (the
+    // default), and showing what the typed query found inside session
+    // transcripts. Promotion is deliberate - the fallback row - so the quiet
+    // board filter never turns into a transcript query by accident.
+    private var contentMode = false
+    private var contentResults: [SearchResult] = []
+    private var contentAvailability: SearchAvailability = .available([])
+    // Hit count for the fallback row; nil until a count comes back, so the row
+    // can say nothing rather than claim zero while the answer is in flight.
+    private var fallbackHits: Int?
+    // Typing must not issue one request per keystroke: each count is an HTTP
+    // round trip, cheap but not free.
+    private var hitCountWork: DispatchWorkItem?
+    // Whether the hub behind this panel serves search at all. A forwarder and a
+    // disabled setting both mean no promotion row, for different reasons.
+    private var searchServed = false
+    // The ended result the user pressed return on, which is shown its resume
+    // instructions rather than being resumed for them.
+    private var resumeHintUuid: String?
+    private var keysLabel: NSTextField!
     private var panel: PalettePanel!
     private var tableView: NSTableView!
     private var emptyLabel: NSTextField!
@@ -1046,19 +1075,202 @@ final class PaletteController: NSObject {
             let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
             if !hidden.isEmpty && (hiddenExpanded || searching) { display.append(contentsOf: hidden) }
         }
+        // The promotion row trails everything, including the Hidden section: it
+        // is an offer to look somewhere else, which only makes sense once the
+        // board has had its say.
+        if searchServed, !query.trimmingCharacters(in: .whitespaces).isEmpty {
+            var fallback = PaletteRow(
+                sessionKey: "", mark: .working, statusWord: "", isAsking: false,
+                isUnread: false, isRead: false, agent: "", name: "", ageStart: Date(),
+                detail: nil, reply: nil, cropped: false, location: "", jumpable: false,
+                infoOnly: true, needsCheck: false,
+                engagedDate: Date(), tags: [], pinned: false
+            )
+            fallback.isFallback = true
+            fallback.fallbackHits = fallbackHits
+            display.append(fallback)
+        }
         return display
+    }
+
+    // Index of the promotion row within the displayed rows, when it is shown.
+    private var fallbackIndex: Int? {
+        rows.firstIndex { $0.isFallback }
     }
 
     // Query changes reset the cursor to the topmost unread within the
     // filtered rows - searching is re-asking "what needs me in here".
     private func applyQuery(_ newQuery: String) {
         query = newQuery
+        // Editing the query leaves contents mode: the results on screen answer
+        // the old query, and silently re-running the new one against
+        // transcripts would be a query the user never asked for.
+        if contentMode { exitContentMode(reload: false) }
         rows = composeRows()
         tableView.reloadData()
         emptyLabel.stringValue = allRows.isEmpty ? "No sessions" : "No matches"
         emptyLabel.isHidden = !rows.isEmpty
         if visibleCount > 0 { select(defaultSelectionIndex()) }
         renderPreview()
+        scheduleHitCount()
+    }
+
+    // MARK: - Contents search
+
+    // The hit count is a live number on a row the user has not chosen yet, so
+    // it trails typing rather than racing it.
+    private func scheduleHitCount() {
+        hitCountWork?.cancel()
+        fallbackHits = nil
+        let term = query.trimmingCharacters(in: .whitespaces)
+        guard !term.isEmpty, !term.hasPrefix("#") else {
+            searchServed = false
+            return
+        }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in await self.refreshHitCount(term) }
+        }
+        hitCountWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
+    }
+
+    private func refreshHitCount(_ term: String) async {
+        guard let searchProvider else { return }
+        let outcome = await searchProvider(term, Self.contentResultLimit)
+        // The field may have moved on while the request was in flight.
+        guard term == query.trimmingCharacters(in: .whitespaces) else { return }
+        switch outcome {
+        case .available(let results):
+            searchServed = true
+            fallbackHits = results.reduce(0) { $0 + $1.hitCount }
+            contentResults = results
+            contentAvailability = outcome
+        case .disabled, .notSupported, .unreachable:
+            // No promotion row at all: there is nothing to promote to, and an
+            // affordance that always fails is worse than no affordance.
+            searchServed = false
+            fallbackHits = nil
+            contentAvailability = outcome
+        }
+        if !contentMode {
+            rows = composeRows()
+            tableView.reloadData()
+        }
+    }
+
+    // The hub caps a search response at 50 sessions; asking for more would be
+    // discarded there.
+    private static let contentResultLimit = 50
+
+    // The preview for a contents hit: the matching text, then what acting on it
+    // will do. An ended session cannot be jumped to, so its preview carries the
+    // command that reopens it rather than an action the panel cannot perform.
+    private func renderContentPreview(_ index: Int) {
+        guard contentResults.indices.contains(index) else {
+            termLabel.attributedStringValue = NSAttributedString()
+            actionRow.isHidden = true
+            previewSessionKey = nil
+            previewContentHeight = 0
+            return
+        }
+        let hit = contentResults[index]
+        let body = NSMutableAttributedString()
+        if let cwd = hit.cwd {
+            body.append(NSAttributedString(string: cwd + "\n\n", attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: s(11), weight: .regular),
+                .foregroundColor: Theme.textDim,
+            ]))
+        }
+        for run in snippetRuns(hit.snippet) {
+            body.append(NSAttributedString(string: run.text, attributes: [
+                .font: NSFont.monospacedSystemFont(
+                    ofSize: s(12), weight: run.isMatch ? .bold : .regular),
+                .foregroundColor: run.isMatch ? Theme.accent : Theme.titleUnread,
+            ]))
+        }
+        if resumeHintUuid == hit.sessionUuid, !hit.isLive {
+            let command = resumeCommand(for: hit)
+            let hint = command.isEmpty
+                ? "\n\nThis session has ended. \(hit.agent) has no resume command signalbox knows about."
+                : "\n\nThis session has ended. Reopen it with:\n\(command)"
+            body.append(NSAttributedString(string: hint, attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: s(12), weight: .regular),
+                .foregroundColor: Theme.attention,
+            ]))
+        }
+        termLabel.attributedStringValue = body
+        previewSessionKey = nil
+        previewContentHeight = 0
+        actionRow.isHidden = false
+        actionLabel.stringValue = hit.isLive
+            ? "↩ Jump to this session"
+            : "↩ Show how to reopen this session"
+    }
+
+    private static let boardKeys =
+        "type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump / F feedback  ·  esc clear/close"
+    private static let contentKeys =
+        "searching session contents  ·  ⌃j/⌃k move  ·  ↩ jump to a live session  ·  esc back to the board"
+
+    private func updateFooterHint() {
+        keysLabel?.stringValue = contentMode ? Self.contentKeys : Self.boardKeys
+    }
+
+    // An ended session has no window to raise. Rather than resume the agent on
+    // the user's behalf, which would start work they did not ask for, the panel
+    // shows the command that picks the conversation back up.
+    private func showResumeHint(for hit: SearchResult) {
+        resumeHintUuid = hit.sessionUuid
+        renderPreview()
+    }
+
+    // The command that reopens an ended session, per agent. Empty when the
+    // agent has no documented resume, in which case the preview says so instead
+    // of printing something that will not work.
+    private func resumeCommand(for hit: SearchResult) -> String {
+        switch hit.agent {
+        case "claude": return "claude --resume \(hit.sessionUuid)"
+        case "codex": return "codex resume \(hit.sessionUuid)"
+        default: return ""
+        }
+    }
+
+    private func enterContentMode() {
+        guard searchServed else { return }
+        contentMode = true
+        tableView.reloadData()
+        emptyLabel.stringValue = "No sessions contain that"
+        emptyLabel.isHidden = !contentResults.isEmpty
+        if !contentResults.isEmpty { select(0) }
+        updateFooterHint()
+        renderPreview()
+    }
+
+    private func exitContentMode(reload: Bool = true) {
+        contentMode = false
+        updateFooterHint()
+        guard reload else { return }
+        rows = composeRows()
+        tableView.reloadData()
+        emptyLabel.stringValue = allRows.isEmpty ? "No sessions" : "No matches"
+        emptyLabel.isHidden = !rows.isEmpty
+        if visibleCount > 0 { select(defaultSelectionIndex()) }
+        renderPreview()
+    }
+
+    // Acting on a contents hit: a live session jumps, exactly as its board row
+    // would. An ended one has no window to raise, so the panel says how to pick
+    // the conversation back up instead of pretending it can.
+    private func activateContentResult(_ index: Int) {
+        guard contentResults.indices.contains(index) else { return }
+        let hit = contentResults[index]
+        if hit.isLive, let key = hit.sessionKey {
+            onJump(key)
+            hide()
+            return
+        }
+        showResumeHint(for: hit)
     }
 
     private func clearQuery() {
@@ -1138,14 +1350,28 @@ final class PaletteController: NSObject {
             return nil
         }
         switch event.keyCode {
-        case 53: // esc clears the search first; a second esc closes
+        case 53: // esc steps back out: contents mode, then the query, then close
             if statusPopoverOpen {
                 closeStatusPopover()
                 return nil
             }
+            if contentMode {
+                exitContentMode()
+                return nil
+            }
             if query.isEmpty { hide() } else { clearQuery() }
             return nil
-        case 36, 76: jumpSelected(); return nil // return / keypad enter
+        case 36, 76: // return / keypad enter
+            if contentMode {
+                activateContentResult(tableView.selectedRow)
+                return nil
+            }
+            if let index = fallbackIndex, tableView.selectedRow == index {
+                enterContentMode()
+                return nil
+            }
+            jumpSelected()
+            return nil
         case 48: cycleNeedsCheck(); return nil // tab
         case 51 where ctrl: removeSelected(); return nil // ⌃⌫ (bare ⌫ edits the search)
         case 125: moveSelection(1); return nil // down arrow
@@ -1621,6 +1847,7 @@ final class PaletteController: NSObject {
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 1
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        keysLabel = label
 
         let light = PaletteStatusButton()
         light.isBordered = false
@@ -2048,6 +2275,10 @@ final class PaletteController: NSObject {
 
     private func renderPreview(now: Date = Date()) {
         let index = tableView.selectedRow
+        if contentMode {
+            renderContentPreview(index)
+            return
+        }
         guard rows.indices.contains(index) else {
             termLabel.attributedStringValue = NSAttributedString()
             actionRow.isHidden = true
@@ -2291,6 +2522,126 @@ private final class PaletteRowView: NSTableRowView {
 // session is set aside. With a count it carries a disclosure chevron and toggles
 // the section (rowClicked); at "Hidden (0)" it is inert - no chevron, nothing to
 // expand.
+// The promotion row: the same query, offered to a bigger index. It carries the
+// hit count so the user knows whether promoting is worth it before pressing
+// return, and stays quiet about the count until one arrives.
+private final class FallbackRowView: NSView {
+    init(query: String, hits: Int?) {
+        super.init(frame: .zero)
+        let key = NSTextField(labelWithString: "↩")
+        key.font = .systemFont(ofSize: s(11), weight: .semibold)
+        key.textColor = Theme.accent
+        key.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(key)
+
+        let label = NSTextField(labelWithString: "Search session contents for \u{201C}\(query)\u{201D}")
+        label.font = .systemFont(ofSize: s(12))
+        label.textColor = Theme.textDim
+        label.lineBreakMode = .byTruncatingTail
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        let count = NSTextField(labelWithString: hits.map { "\($0) hits" } ?? "")
+        count.font = .systemFont(ofSize: s(11))
+        count.textColor = Theme.textDim
+        count.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(count)
+
+        NSLayoutConstraint.activate([
+            key.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s(20)),
+            key.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: key.trailingAnchor, constant: s(10)),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            count.leadingAnchor.constraint(
+                greaterThanOrEqualTo: label.trailingAnchor, constant: s(10)),
+            count.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(20)),
+            count.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+}
+
+// A contents hit: which session, when, how many times, and the matching text
+// with the match itself picked out. Live and ended are marked because only a
+// live session can be jumped to.
+private final class ContentResultCellView: NSView {
+    init(hit: SearchResult) {
+        super.init(frame: .zero)
+        let glyph = AgentGlyphView(agent: hit.agent)
+        glyph.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(glyph)
+
+        // The last path component is what identifies a project at a glance; the
+        // full path crowds out the snippet, which is the reason the row exists.
+        let name = (hit.cwd?.split(separator: "/").last).map(String.init) ?? hit.agent
+        let title = NSTextField(labelWithString: name)
+        title.font = .systemFont(ofSize: s(13), weight: .semibold)
+        title.textColor = Theme.titleUnread
+        title.lineBreakMode = .byTruncatingTail
+        title.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(title)
+
+        let meta = NSTextField(labelWithString: metaText(hit))
+        meta.font = .systemFont(ofSize: s(11))
+        meta.textColor = Theme.textDim
+        meta.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(meta)
+
+        let snippet = NSTextField(labelWithAttributedString: attributedSnippet(hit.snippet))
+        snippet.lineBreakMode = .byTruncatingTail
+        snippet.maximumNumberOfLines = 1
+        snippet.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(snippet)
+
+        NSLayoutConstraint.activate([
+            glyph.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s(20)),
+            glyph.topAnchor.constraint(equalTo: topAnchor, constant: s(10)),
+            title.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: s(10)),
+            title.topAnchor.constraint(equalTo: topAnchor, constant: s(8)),
+            meta.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(20)),
+            meta.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            meta.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: s(10)),
+            snippet.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            snippet.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(20)),
+            snippet.topAnchor.constraint(equalTo: title.bottomAnchor, constant: s(2)),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    private func metaText(_ hit: SearchResult) -> String {
+        let when = hit.ts.flatMap(shortDate) ?? ""
+        let count = hit.hitCount > 1 ? "×\(hit.hitCount)" : ""
+        let state = hit.isLive ? "live" : "ended"
+        return [when, count, state].filter { !$0.isEmpty }.joined(separator: "  ·  ")
+    }
+
+    // The hub marks matches with <mark>; drawn raw the user would read the tags.
+    private func attributedSnippet(_ snippet: String) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        for run in snippetRuns(snippet) {
+            out.append(NSAttributedString(string: run.text, attributes: [
+                .font: NSFont.systemFont(ofSize: s(11.5), weight: run.isMatch ? .semibold : .regular),
+                .foregroundColor: run.isMatch ? Theme.accent : Theme.textDim,
+            ]))
+        }
+        return out
+    }
+}
+
+// RFC3339 to a short "3 Aug 14:02" for a contents hit's timestamp.
+private func shortDate(_ iso: String) -> String? {
+    let parser = ISO8601DateFormatter()
+    parser.formatOptions = [.withInternetDateTime]
+    guard let date = parser.date(from: iso) else { return nil }
+    let out = DateFormatter()
+    out.dateFormat = "d MMM HH:mm"
+    return out.string(from: date)
+}
+
 private final class HiddenDividerView: NSView {
     init(count: Int, expanded: Bool) {
         super.init(frame: .zero)
@@ -2335,7 +2686,7 @@ private final class HiddenDividerView: NSView {
 
 extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        rows.count
+        contentMode ? contentResults.count : rows.count
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
@@ -2343,10 +2694,17 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row index: Int) -> NSView? {
+        if contentMode {
+            guard contentResults.indices.contains(index) else { return nil }
+            return ContentResultCellView(hit: contentResults[index])
+        }
         guard rows.indices.contains(index) else { return nil }
         let row = rows[index]
         if row.isDivider {
             return HiddenDividerView(count: row.hiddenCount, expanded: hiddenExpanded)
+        }
+        if row.isFallback {
+            return FallbackRowView(query: query, hits: row.fallbackHits)
         }
         let cell = SessionCellView(row: row)
         // Hidden rows read as dismissed: dimmed, and inert (see shouldSelectRow).
@@ -2356,8 +2714,12 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
 
     // Only visible session rows select. The Hidden divider and hidden rows are
     // inert to selection and the keyboard; a click on them is handled separately.
+    // The promotion row is the exception: it is an action, so it selects even
+    // though it sits past the session span.
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        row < visibleCount
+        if contentMode { return true }
+        if rows.indices.contains(row), rows[row].isFallback { return true }
+        return row < visibleCount
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
