@@ -625,6 +625,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         palette?.searchProvider = { [weak self] query, limit in
             await self?.fetchSearch(query: query, limit: limit) ?? .unreachable
         }
+        settings?.searchStatusProvider = { [weak self] in await self?.fetchSearchStatus() }
         KeyboardShortcuts.onKeyDown(for: .openJumplist) { [weak self] in self?.palette?.toggle() }
     }
 

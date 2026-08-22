@@ -16,12 +16,19 @@ import {
 
 export type { SearchResult, SearchResultState } from "./searchquery";
 
-const schemaVersion = 1;
+const schemaVersion = 2;
 const indexFilename = "search.db";
 
 // Walking real transcript roots costs several indexing ticks, while a new
 // transcript can wait briefly before becoming searchable.
 const discoveryIntervalMs = 30_000;
+
+const createMeta = `
+CREATE TABLE meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`;
 
 const createFiles = `
 CREATE TABLE files (
@@ -147,6 +154,7 @@ function createSchema(db: Database): void {
   }
 
   db.transaction(() => {
+    db.run(createMeta);
     db.run(createFiles);
     db.run(createTurns);
     db.run(createTurnsBySession);
@@ -368,12 +376,34 @@ class SqliteSearchIndex implements SearchIndex {
       }
     }
 
+    const workRemains = this.hasWork();
+    // Reaching an empty queue once is what ends the first build, so record it
+    // the moment it happens rather than inferring it later.
+    if (!workRemains) this.markFirstBuildDone();
+
     return {
       filesScanned: this.discoveredCount,
       filesUpdated,
       turnsAdded,
-      workRemains: this.hasWork(),
+      workRemains,
     };
+  }
+
+  // A durable marker, because "has pending work" is a different question: one
+  // active session writing a line makes work pending again forever after, and a
+  // status built on that would claim to be building for the rest of time.
+  private firstBuildDone(): boolean {
+    const row = this.db
+      .query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'first_build_done'")
+      .get();
+    return row !== null && row !== undefined;
+  }
+
+  private markFirstBuildDone(): void {
+    this.db.run(
+      "INSERT OR IGNORE INTO meta (key, value) VALUES ('first_build_done', ?)",
+      [new Date().toISOString()],
+    );
   }
 
   status(): IndexStatus {
@@ -405,7 +435,10 @@ class SqliteSearchIndex implements SearchIndex {
       filesPending,
       turnsIndexed: aggregate.turns_indexed,
       lastSweepTime: aggregate.last_sweep_time,
-      firstBuildInProgress: filesPending > 0,
+      // "Has pending work" is not the same question: a single active session
+      // writing one line makes work pending forever after. The first build is
+      // over once a sweep has seen the corpus fully indexed, once, ever.
+      firstBuildInProgress: filesPending > 0 && !this.firstBuildDone(),
       indexSizeBytes,
     };
   }

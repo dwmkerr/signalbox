@@ -202,16 +202,17 @@ describe("openIndex", () => {
     const index = openIndex(corpus.indexDir);
     const db = openDatabase(corpus);
     try {
-      expect(db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version).toBe(1);
+      expect(db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version).toBe(2);
       expect(db.query<{ journal_mode: string }, []>("PRAGMA journal_mode").get()?.journal_mode).toBe("wal");
       expect(db.query<{ name: string }, []>(`
         SELECT name FROM sqlite_schema
         WHERE type IN ('table', 'index') AND name IN (
-          'files', 'turns', 'turns_by_session', 'turns_by_path', 'turns_fts'
+          'files', 'meta', 'turns', 'turns_by_session', 'turns_by_path', 'turns_fts'
         )
         ORDER BY name
       `).all().map((row) => row.name)).toEqual([
         "files",
+        "meta",
         "turns",
         "turns_by_path",
         "turns_by_session",
@@ -354,6 +355,30 @@ describe("sweep", () => {
       expect(status.lastSweepTime).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       expect(status.firstBuildInProgress).toBe(false);
       expect(status.indexSizeBytes).toBeGreaterThan(0);
+    } finally {
+      index.close();
+    }
+  }));
+
+  // The flag names the first build, not "has pending work". One active session
+  // appending a line makes work pending again, and a surface built on the wrong
+  // question would claim to be building for the rest of the machine's life.
+  test("first build ends for good once the corpus is fully indexed", () => withCorpus((corpus) => {
+    const index = openIndex(corpus.indexDir);
+    try {
+      while (index.sweep({ budgetMs: 50 }).workRemains) { /* drain */ }
+      expect(index.status().firstBuildInProgress).toBe(false);
+
+      // A session speaks again. Whether that work has been noticed yet depends
+      // on the discovery cadence, but either way the first build is long over
+      // and must never be reported as running again.
+      appendFileSync(corpus.claudePath, jsonl([{
+        type: "user",
+        cwd: "/work/claude",
+        message: { role: "user", content: "a fresh line arrives" },
+      }]));
+      index.sweep({ budgetMs: 0 });
+      expect(index.status().firstBuildInProgress).toBe(false);
     } finally {
       index.close();
     }

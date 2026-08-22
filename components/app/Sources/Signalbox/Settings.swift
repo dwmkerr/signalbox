@@ -145,6 +145,17 @@ enum SharedSettings {
             write(s)
         }
     }
+
+    // Off by default: indexing reads every transcript on the machine, which is
+    // work and disk nobody should spend without asking (specs/search.md).
+    static var searchEnabled: Bool {
+        get { read()["searchEnabled"] as? Bool ?? false }
+        set {
+            var s = read()
+            s["searchEnabled"] = newValue
+            write(s)
+        }
+    }
 }
 
 enum SettingsTab: String, CaseIterable {
@@ -204,6 +215,11 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
     private var selectedTab: SettingsTab = .general
     private var iconPopup: NSPopUpButton?
     private var clearCheckbox: NSButton?
+    private var searchCheckbox: NSButton?
+    private var searchStatusLabel: NSTextField?
+    private var searchStatusTimer: Timer?
+    /// Asks the hub for index progress. Set by the app delegate.
+    var searchStatusProvider: (@MainActor () async -> SearchIndexStatus?)?
     private var renameCheckbox: NSButton?
     private var codexClearCheckbox: NSButton?
     private var codexRenameCheckbox: NSButton?
@@ -274,6 +290,15 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         // A settings window nobody has open has no business talking to the hub
         // every few seconds, so this surface owns one reference to the monitor.
         monitor.begin("settings") { [weak self] in self?.applyHealth() }
+        // A first build takes minutes, so the line has to move while the window
+        // is open; a static count reads as a stuck toggle. Only while open, for
+        // the same reason the health monitor is reference counted.
+        refreshSearchStatus()
+        searchStatusTimer?.invalidate()
+        searchStatusTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) {
+            [weak self] _ in
+            Task { @MainActor in self?.refreshSearchStatus() }
+        }
         // Accessory apps stay background by default; a settings window is a
         // real window and needs the app frontmost to take keys and clicks.
         // orderFrontRegardless because activate alone can leave the window
@@ -364,10 +389,31 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         let captionIndent = NSView()
         let captionRow = horizontalRow([captionIndent, filterCaption])
 
+        let searchHeading = sectionHeading("Session contents search")
+        let searchCheckbox = NSButton(
+            checkboxWithTitle: "Search inside session transcripts",
+            target: self,
+            action: #selector(searchEnabledChanged(_:))
+        )
+        searchCheckbox.state = SharedSettings.searchEnabled ? .on : .off
+        self.searchCheckbox = searchCheckbox
+        let searchCaption = caption(
+            "Indexes the conversations on this machine so the jumplist can find a session "
+            + "by something said inside it, including sessions that have ended. The index "
+            + "stays on this machine and is never sent to a hub."
+        )
+        let searchStatus = caption("")
+        self.searchStatusLabel = searchStatus
+
         let stack = verticalStack([
             iconRow, shortcutRow, shortcutCaptionRow, filterRow, captionRow,
+            searchHeading, searchCheckbox, searchCaption, searchStatus,
         ])
         stack.setCustomSpacing(2, after: filterRow)
+        stack.setCustomSpacing(16, after: captionRow)
+        stack.setCustomSpacing(4, after: searchHeading)
+        stack.setCustomSpacing(2, after: searchCheckbox)
+        stack.setCustomSpacing(6, after: searchCaption)
         // One label column, right aligned, so the three controls line up the
         // way every other settings window on macOS lays a form out. Activated
         // only now: cross-row constraints need the shared stack ancestor, and
@@ -771,6 +817,8 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
 
     func windowWillClose(_ notification: Notification) {
         monitor.end("settings")
+        searchStatusTimer?.invalidate()
+        searchStatusTimer = nil
         logToastTimer?.invalidate()
         logToastTimer = nil
         logToastLabel?.stringValue = ""
@@ -852,6 +900,47 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
             }.joined(separator: "\n")
         } catch {
             return missingMessage
+        }
+    }
+
+    @objc private func searchEnabledChanged(_ sender: NSButton) {
+        SharedSettings.searchEnabled = sender.state == .on
+        // The hub reads this file when it starts a sweep, so the change takes
+        // effect on its own; the status line is what tells the user that.
+        refreshSearchStatus()
+    }
+
+    // Index progress, polled while the window is open. A first build over a
+    // large corpus takes minutes, and a settings pane that says nothing during
+    // it reads as a broken toggle.
+    private func refreshSearchStatus() {
+        guard let label = searchStatusLabel else { return }
+        if !SharedSettings.searchEnabled {
+            label.stringValue = "Off. No transcripts are read and no index is kept."
+            return
+        }
+        guard let provider = searchStatusProvider else {
+            label.stringValue = "Waiting for the hub."
+            return
+        }
+        Task { @MainActor in
+            guard let status = await provider() else {
+                label.stringValue = "Waiting for the hub."
+                return
+            }
+            let size = ByteCountFormatter.string(
+                fromByteCount: Int64(status.indexSizeBytes), countStyle: .file
+            )
+            if status.filesPending > 0 {
+                let verb = status.firstBuildInProgress ? "Building" : "Updating"
+                label.stringValue =
+                    "\(verb): \(status.turnsIndexed) messages from "
+                    + "\(status.filesKnown) sessions, \(status.filesPending) to go."
+            } else {
+                label.stringValue =
+                    "Ready: \(status.turnsIndexed) messages from "
+                    + "\(status.filesKnown) sessions, \(size)."
+            }
         }
     }
 

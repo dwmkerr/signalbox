@@ -63,6 +63,16 @@ The SQLite index is `<stateDir()>/search.db`. `stateDir()` honours `SIGNALBOX_DA
 This schema is the implementation contract. Later schema work must implement these statements verbatim.
 
 ```sql
+-- Durable index-wide facts. `first_build_done` is written the first time a
+-- sweep drains its queue, so "is the first build running" stays answerable
+-- forever after. Without it the only available question is "is there pending
+-- work", which goes true again every time a live session writes a line, and a
+-- progress surface built on that claims to be building for the rest of time.
+CREATE TABLE meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 -- One row per indexed transcript file. Enables incremental, append-only
 -- resume: a file that only grew is read from byte_offset, never re-parsed.
 CREATE TABLE files (
