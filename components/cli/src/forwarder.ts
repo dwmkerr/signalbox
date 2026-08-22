@@ -127,6 +127,18 @@ export class Forwarder implements RequestHandler {
     if (req.method === "GET" && url.pathname === "/exchanges") {
       return this.handleExchanges(url);
     }
+    if (
+      req.method === "GET"
+      && (url.pathname === "/search" || url.pathname === "/search/status")
+    ) {
+      // A forwarder cannot answer from an upstream index without making
+      // transcript-derived text cross machines, which violates the local-only
+      // search boundary.
+      return Response.json(
+        { error: "search_not_supported", mode: "forwarder" },
+        { status: 501, headers: { "Cache-Control": "no-store" } },
+      );
+    }
     if (req.method === "GET" && url.pathname === "/stream") {
       return this.handleStream(req, url, server);
     }

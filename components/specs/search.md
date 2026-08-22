@@ -129,6 +129,38 @@ matches the `transcript` path of a current board row. A live result also carries
 that row's `session_key` as its jump target. Every other result is marked
 `ended` and has no jump target.
 
+## Hub API
+
+The hub serves local grouped results at `GET /search?q=QUERY`. The route is
+below the normal hub authentication gate and uses the same flat route shape as
+`GET /exchanges`; query values are ordinary URL query values. A successful
+response is `200` with `Cache-Control: no-store`:
+
+```json
+{
+  "enabled": true,
+  "query": "edit skill",
+  "results": []
+}
+```
+
+`results` contains at most 50 grouped results with the fields described in
+Query semantics. A missing or empty `q` is `400` with `{"error":"q is
+required"}`. When search is off, the route returns `409` with
+`{"error":"search_disabled","enabled":false}`. This marker is deliberately
+not an empty result list, because an empty list means an enabled search found
+no matches.
+
+`GET /search/status` is also below the authentication gate and returns `200`
+with `Cache-Control: no-store`. When enabled, its body is `{"enabled":true,
+"status":STATUS}`, where `STATUS` is the index status described below. When
+off, its body is `{"enabled":false,"status":"disabled"}`.
+
+A forwarder returns `501` for both routes with
+`{"error":"search_not_supported","mode":"forwarder"}` and
+`Cache-Control: no-store`. It never proxies either route because doing so would
+make transcript-derived text cross machines.
+
 ## Turn extraction
 
 A turn is one displayed user prompt or assistant reply from an eligible transcript line. Tool calls, tool output, reasoning, system instructions, metadata, and lifecycle records are not turns. Empty displayed text and malformed JSON lines are skipped. Only complete newline-terminated records are consumed, so a line still being written remains at the current `byte_offset` for the next sweep.
@@ -209,7 +241,20 @@ After each bounded batch, the indexer commits the last complete-line `byte_offse
 
 ### Sweep budget
 
-The hub starts a sweep tick every 250 ms and spends at most 10 ms of wall-clock time indexing on each tick. Parsing and writes use bounded batches, commit their progress, and yield when the budget is exhausted. A 10 ms slice stays below a display frame on the app's main interaction path, while four ticks per second provide steady first-build throughput.
+The hub starts a sweep tick every 250 ms with a 10 ms wall-clock indexing
+budget. Parsing and writes use bounded batches, commit their progress, and
+yield when the budget is exhausted. A 10 ms slice stays below a display frame
+on the app's main interaction path, while four ticks per second provide steady
+first-build throughput.
+
+Discovery is separate from that indexing budget. The indexer walks the
+transcript roots once when the enabled index opens, before the recurring sweep
+timer starts, and refreshes the discovered corpus every 30 seconds. The initial
+walk is a one-off startup operation outside the per-tick budget. Each refresh
+builds a pending work list that is retained across ticks; intervening sweeps
+consume that list without walking the directories again. A new, changed, or
+vanished file becomes pending at the next refresh. Status reads the retained
+list and does not trigger its own discovery walk.
 
 A tick's budget is only enforceable when the unit of work is smaller than the
 budget, so the indexer must never read a whole transcript in one operation. The
@@ -220,7 +265,13 @@ bounded window of bytes from `byte_offset`, stops at the last complete newline
 in that window, and commits. A large file is consumed across as many ticks as
 it needs, which is the same mechanism the append-only resume already uses.
 
-Event ingest and the SSE stream have priority. A sweep must never delay event ingest or SSE delivery. The 10 ms budget is a hard ceiling for a tick, not permission to block pending event work; discovery, parsing, and database writes must use bounded operations and yield between batches.
+The budget controls whether another indexing unit may start; it cannot preempt
+a parser or transaction already in progress. When discovered work exists, a
+sweep always commits or attempts at least one bounded unit before checking the
+deadline. If that unit takes longer than 10 ms, the sweep returns immediately
+after it instead of making no progress forever. Subsequent units start only
+while time remains. Event ingest and the SSE stream have priority, so parsing
+and database writes yield after the current bounded unit.
 
 ### First build and status
 
@@ -228,7 +279,11 @@ Measured on a working machine: 1248 transcripts totalling approximately 1.2 GB
 yield roughly 65,000 turns and 38 MB of indexed text, because turn text is only
 about 3 percent of raw transcript bytes. Parsing runs at roughly 125 MB/s cold.
 The first build is therefore on the order of 10 to 15 seconds of CPU, spread by
-the sweep budget across approximately 6 minutes of wall clock. Progress is observable through `signalbox index --status` and the Settings surface, including whether the first build is running and how much work remains. Both surfaces must update as batches commit. A first build must never present as a silent freeze.
+the sweep budget across approximately 6 minutes of wall clock. Progress is
+observable through `signalbox index --status` and the Settings surface,
+including whether the first build is running and how much work from the most
+recent discovery remains. Both surfaces must update as batches commit. A first
+build must never present as a silent freeze.
 
 ## Out of scope for v1
 

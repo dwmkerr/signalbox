@@ -166,12 +166,34 @@ function build(index: SearchIndex): void {
 function sweepOneFile(index: SearchIndex): SweepSummary {
   const clock = spyOn(performance, "now")
     .mockReturnValueOnce(0)
-    .mockReturnValueOnce(0)
     .mockReturnValue(2);
   try {
     return index.sweep({ budgetMs: 1 });
   } finally {
     clock.mockRestore();
+  }
+}
+
+function sweepAfterDiscoveryRefresh(index: SearchIndex): SweepSummary {
+  const clock = spyOn(Date, "now").mockReturnValue(Number.MAX_SAFE_INTEGER);
+  try {
+    return index.sweep({ budgetMs: 5_000 });
+  } finally {
+    clock.mockRestore();
+  }
+}
+
+function addProductionSizedCorpus(corpus: Corpus, count: number): void {
+  const project = join(corpus.claudeRoot, "-work-production-sized");
+  mkdirSync(project, { recursive: true });
+  for (let index = 0; index < count; index++) {
+    const tail = index.toString(16).padStart(12, "0");
+    const sessionUuid = `aaaaaaaa-aaaa-4aaa-8aaa-${tail}`;
+    writeFileSync(join(project, `${sessionUuid}.jsonl`), jsonl([{
+      type: "user",
+      cwd: "/work/production-sized",
+      message: { role: "user", content: `production budget turn ${index}` },
+    }]));
   }
 }
 
@@ -203,6 +225,63 @@ describe("openIndex", () => {
 });
 
 describe("sweep", () => {
+  test("makes durable progress at the production budget on a real-sized corpus", () => withCorpus((corpus) => {
+    const additionalFiles = 1_000;
+    addProductionSizedCorpus(corpus, additionalFiles);
+    const index = openIndex(corpus.indexDir);
+    try {
+      let totalTurnsAdded = 0;
+      let sweeps = 0;
+      let workRemains = true;
+
+      while (workRemains) {
+        const result = index.sweep({ budgetMs: 10 });
+        const previousTotal = totalTurnsAdded;
+        totalTurnsAdded += result.turnsAdded;
+        expect(totalTurnsAdded).toBeGreaterThan(previousTotal);
+        workRemains = result.workRemains;
+        expect(++sweeps).toBeLessThan(additionalFiles + 4);
+      }
+
+      expect(sweeps).toBeGreaterThan(1);
+      expect(totalTurnsAdded).toBe(additionalFiles + 6);
+      expect(index.status().turnsIndexed).toBe(additionalFiles + 6);
+    } finally {
+      index.close();
+    }
+  }));
+
+  test("does not discover new files again until the discovery interval elapses", () => withCorpus((corpus) => {
+    const clock = spyOn(Date, "now").mockReturnValue(1_000);
+    const index = openIndex(corpus.indexDir);
+    try {
+      build(index);
+      const sessionUuid = "44444444-4444-4444-8444-444444444444";
+      write(join(corpus.claudeRoot, "-work-new", `${sessionUuid}.jsonl`), jsonl([{
+        type: "user",
+        message: { role: "user", content: "found after refresh" },
+      }]));
+
+      expect(index.sweep({ budgetMs: 10 })).toEqual({
+        filesScanned: 3,
+        filesUpdated: 0,
+        turnsAdded: 0,
+        workRemains: false,
+      });
+
+      clock.mockReturnValue(31_000);
+      expect(index.sweep({ budgetMs: 10 })).toEqual({
+        filesScanned: 4,
+        filesUpdated: 1,
+        turnsAdded: 1,
+        workRemains: false,
+      });
+    } finally {
+      index.close();
+      clock.mockRestore();
+    }
+  }));
+
   test("builds a fresh fixture corpus and keeps FTS readable concurrently", () => withCorpus((corpus) => {
     const index = openIndex(corpus.indexDir);
     try {
@@ -310,7 +389,7 @@ describe("sweep", () => {
         message: { role: "assistant", content: "appended reply" },
       }]));
 
-      expect(index.sweep({ budgetMs: 5_000 })).toMatchObject({
+      expect(sweepAfterDiscoveryRefresh(index)).toMatchObject({
         filesUpdated: 1,
         turnsAdded: 2,
         workRemains: false,
@@ -349,7 +428,7 @@ describe("sweep", () => {
       }]));
       expect(statSync(corpus.claudePath).size).toBeLessThan(originalSize);
 
-      expect(index.sweep({ budgetMs: 5_000 })).toMatchObject({
+      expect(sweepAfterDiscoveryRefresh(index)).toMatchObject({
         filesUpdated: 1,
         turnsAdded: 1,
         workRemains: false,
@@ -379,7 +458,7 @@ describe("sweep", () => {
       build(index);
       unlinkSync(corpus.codexPath);
 
-      expect(index.sweep({ budgetMs: 5_000 })).toMatchObject({
+      expect(sweepAfterDiscoveryRefresh(index)).toMatchObject({
         filesUpdated: 1,
         turnsAdded: 0,
         workRemains: false,

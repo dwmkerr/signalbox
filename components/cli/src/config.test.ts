@@ -8,19 +8,28 @@ import {
   normalizeUpstreamInput,
   shouldGenerateToken,
   generateToken,
-} from "../src/config";
+} from "./config";
 
 // loadSettings and saveSettings resolve the file under $HOME (via os.homedir()),
 // which Bun fixes at process start - so the file-backed cases run in a child
 // process with its own HOME, exercising the real read/write paths against a temp
 // settings.json and never the developer's real one.
-const configSrc = join(import.meta.dir, "..", "src", "config.ts");
+const configSrc = join(import.meta.dir, "config.ts");
 
 function loadIn(env: Record<string, string>, settings?: unknown): boolean {
   const home = freshHome(settings);
   const proc = Bun.spawnSync(
     ["bun", "-e", `import { loadSettings } from ${JSON.stringify(configSrc)}; process.stdout.write(String(loadSettings().claudeRenameTitle));`],
     { env: { ...process.env, HOME: home, SIGNALBOX_CLAUDE_RENAME: "", SIGNALBOX_CONFIG: "", XDG_CONFIG_HOME: "", ...env } }
+  );
+  return proc.stdout.toString().trim() === "true";
+}
+
+function searchEnabledIn(env: Record<string, string>, settings?: unknown): boolean {
+  const home = freshHome(settings);
+  const proc = Bun.spawnSync(
+    ["bun", "-e", `import { loadSettings } from ${JSON.stringify(configSrc)}; process.stdout.write(String(loadSettings().searchEnabled));`],
+    { env: { ...process.env, HOME: home, SIGNALBOX_SEARCH: "", SIGNALBOX_CONFIG: "", XDG_CONFIG_HOME: "", ...env } }
   );
   return proc.stdout.toString().trim() === "true";
 }
@@ -43,7 +52,7 @@ function freshHome(settings?: unknown): string {
 function inHome(home: string, expr: string, env: Record<string, string> = {}): string {
   const proc = Bun.spawnSync(
     ["bun", "-e", `import * as c from ${JSON.stringify(configSrc)}; ${expr}`],
-    { env: { ...process.env, HOME: home, SIGNALBOX_CLAUDE_RENAME: "", SIGNALBOX_BIND: "", SIGNALBOX_TOKEN: "", SIGNALBOX_CONFIG: "", XDG_CONFIG_HOME: "", ...env } }
+    { env: { ...process.env, HOME: home, SIGNALBOX_CLAUDE_RENAME: "", SIGNALBOX_SEARCH: "", SIGNALBOX_BIND: "", SIGNALBOX_TOKEN: "", SIGNALBOX_CONFIG: "", XDG_CONFIG_HOME: "", ...env } }
   );
   return proc.stdout.toString();
 }
@@ -60,6 +69,21 @@ describe("claudeRenameTitle", () => {
   test("env override wins over the file", () => {
     expect(loadIn({ SIGNALBOX_CLAUDE_RENAME: "0" }, { claudeRenameTitle: true })).toBe(false);
     expect(loadIn({ SIGNALBOX_CLAUDE_RENAME: "1" }, { claudeRenameTitle: false })).toBe(true);
+  });
+});
+
+describe("searchEnabled", () => {
+  test("defaults to false when the file is missing", () => {
+    expect(searchEnabledIn({})).toBe(false);
+  });
+
+  test("reads true from settings.json", () => {
+    expect(searchEnabledIn({}, { searchEnabled: true })).toBe(true);
+  });
+
+  test("env override wins over the file", () => {
+    expect(searchEnabledIn({ SIGNALBOX_SEARCH: "0" }, { searchEnabled: true })).toBe(false);
+    expect(searchEnabledIn({ SIGNALBOX_SEARCH: "1" }, { searchEnabled: false })).toBe(true);
   });
 });
 

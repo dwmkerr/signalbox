@@ -2,14 +2,26 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { stateDir } from "./client";
+import type { Event } from "./event";
+import {
+  createSearchQuery,
+  type SearchQuery,
+  type SearchResult,
+} from "./searchquery";
 import {
   discoverTranscripts,
   parseTurns,
   type TranscriptFile,
 } from "./transcripts";
 
+export type { SearchResult, SearchResultState } from "./searchquery";
+
 const schemaVersion = 1;
 const indexFilename = "search.db";
+
+// Walking real transcript roots costs several indexing ticks, while a new
+// transcript can wait briefly before becoming searchable.
+const discoveryIntervalMs = 30_000;
 
 const createFiles = `
 CREATE TABLE files (
@@ -66,18 +78,19 @@ interface FileSnapshot {
 
 interface BatchResult {
   turnsAdded: number;
-  incomplete: boolean;
+  next?: FileSnapshot;
+  madeProgress: boolean;
 }
 
 /** Limits one sweep to a small slice of the hub's event loop. */
 export interface SweepOptions {
-  /** Maximum wall-clock time available before another transcript batch may start. */
+  /** Maximum indexing time available before another bounded work unit may start. */
   budgetMs: number;
 }
 
 /** Describes the durable work completed by one bounded index sweep. */
 export interface SweepSummary {
-  /** Number of discovered transcript files whose current metadata was inspected. */
+  /** Number of transcript files found by the most recent discovery refresh. */
   filesScanned: number;
   /** Number of transcript file records inserted, advanced, rebuilt, or removed. */
   filesUpdated: number;
@@ -104,10 +117,10 @@ export interface IndexStatus {
 }
 
 /** Owns one SQLite connection to the local transcript search index. */
-export interface SearchIndex {
-  /** Commits bounded transcript progress without holding work for a later transaction. */
+export interface SearchIndex extends SearchQuery {
+  /** Commits bounded progress from the work list retained across sweep ticks. */
   sweep(opts: SweepOptions): SweepSummary;
-  /** Reads current durable counts and compares them with the local transcript corpus. */
+  /** Reads current durable counts and the retained discovery work list. */
   status(): IndexStatus;
   /** Releases this process's SQLite connection while leaving the index intact. */
   close(): void;
@@ -169,10 +182,53 @@ function needsIndexing(item: FileSnapshot): boolean {
 }
 
 class SqliteSearchIndex implements SearchIndex {
+  private readonly query: SearchQuery;
+  private pending: FileSnapshot[] = [];
+  private pendingIndex = 0;
+  private vanished: FileRow[] = [];
+  private vanishedIndex = 0;
+  private discoveredCount = 0;
+  private lastDiscoveryMs = Number.NEGATIVE_INFINITY;
+
   constructor(
     private readonly db: Database,
     private readonly indexPath: string,
-  ) {}
+  ) {
+    this.query = createSearchQuery(db);
+    // The one-off walk belongs to index startup so every recurring budget can
+    // be spent committing transcript progress.
+    this.refreshDiscovery();
+  }
+
+  countHits(q: string): number {
+    return this.query.countHits(q);
+  }
+
+  search(q: string, limit: number, liveSessions: readonly Event[] = []): SearchResult[] {
+    return this.query.search(q, limit, liveSessions);
+  }
+
+  private refreshDiscovery(): void {
+    const discovered = discoverTranscripts();
+    const rows = fileRows(this.db);
+    const rowsByPath = new Map(rows.map((row) => [row.path, row]));
+    const snapshots = discovered
+      .map((file) => snapshot(file, rowsByPath.get(file.path)))
+      .filter((item): item is FileSnapshot => item !== undefined);
+    const availablePaths = new Set(snapshots.map((item) => item.file.path));
+
+    this.discoveredCount = discovered.length;
+    this.vanished = rows.filter((row) => !availablePaths.has(row.path));
+    this.vanishedIndex = 0;
+    this.pending = snapshots.filter(needsIndexing);
+    this.pendingIndex = 0;
+    this.lastDiscoveryMs = Date.now();
+  }
+
+  private hasWork(): boolean {
+    return this.vanishedIndex < this.vanished.length
+      || this.pendingIndex < this.pending.length;
+  }
 
   private removeFile(path: string): void {
     this.db.transaction(() => {
@@ -247,9 +303,20 @@ class SqliteSearchIndex implements SearchIndex {
       }
     })();
 
+    const row: FileRow = {
+      path: item.file.path,
+      agent: item.file.agent,
+      session_uuid: sessionUuid,
+      cwd,
+      mtime_ms: item.mtimeMs,
+      size: Math.max(item.size, parsed.endOffset),
+      byte_offset: parsed.endOffset,
+      indexed_ts: indexedTs,
+    };
     return {
       turnsAdded: parsed.turns.length,
-      incomplete: parsed.endOffset < item.size,
+      next: parsed.endOffset < item.size ? { ...item, row } : undefined,
+      madeProgress: parsed.endOffset > fromOffset,
     };
   }
 
@@ -258,58 +325,52 @@ class SqliteSearchIndex implements SearchIndex {
       throw new RangeError("budgetMs must be a finite non-negative number");
     }
 
-    const started = performance.now();
-    const deadline = started + opts.budgetMs;
-    const discovered = discoverTranscripts();
-    const rows = fileRows(this.db);
-    const rowsByPath = new Map(rows.map((row) => [row.path, row]));
-    const snapshots = discovered
-      .map((file) => snapshot(file, rowsByPath.get(file.path)))
-      .filter((item): item is FileSnapshot => item !== undefined);
-    const availablePaths = new Set(snapshots.map((item) => item.file.path));
-    const vanished = rows.filter((row) => !availablePaths.has(row.path));
-    const pending = snapshots.filter(needsIndexing);
+    if (Date.now() - this.lastDiscoveryMs >= discoveryIntervalMs) {
+      this.refreshDiscovery();
+    }
+
+    const deadline = performance.now() + opts.budgetMs;
 
     let filesUpdated = 0;
     let turnsAdded = 0;
-    let remaining = vanished.length + pending.length;
+    let attempted = false;
 
-    for (const row of vanished) {
-      if (performance.now() >= deadline) break;
-      this.removeFile(row.path);
-      filesUpdated++;
-      remaining--;
-    }
+    while (this.hasWork()) {
+      if (attempted && performance.now() >= deadline) break;
+      attempted = true;
 
-    if (remaining === pending.length) {
-      for (const item of pending) {
-        if (performance.now() >= deadline) break;
+      const vanished = this.vanished[this.vanishedIndex];
+      if (vanished) {
+        this.vanishedIndex++;
+        this.removeFile(vanished.path);
+        filesUpdated++;
+        continue;
+      }
+
+      const item = this.pending[this.pendingIndex];
+      if (item) {
+        this.pendingIndex++;
         const result = this.indexBatch(item);
         turnsAdded += result.turnsAdded;
         filesUpdated++;
-        remaining--;
-        if (result.incomplete) remaining++;
+        if (result.next) this.pending.push(result.next);
+        // A trailing partial line cannot advance until its writer appends. Do
+        // not spend the rest of this tick retrying the same bytes.
+        if (result.next && !result.madeProgress) break;
       }
     }
 
     return {
-      filesScanned: discovered.length,
+      filesScanned: this.discoveredCount,
       filesUpdated,
       turnsAdded,
-      workRemains: remaining > 0,
+      workRemains: this.hasWork(),
     };
   }
 
   status(): IndexStatus {
-    const rows = fileRows(this.db);
-    const rowsByPath = new Map(rows.map((row) => [row.path, row]));
-    const discovered = discoverTranscripts();
-    const snapshots = discovered
-      .map((file) => snapshot(file, rowsByPath.get(file.path)))
-      .filter((item): item is FileSnapshot => item !== undefined);
-    const availablePaths = new Set(snapshots.map((item) => item.file.path));
-    let filesPending = rows.filter((row) => !availablePaths.has(row.path)).length;
-    filesPending += snapshots.filter(needsIndexing).length;
+    const filesPending = this.vanished.length - this.vanishedIndex
+      + this.pending.length - this.pendingIndex;
 
     const aggregate = this.db.query<{
       files_known: number;

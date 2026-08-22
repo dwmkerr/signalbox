@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Command } from "../src/command";
-import type { Event } from "../src/event";
-import { Forwarder } from "../src/forwarder";
+import type { Command } from "./command";
+import type { Event } from "./event";
+import { Forwarder } from "./forwarder";
 
 function serverFrom(address: string): Bun.Server<undefined> {
   return {
@@ -106,6 +106,19 @@ describe("forwarder routes", () => {
       fakeServer
     ))!;
     expect(res.status).toBe(403);
+  });
+
+  test("refuses local transcript search explicitly", async () => {
+    const { forwarder } = newForwarder();
+    for (const path of ["/search?q=needle", "/search/status"]) {
+      const res = (await forwarder.handle(request(path), fakeServer))!;
+      expect(res.status).toBe(501);
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+      expect(await res.json()).toEqual({
+        error: "search_not_supported",
+        mode: "forwarder",
+      });
+    }
   });
 
   test("POST /events appends one event and returns immediately", async () => {

@@ -12,8 +12,12 @@ import { Store, DefaultHistoryLimit } from "./state";
 import type { Exchange } from "./state";
 import { procAlive } from "./proc";
 import { buildStamp } from "./build";
+import { openIndex, type SearchIndex } from "./searchindex";
 
 const heartbeatMs = 15_000;
+const searchSweepIntervalMs = 250;
+const searchSweepBudgetMs = 10;
+const searchResultLimit = 50;
 // Bounds a single POST body; events are tiny, so anything bigger is junk.
 const maxBodyBytes = 1 << 20;
 
@@ -42,6 +46,7 @@ export class Hub {
   private logFd: number;
   private timers: ReturnType<typeof setInterval>[] = [];
   private logPath: string;
+  private searchIndex: SearchIndex | null = null;
 
   // Rebuilds state from events.jsonl in stateDir (creating it if needed).
   // Seq continues from the highest persisted value. token is the bearer secret
@@ -74,7 +79,8 @@ export class Hub {
     // to tell a person where to reach the hub must not have to guess it from
     // the URL it happened to dial.
     private port: number = 0,
-    private historyLimit: number = DefaultHistoryLimit
+    private historyLimit: number = DefaultHistoryLimit,
+    searchEnabled: boolean = false
   ) {
     this.store = new Store(historyLimit);
     mkdirSync(stateDir, { recursive: true });
@@ -105,6 +111,7 @@ export class Hub {
     }
     // Keep an fd open for appends (append mode).
     this.logFd = openSync(this.logPath, "a");
+    if (searchEnabled) this.searchIndex = openIndex(stateDir);
   }
 
   close(): void {
@@ -112,6 +119,8 @@ export class Hub {
     try {
       closeSync(this.logFd);
     } catch {}
+    this.searchIndex?.close();
+    this.searchIndex = null;
   }
 
   // The forwarder's drain is at-least-once, so a crash between send and
@@ -219,6 +228,15 @@ export class Hub {
     this.timers.push(setInterval(sweep, intervalMs));
   }
 
+  /** Starts bounded local transcript indexing when the privacy-sensitive feature is enabled. */
+  startSearch(): void {
+    const index = this.searchIndex;
+    if (!index) return;
+    const sweep = () => index.sweep({ budgetMs: searchSweepBudgetMs });
+    sweep();
+    this.timers.push(setInterval(sweep, searchSweepIntervalMs));
+  }
+
   // fetch handles one HTTP request; returns undefined for unknown routes.
   handle(req: Request, server: Bun.Server<undefined>): Response | Promise<Response> | undefined {
     const url = new URL(req.url);
@@ -273,6 +291,12 @@ export class Hub {
     if (req.method === "GET" && url.pathname === "/exchanges") {
       return this.handleExchanges(url);
     }
+    if (req.method === "GET" && url.pathname === "/search/status") {
+      return this.handleSearchStatus();
+    }
+    if (req.method === "GET" && url.pathname === "/search") {
+      return this.handleSearch(url);
+    }
     if (req.method === "GET" && url.pathname === "/stream") {
       return this.handleStream(req, url, server);
     }
@@ -296,6 +320,26 @@ export class Hub {
     return Response.json(exchangesBody(parsed.session!, list), {
       headers: { "Cache-Control": "no-store" },
     });
+  }
+
+  private handleSearch(url: URL): Response {
+    if (!this.searchIndex) {
+      return noStoreJSON({ error: "search_disabled", enabled: false }, 409);
+    }
+    const query = url.searchParams.get("q");
+    if (!query) return noStoreJSON({ error: "q is required" }, 400);
+    return noStoreJSON({
+      enabled: true,
+      query,
+      results: this.searchIndex.search(query, searchResultLimit, this.sessions()),
+    });
+  }
+
+  private handleSearchStatus(): Response {
+    if (!this.searchIndex) {
+      return noStoreJSON({ enabled: false, status: "disabled" });
+    }
+    return noStoreJSON({ enabled: true, status: this.searchIndex.status() });
   }
 
   // checkBearer returns a 401 Response when the request does not carry the
@@ -614,6 +658,13 @@ export function validateBindConfig(bind: string, token: string): string | null {
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
+}
+
+function noStoreJSON(body: unknown, status: number = 200): Response {
+  return Response.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
 // pairError is the one uniform /pair failure body. No code, expired, wrong,

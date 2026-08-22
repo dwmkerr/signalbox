@@ -738,13 +738,15 @@ function runHub(args: string[]): void {
     tls ? tlsPort : 0,
     remote,
     port,
-    settings.hub.historyLimit
+    settings.hub.historyLimit,
+    settings.searchEnabled
   );
   const expire = expireAgeMs();
   hub.startExpiry(10 * 60 * 1000, expire);
   // Much shorter than expiry: a dead process shows as an eternal spinner
   // until the sweep catches it.
   hub.startLiveness(30 * 1000);
+  hub.startSearch();
 
   // PID 1 has no default SIGTERM disposition, so close the append fd before the platform stops the container.
   process.on("SIGTERM", () => { hub.close(); process.exit(0); });
