@@ -2,7 +2,7 @@ signalbox specifications: [jumplist](https://dwmkerr.github.io/signalbox/specs/h
 
 # Specification: signalbox CLI
 
-signalbox is a single binary. The hook-path commands (`fire`, `hook claude`, `hook cursor`, `hook codex`, `tmux seen-pane`, and the `session` verbs `ack`, `hide`, `show`, `pin`, `unpin`, `rename`, `remove`, `tag`, `untag`) are bounded - one POST with a 200ms timeout and a capped backlog drain - and always exit 0, so a notifier cannot break the agent that called it. The commands you run yourself (`state`, `jump`, `pick`, `init`, `hub`, `config`, `drain`) may fail loudly.
+signalbox is a single binary. The hook-path commands (`fire`, `hook claude`, `hook cursor`, `hook codex`, `tmux seen-pane`, and the `session` verbs `ack`, `hide`, `show`, `pin`, `unpin`, `rename`, `remove`, `tag`, `untag`) are bounded - one POST with a 200ms timeout and a capped backlog drain - and always exit 0, so a notifier cannot break the agent that called it. The commands you run yourself (`state`, `search`, `index`, `jump`, `pick`, `init`, `hub`, `config`, `drain`) may fail loudly.
 
 Bare `signalbox` (and `-h`/`--help`) prints a short help: just the human commands. `signalbox help` is the full reference - every command, flag, and environment variable. When a command needs the hub and it is not running, the error names the fix (open the Signalbox app, or `signalbox hub`).
 
@@ -113,6 +113,79 @@ STATUS          AGENT   TITLE            KEY           AGE  PROMPT
 ```
 
 The marks are the [status marks](https://dwmkerr.github.io/signalbox/specs/hub-jumplist.html) in terminal form: amber `●` needs you, blue `●` ready, `◌` working, dim `·` read, red `✕` failed. On a TTY, seen and hidden rows dim; piped, they carry a `(seen)` or `(hidden)` suffix instead. `--json` prints the raw `/state` document; `--all` includes hidden rows.
+
+## search
+
+Search complete local session contents, grouped by session.
+
+```bash
+COLUMNS=110 SIGNALBOX_SEARCH=1 components/cli/bin/signalbox search editor --limit 15
+```
+
+```text
+STATE    AGENT   CWD                          HITS  MATCH
+· ended  claude  es-agentic-ai-platform-core  18    Both the navbar dropdown and sidebar entry link to `hre…
+· ended  claude  dwmkerr-claude-toolkit       53    ...correct pwd `~/repos/github/dwmkerr/editor`, clean, …
+· ended  claude  dwmkerr-professional         49    Three real invocations from this session: ``` /editor g…
+· ended  claude  session-contents-search      12    ...Real query against your own history: ``` countHits("…
+· ended  codex   dwmkerr-professional         1     Read the writing style rules at /Users/Dave_Kerr/.claud…
+· ended  claude  dwmkerr                      9     Editor focused. Clearing (Cmd+A, Backspace).
+· ended  claude  dwmkerr                      5     Looking at the editor (tab 1) for your placeholder:
+· ended  codex   editor                       2     ...the editor lists writing-style issues in a file with…
+· ended  claude  remote-hub                   13    and are you indeed using editor w/ gpt as per the defau…
+· ended  claude  signalbox                    22    Let me fetch the live sites and search for the terminal…
+· ended  claude  task--van                    6     Draft written. Now running it through your editor skill…
+· ended  codex   editor                       1     1. [references/code-style.md:32](/Users/Dave_Kerr/repos…
+· ended  codex   dwmkerr-professional         4     I’ll find one example of the floating editor interactio…
+· ended  claude  remote-hub                   5     Kimi FAIL on task 7 - all seven findings are legitimate…
+· ended  codex   dwmkerr-professional         3     I am using the writing-style skill because this is a st…
+```
+
+`HITS` counts matching turns in that session. `STATE` is `live` when the
+indexed transcript still belongs to a current local board row, otherwise
+`ended`. Matches from FTS5 are stripped of their `<mark>` wrappers before
+printing. `--limit N` accepts 1 to 50 sessions and defaults to 50. `--json`
+prints the enabled marker, query, and grouped result objects. When search is
+off, the command prints `search is off; enable it in Signalbox Settings or set
+searchEnabled to true in ~/.config/signalbox/settings.json (scripts can use
+SIGNALBOX_SEARCH=1)` instead of an empty result list.
+
+## index
+
+Inspect the local content index or rebuild it from every discovered transcript.
+
+```bash
+SIGNALBOX_SEARCH=1 components/cli/bin/signalbox index --status
+```
+
+```text
+files known: 941
+files pending: 0
+turns indexed: 16956
+last sweep time: 2026-08-22T13:02:46.200Z
+first build in progress: false
+index size: 32.9 MiB
+```
+
+```bash
+SIGNALBOX_SEARCH=1 SIGNALBOX_DATA_DIR=/tmp/sbidxcli components/cli/bin/signalbox index --rebuild
+```
+
+```text
+rebuilding search index...
+indexing: 0 turns from 0 files, 941 pending
+indexing: 3688 turns from 454 files, 528 pending
+indexing: 7358 turns from 764 files, 300 pending
+indexing: 10352 turns from 941 files, 72 pending
+indexing: 14794 turns from 941 files, 24 pending
+indexing: 16956 turns from 941 files, 0 pending
+search index rebuilt: 16956 turns from 941 files (35.7 MiB)
+```
+
+`--rebuild` sweeps in bounded batches and reports accumulated turns until no
+work remains. With no flag, the command prints usage for `--status` and
+`--rebuild`. When search is off, it prints the same Settings guidance as
+`search` instead of empty index counts.
 
 ## jump
 
@@ -358,12 +431,13 @@ answer everywhere.
 | Variable | Default | Meaning |
 |---|---|---|
 | `SIGNALBOX_URL` | `http://127.0.0.1:8377` | hub address |
-| `SIGNALBOX_DATA_DIR` | `~/.local/state/signalbox` | spool, log, events.jsonl |
+| `SIGNALBOX_DATA_DIR` | `~/.local/state/signalbox` | spool, logs, events.jsonl, and the local search index |
 | `SIGNALBOX_CONFIG` | `$XDG_CONFIG_HOME/signalbox/settings.json`, else `~/.config/signalbox/settings.json` | path to the settings FILE (not a directory); the global `--config <path>` flag wins over it |
 | `SIGNALBOX_PROFILE` | `full` | `redacted` drops cwd, title, prompt and reply, and hashes the session id |
 | `SIGNALBOX_EXPIRE` | `24h` | hub: end sessions with no agent event for this long |
 | `SIGNALBOX_BIND` | `127.0.0.1` | hub: bind address (`signalbox hub --bind` wins over it) |
 | `SIGNALBOX_UPSTREAM` | unset | hub: forward to this remote hub instead of owning state (`signalbox hub --upstream` wins) |
 | `SIGNALBOX_REMOTE` | unset | hub: `1` or `true` runs the hub in remote mode (same as `--remote`) |
+| `SIGNALBOX_SEARCH` | off | `1` or `true` enables local transcript indexing and search |
 | `SIGNALBOX_TOKEN` | unset | bearer token: required to bind non-loopback, and sent by clients as `Authorization: Bearer` |
 | `SIGNALBOX_RAW` | unset | diagnostic: `hook claude` / `hook cursor` attach the untouched hook payload to the fired event (stripped by the redacted profile) |

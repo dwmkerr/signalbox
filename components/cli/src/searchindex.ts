@@ -126,6 +126,12 @@ export interface SearchIndex extends SearchQuery {
   close(): void;
 }
 
+/** Selects whether an index connection may create or update durable search state. */
+export interface OpenIndexOptions {
+  /** Prevents schema creation, transcript discovery, and every index write. */
+  readonly?: boolean;
+}
+
 function readUserVersion(db: Database): number {
   return db.query<{ user_version: number }, []>("PRAGMA user_version").get()?.user_version ?? 0;
 }
@@ -193,11 +199,12 @@ class SqliteSearchIndex implements SearchIndex {
   constructor(
     private readonly db: Database,
     private readonly indexPath: string,
+    private readonly readonly: boolean = false,
   ) {
     this.query = createSearchQuery(db);
     // The one-off walk belongs to index startup so every recurring budget can
     // be spent committing transcript progress.
-    this.refreshDiscovery();
+    if (!readonly) this.refreshDiscovery();
   }
 
   countHits(q: string): number {
@@ -321,6 +328,7 @@ class SqliteSearchIndex implements SearchIndex {
   }
 
   sweep(opts: SweepOptions): SweepSummary {
+    if (this.readonly) throw new Error("search index is open read-only");
     if (!Number.isFinite(opts.budgetMs) || opts.budgetMs < 0) {
       throw new RangeError("budgetMs must be a finite non-negative number");
     }
@@ -408,20 +416,28 @@ class SqliteSearchIndex implements SearchIndex {
 }
 
 /** Opens the versioned WAL index beneath Signalbox's local state directory. */
-export function openIndex(dir = stateDir()): SearchIndex {
-  mkdirSync(dir, { recursive: true });
+export function openIndex(dir = stateDir(), options: OpenIndexOptions = {}): SearchIndex {
+  const readonly = options.readonly ?? false;
+  if (!readonly) mkdirSync(dir, { recursive: true });
   const indexPath = join(dir, indexFilename);
-  const db = new Database(indexPath, { create: true, readwrite: true, strict: true });
+  const db = new Database(indexPath, readonly
+    ? { readonly: true, strict: true }
+    : { create: true, readwrite: true, strict: true });
 
   try {
-    db.run("PRAGMA foreign_keys = ON");
-    db.run("PRAGMA journal_mode = WAL");
+    if (!readonly) {
+      db.run("PRAGMA foreign_keys = ON");
+      db.run("PRAGMA journal_mode = WAL");
+    }
     const version = readUserVersion(db);
-    if (version === 0) createSchema(db);
+    if (version === 0) {
+      if (readonly) throw new Error("search index has no schema");
+      createSchema(db);
+    }
     else if (version !== schemaVersion) {
       throw new Error(`unsupported search index schema version ${version}`);
     }
-    return new SqliteSearchIndex(db, indexPath);
+    return new SqliteSearchIndex(db, indexPath, readonly);
   } catch (err) {
     db.close();
     throw err;
