@@ -15,7 +15,6 @@ struct SessionsView: View {
     // so its empty state agrees with Settings: a hub we set up but cannot reach is
     // "offline", not the cold "never paired" pitch. One truth, two surfaces.
     @Binding var hubURL: String
-    @State private var expanded: String?
     @State private var pressed: String?
     @State private var query = ""
     @State private var confirmDisconnect = false
@@ -50,7 +49,7 @@ struct SessionsView: View {
                                 // Long-press for the pin/unpin menu, the Messages
                                 // gesture. The hub owns the partition, so this
                                 // only fires an event; it never re-sorts here.
-                                .contextMenu { pinMenu(session); chatButton(session) }
+                                .contextMenu { pinMenu(session) }
                                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                                     if !session.infoOnly {
                                         Button { jump(session) } label: { Label("Jump", systemImage: "arrow.uturn.forward") }
@@ -87,7 +86,7 @@ struct SessionsView: View {
                                         .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                                         .listRowSeparator(.hidden)
                                         .listRowBackground(Color.clear)
-                                        .contextMenu { pinMenu(session); chatButton(session) }
+                                        .contextMenu { pinMenu(session) }
                                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                             Button { Task { await hub.unhide(session) } } label: { Label("Unhide", systemImage: "eye") }
                                                 .tint(Theme.blue)
@@ -373,7 +372,6 @@ struct SessionsView: View {
     // status mark would be (it is deliberately silenced, so its live status is
     // not the point), and no jump arrow.
     private func card(_ session: Session, dimmed: Bool) -> some View {
-        let isOpen = expanded == session.key
         return HStack(spacing: 11) {
             // Tap this area to expand; the jump arrow is its own target.
             HStack(spacing: 11) {
@@ -416,17 +414,17 @@ struct SessionsView: View {
                         Text(markdownText(preview))
                             .font(.system(size: 12.5))
                             .foregroundStyle(Theme.dim)
-                            .lineLimit(isOpen ? 5 : 1)
+                            .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 4)
             }
             .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.easeOut(duration: 0.16)) {
-                    expanded = isOpen ? nil : session.key
-                }
-            }
+            // A tap opens the conversation. On a phone you are not at the
+            // machine, so reading what happened is the useful thing to do with
+            // a row and jumping is the deliberate one - which is why jump keeps
+            // its own button rather than owning the whole row.
+            .onTapGesture { chatSession = session }
 
             if !session.infoOnly && !dimmed {
                 Button { jump(session) } label: {
@@ -438,6 +436,11 @@ struct SessionsView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            // Whether this row wants you, on the trailing edge where a badge
+            // belongs. Information-only rows carry no jump button but can still
+            // be unread, which is the clearest proof the two are independent.
+            if !dimmed { AttentionDot(mark: Mark.of(session)) }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 14)
@@ -458,13 +461,6 @@ struct SessionsView: View {
             Button { Task { await hub.unpin(session) } } label: { Label("Unpin", systemImage: "pin.slash") }
         } else {
             Button { Task { await hub.pin(session) } } label: { Label("Pin", systemImage: "pin") }
-        }
-    }
-
-    @ViewBuilder
-    private func chatButton(_ session: Session) -> some View {
-        Button { chatSession = session } label: {
-            Label("Show Chat", systemImage: "bubble.left.and.bubble.right")
         }
     }
 

@@ -440,11 +440,12 @@ power user pairs - and deliberately do not send them to Settings, which only rep
 <h2>Actions</h2>
 <table>
   <tr><th>Gesture</th><th>Action</th></tr>
-  <tr><td>Tap a card</td><td>Expand the preview in place, to a few lines. It never marks the session seen.</td></tr>
+  <tr><td>Tap a card</td><td>Open the session's history as a conversation (see Chat below). It never marks the session seen. On a phone you are not at the machine the session runs on, so reading what happened is the useful thing to do with a row, and jumping is the deliberate one - which is why jump keeps its own button rather than owning the whole row.</td></tr>
+  <tr><td>The <span class="amber">dot</span> on the trailing edge</td><td>Whether this row wants you: amber when it needs your input, blue when output has updated, absent once it is read. It sits opposite the leading mark on purpose. A row answers two different questions - what the agent is doing, and whether it wants you - and they change for different reasons: the first when the agent acts, the second when you look. One glyph cannot carry both. A working row shows a spinner and no dot, because a spinner is an activity rather than a notification. A failed row shows both. Information-only rows (CI, GitHub) carry the dot but no jump affordance, which is the clearest proof the two are independent.</td></tr>
   <tr><td>The <span class="blue">arrow</span>, or swipe right, <span class="blue">Jump</span></td><td>Shown on every visible machine row. A tmux or cursor origin asks the owning machine to raise its window. With no usable origin, it shows <b>Jump not supported</b>: "This session is running in a plain terminal - jump is not supported yet. Submit feedback if you would find this useful." <b>Submit feedback</b> opens <a href="https://github.com/dwmkerr/signalbox/issues/67">issue 67</a>, and <b>Cancel</b> dismisses the alert. URL-only CI and GitHub rows are information-only and offer neither the arrow nor the Jump swipe action.</td></tr>
   <tr><td>Swipe left, <span class="amber">Seen</span></td><td>Fire <code>seen</code>. The row goes quiet everywhere, on every surface. <span class="chip built">built</span> Offered only on an unread row; a quiet, already-acked row offers no no-op (the Mail rule: "Mark Read" appears only on unread mail).</td></tr>
   <tr><td>Swipe left, Hide</td><td>Fire <code>hide</code>. The row leaves the main list for the collapsed Hidden section until the session speaks again, or until unhidden there.</td></tr>
-  <tr><td>Long-press <span class="chip built">built</span></td><td>Context menu: <b>Pin</b> / <b>Unpin</b> (see Pinned above) and <b>Show Chat</b> (see Chat below).</td></tr>
+  <tr><td>Long-press <span class="chip built">built</span></td><td>Context menu: <b>Pin</b> / <b>Unpin</b> (see Pinned above). Chat is the row's tap, so it is not repeated here.</td></tr>
   <tr><td>Pull down a little</td><td>Reveal the search field.</td></tr>
   <tr><td>Pull down further</td><td>Force a full <code>/state</code> resync. The escape hatch when a stream has gone strange.</td></tr>
 </table>
@@ -455,7 +456,7 @@ seen is always deliberate here.</p>
 phone.</p>
 
 <h2>Chat</h2>
-<p>Long-press a session row and choose <b>Show Chat</b> to open its history as a conversation.</p>
+<p>Tap a session row to open its history as a conversation.</p>
 
 <div class="phones">
   <div class="phonewrap">

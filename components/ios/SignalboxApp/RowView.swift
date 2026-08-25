@@ -44,12 +44,14 @@ struct RowView: View {
     }
 }
 
+// The leading indicator: what the agent is doing. Whether it wants you is a
+// separate question, answered by the trailing dot.
 struct MarkView: View {
     let mark: Mark
 
     var body: some View {
         Group {
-            switch mark {
+            switch mark.activity {
             case .working:
                 // A spinner, because "working" is the one status that is about
                 // time passing rather than a thing that happened.
@@ -62,14 +64,25 @@ struct MarkView: View {
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(Theme.red)
                     .frame(width: 9, height: 9)
-            case .read:
+            case .idle:
                 Circle()
                     .strokeBorder(Theme.faint.opacity(0.6), lineWidth: 1.5)
                     .frame(width: 9, height: 9)
-            case .attention, .unread:
-                Circle().fill(mark.color).frame(width: 9, height: 9)
             }
         }
+    }
+}
+
+// The trailing indicator: whether this row wants you. Takes the slot a badge
+// occupies in any messaging app, and holds the row's width even when empty so
+// titles do not shift as sessions are read.
+struct AttentionDot: View {
+    let mark: Mark
+
+    var body: some View {
+        Circle()
+            .fill(mark.attentionDot ?? .clear)
+            .frame(width: 9, height: 9)
     }
 }
 

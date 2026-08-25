@@ -2811,6 +2811,11 @@ private final class SessionCellView: NSTableCellView {
             right.addArrangedSubview(pin)
         }
         right.addArrangedSubview(ageLabel)
+        // Whether this row wants you, where a badge belongs. Working has none:
+        // a spinner is an activity, not a notification, and one dot meaning
+        // both would mean neither. The view is always added so the age column
+        // does not shift as rows are read.
+        right.addArrangedSubview(makeAttentionDot())
         right.translatesAutoresizingMaskIntoConstraints = false
         right.setContentHuggingPriority(.required, for: .horizontal)
         right.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -2899,23 +2904,34 @@ private final class SessionCellView: NSTableCellView {
         return pill
     }
 
+    // The leading mark is the activity: working, failed, or idle. Whether the
+    // row wants you is a different question with a different answer rate - it
+    // changes when you look, not when the agent acts - so it has its own slot
+    // on the trailing edge.
+    private func makeAttentionDot() -> NSView {
+        let dot = NSView()
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = s(4.25)
+        switch row.mark {
+        case .attention, .failed:
+            dot.layer?.backgroundColor = Theme.attention.cgColor
+        case .unread:
+            dot.layer?.backgroundColor = markColor(.unread).cgColor
+        case .working, .read:
+            dot.layer?.backgroundColor = NSColor.clear.cgColor
+        }
+        NSLayoutConstraint.activate([
+            dot.widthAnchor.constraint(equalToConstant: s(8.5)),
+            dot.heightAnchor.constraint(equalToConstant: s(8.5)),
+        ])
+        return dot
+    }
+
     private func makeMarkView() -> NSView {
         switch row.mark {
         case .working:
             return SpinnerMarkView(frame: NSRect(x: 0, y: 0, width: s(11), height: s(11)))
-        case .attention, .unread:
-            // Same dot, two temperatures: amber = blocked on you, blue =
-            // output updated (amber scheme; no "?" pill).
-            let dot = NSView()
-            dot.wantsLayer = true
-            dot.layer?.backgroundColor = markColor(row.mark).cgColor
-            dot.layer?.cornerRadius = s(4.25)
-            NSLayoutConstraint.activate([
-                dot.widthAnchor.constraint(equalToConstant: s(8.5)),
-                dot.heightAnchor.constraint(equalToConstant: s(8.5)),
-            ])
-            return dot
-        case .read:
+        case .attention, .unread, .read:
             let ring = NSView()
             ring.wantsLayer = true
             ring.layer?.borderColor = Theme.ring.cgColor

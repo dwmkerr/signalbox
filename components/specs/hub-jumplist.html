@@ -67,6 +67,9 @@
   .age { font-size:11px; font-weight:600; color:#98989D; }
   .dot { width:8.5px; height:8.5px; border-radius:50%; background:#0A84FF; }
   .dot.ask { background:#FF9F0A; }
+  /* Holds the slot so the age column does not shift as rows are read. */
+  .dot.none { background:transparent; }
+  .xmark { color:#FF453A; font-size:10px; line-height:1; font-weight:700; }
   .ring { width:8px; height:8px; border-radius:50%; border:1.4px solid rgba(152,152,157,.55); }
   .spin { width:11px; height:11px; border-radius:50%; border:1.7px solid rgba(152,152,157,.25);
           border-top-color:#98989D; animation:rot .9s linear infinite; }
@@ -226,14 +229,30 @@
   bar items for the light, these facts, or its links.</p>
 
   <h2>Status marks</h2>
+  <p>A row answers two different questions, and they get two different slots. The
+  leading mark says what the agent is doing. The trailing dot says whether it wants
+  you. They change for different reasons - the first when the agent acts, the second
+  when you look - so one glyph cannot carry both.</p>
+
+  <p><b>Leading, the activity:</b></p>
+  <ul>
+    <li><span class="spin" style="display:inline-block;vertical-align:-1px"></span> spinner - working</li>
+    <li><span class="red">✕ red</span> - failed (fix)</li>
+    <li>○ faint ring - idle; nothing is running right now</li>
+  </ul>
+
+  <p><b>Trailing, beside the age, whether it wants you:</b></p>
   <ul>
     <li><span class="amber">● amber</span> - needs your input (act)</li>
     <li><span class="blue">● blue</span> - output updated (look)</li>
-    <li><span class="red">✕ red</span> - failed (fix)</li>
-    <li><span class="spin" style="display:inline-block;vertical-align:-1px"></span> spinner - working</li>
-    <li>○ faint ring - read; dealt with, the row keeps its place</li>
+    <li>no dot - read, or working</li>
   </ul>
-  <p>A bold title means unread. The amber mark alone means the session is asking for you.</p>
+
+  <p>A working row shows a spinner and no dot: a spinner is an activity, not a
+  notification, and a dot that also meant "busy" would mean neither thing clearly.
+  A failed row shows both, because a failure is something that happened and
+  something that wants you. A bold title still means unread, and the amber dot
+  alone still means the session is asking for you.</p>
 
   <h2>Subtext</h2>
   <p>The line under each name follows the one-line preview rule from
@@ -482,11 +501,21 @@ const PIN = '<svg width="10" height="10" viewBox="0 0 24 24"><path d="M16 9V4h1c
 // Eye-off mark, shown in place of the status dot on a hidden (set-aside) row.
 const EYESLASH = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6E6E73" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20C5 20 1 12 1 12a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 function ageStr(s){ if(s<60) return s+"s"; if(s<3600) return Math.floor(s/60)+"m"; return Math.floor(s/3600)+"h"; }
+// The leading mark is the activity only. Whether the row wants you is the
+// trailing dot, because the two answer different questions and change at
+// different rates.
 function markHTML(st){
   if(st==="working") return '<div class="spin"></div>';
-  if(st==="ask") return '<div class="dot ask"></div>';
-  if(st==="unread") return '<div class="dot"></div>';
+  if(st==="error") return '<div class="xmark">&#10005;</div>';
   return '<div class="ring"></div>';
+}
+// A working row has no dot: a spinner is an activity, not a notification. A
+// failed row has both. The element is always emitted so the age column does not
+// shift as rows are read.
+function attentionHTML(st){
+  if(st==="ask"||st==="error") return '<div class="dot ask"></div>';
+  if(st==="unread") return '<div class="dot"></div>';
+  return '<div class="dot none"></div>';
 }
 function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function inlineMd(source){
@@ -634,7 +663,7 @@ function renderList(){
       <div class="mark">${markHTML(s.state)}</div>
       <div class="glyph">${AG[s.agent]||AG.generic}</div>
       <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${previewMd(subtext(s))}</div></div>
-      <div class="right">${s.pinned?`<span class="pin">${PIN}</span>`:""}<span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span></div>
+      <div class="right">${s.pinned?`<span class="pin">${PIN}</span>`:""}<span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span>${attentionHTML(s.state)}</div>
     </div>`}).join("");
   const hidden = hiddenHTML();
   // "No matches" only when nothing matches at all, hidden rows included.
