@@ -391,16 +391,15 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
 
         let searchHeading = sectionHeading("Session contents search")
         let searchCheckbox = NSButton(
-            checkboxWithTitle: "Search inside session transcripts",
+            checkboxWithTitle: "Search session contents",
             target: self,
             action: #selector(searchEnabledChanged(_:))
         )
         searchCheckbox.state = SharedSettings.searchEnabled ? .on : .off
         self.searchCheckbox = searchCheckbox
         let searchCaption = caption(
-            "Indexes the conversations on this machine so the jumplist can find a session "
-            + "by something said inside it, including sessions that have ended. The index "
-            + "stays on this machine and is never sent to a hub."
+            "Builds a local index of session transcripts so the jumplist can find sessions "
+            + "by their contents, including ended sessions. The index is never uploaded."
         )
         let searchStatus = caption("")
         self.searchStatusLabel = searchStatus
@@ -903,6 +902,10 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         }
     }
 
+    private static func counted(_ value: Int) -> String {
+        NumberFormatter.localizedString(from: NSNumber(value: value), number: .decimal)
+    }
+
     @objc private func searchEnabledChanged(_ sender: NSButton) {
         SharedSettings.searchEnabled = sender.state == .on
         // The hub reads this file when it starts a sweep, so the change takes
@@ -916,7 +919,8 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
     private func refreshSearchStatus() {
         guard let label = searchStatusLabel else { return }
         if !SharedSettings.searchEnabled {
-            label.stringValue = "Off. No transcripts are read and no index is kept."
+            label.stringValue =
+                "Off. Transcripts are not being indexed. Any existing index stays on this machine."
             return
         }
         guard let provider = searchStatusProvider else {
@@ -931,15 +935,20 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
             let size = ByteCountFormatter.string(
                 fromByteCount: Int64(status.indexSizeBytes), countStyle: .file
             )
+            // Counts read in the user's locale, and sessions rather than files:
+            // a session's subagent transcripts are separate files sharing its
+            // id, so a file count overstates the sessions by several times.
+            let messages = Self.counted(status.turnsIndexed)
+            let sessions = Self.counted(status.sessionsKnown)
             if status.filesPending > 0 {
                 let verb = status.firstBuildInProgress ? "Building" : "Updating"
+                let remaining = Self.counted(status.filesPending)
                 label.stringValue =
-                    "\(verb): \(status.turnsIndexed) messages from "
-                    + "\(status.filesKnown) sessions, \(status.filesPending) to go."
+                    "\(verb): \(messages) messages across \(sessions) sessions. "
+                    + "\(remaining) transcripts remaining."
             } else {
                 label.stringValue =
-                    "Ready: \(status.turnsIndexed) messages from "
-                    + "\(status.filesKnown) sessions, \(size)."
+                    "Ready: \(messages) messages across \(sessions) sessions (\(size))."
             }
         }
     }

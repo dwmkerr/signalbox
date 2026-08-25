@@ -79,6 +79,9 @@ struct SearchDoc: Decodable {
 struct SearchIndexStatus: Decodable, Equatable {
     /// Transcript files currently recorded in the index.
     let filesKnown: Int
+    /// Distinct sessions those files belong to. Lower than filesKnown, because
+    /// a session's subagent transcripts are separate files sharing its id.
+    let sessionsKnown: Int
     /// Files discovered but not yet indexed, or changed since they were.
     let filesPending: Int
     /// Turns currently searchable.
@@ -91,6 +94,7 @@ struct SearchIndexStatus: Decodable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         filesKnown = (try? c.decodeIfPresent(Int.self, forKey: .filesKnown)) ?? 0
+        sessionsKnown = (try? c.decodeIfPresent(Int.self, forKey: .sessionsKnown)) ?? 0
         filesPending = (try? c.decodeIfPresent(Int.self, forKey: .filesPending)) ?? 0
         turnsIndexed = (try? c.decodeIfPresent(Int.self, forKey: .turnsIndexed)) ?? 0
         firstBuildInProgress =
@@ -99,14 +103,16 @@ struct SearchIndexStatus: Decodable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case filesKnown, filesPending, turnsIndexed, firstBuildInProgress, indexSizeBytes
+        case filesKnown, sessionsKnown, filesPending, turnsIndexed, firstBuildInProgress
+        case indexSizeBytes
     }
 
     init(
-        filesKnown: Int, filesPending: Int, turnsIndexed: Int,
+        filesKnown: Int, sessionsKnown: Int, filesPending: Int, turnsIndexed: Int,
         firstBuildInProgress: Bool, indexSizeBytes: Int
     ) {
         self.filesKnown = filesKnown
+        self.sessionsKnown = sessionsKnown
         self.filesPending = filesPending
         self.turnsIndexed = turnsIndexed
         self.firstBuildInProgress = firstBuildInProgress

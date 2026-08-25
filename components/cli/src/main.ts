@@ -897,7 +897,7 @@ async function runState(args: string[]): Promise<void> {
 const cliSearchResultLimit = 50;
 const searchDatabaseFiles = ["search.db-wal", "search.db-shm", "search.db"];
 const searchDisabledMessage =
-  "search is off; enable it in Signalbox Settings or set searchEnabled to true in ~/.config/signalbox/settings.json (scripts can use SIGNALBOX_SEARCH=1)";
+  "session contents search is off; enable it in Signalbox Settings, set searchEnabled to true in ~/.config/signalbox/settings.json, or use SIGNALBOX_SEARCH=1 in scripts";
 
 function checkSearchEnabled(): boolean {
   if (loadSettings().searchEnabled) return true;

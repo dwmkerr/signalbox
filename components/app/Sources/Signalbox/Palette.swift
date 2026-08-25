@@ -2534,7 +2534,7 @@ private final class FallbackRowView: NSView {
         key.translatesAutoresizingMaskIntoConstraints = false
         addSubview(key)
 
-        let label = NSTextField(labelWithString: "Search session contents for \u{201C}\(query)\u{201D}")
+        let label = NSTextField(labelWithString: "Search session contents for \"\(query)\"")
         label.font = .systemFont(ofSize: s(12))
         label.textColor = Theme.textDim
         label.lineBreakMode = .byTruncatingTail

@@ -227,7 +227,7 @@ describe("search command", () => {
     expect(code).toBe(0);
     expect(out).toContain("enable it in Signalbox Settings");
     expect(out).toContain("searchEnabled to true in ~/.config/signalbox/settings.json");
-    expect(out).toContain("scripts can use SIGNALBOX_SEARCH=1");
+    expect(out).toContain("use SIGNALBOX_SEARCH=1 in scripts");
     expect(existsSync(join(dataDir, "search.db"))).toBe(false);
   });
 

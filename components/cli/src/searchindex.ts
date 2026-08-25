@@ -111,6 +111,8 @@ export interface SweepSummary {
 export interface IndexStatus {
   /** Number of transcript files currently recorded in the index. */
   filesKnown: number;
+  /** Number of distinct sessions those files belong to. */
+  sessionsKnown: number;
   /** Number of discovered, incomplete, changed, or vanished files needing work. */
   filesPending: number;
   /** Number of user and assistant turns currently indexed. */
@@ -412,11 +414,16 @@ class SqliteSearchIndex implements SearchIndex {
 
     const aggregate = this.db.query<{
       files_known: number;
+      sessions_known: number;
       turns_indexed: number;
       last_sweep_time: string | null;
     }, []>(`
       SELECT
         (SELECT count(*) FROM files) AS files_known,
+        -- Distinct sessions, not files: a session's subagent transcripts are
+        -- separate files that share its id, so counting files overstates what
+        -- a person would call a session by several times over.
+        (SELECT count(DISTINCT session_uuid) FROM files) AS sessions_known,
         (SELECT count(*) FROM turns) AS turns_indexed,
         (SELECT max(indexed_ts) FROM files) AS last_sweep_time
     `).get()!;
@@ -432,6 +439,7 @@ class SqliteSearchIndex implements SearchIndex {
 
     return {
       filesKnown: aggregate.files_known,
+      sessionsKnown: aggregate.sessions_known,
       filesPending,
       turnsIndexed: aggregate.turns_indexed,
       lastSweepTime: aggregate.last_sweep_time,

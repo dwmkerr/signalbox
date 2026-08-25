@@ -13,6 +13,7 @@ import type { Exchange } from "./state";
 import { procAlive } from "./proc";
 import { buildStamp } from "./build";
 import { openIndex, type SearchIndex } from "./searchindex";
+import { loadSettings } from "./config";
 
 const heartbeatMs = 15_000;
 export const searchSweepIntervalMs = 250;
@@ -80,7 +81,13 @@ export class Hub {
     // the URL it happened to dial.
     private port: number = 0,
     private historyLimit: number = DefaultHistoryLimit,
-    searchEnabled: boolean = false
+    searchEnabled: boolean = false,
+    // Whether search is still enabled, asked once per sweep. The constructor
+    // flag decides whether to open an index at all; this decides whether to
+    // keep writing to it, so turning the setting off stops transcripts being
+    // read without waiting for a restart. Injectable so a test does not need a
+    // settings file on disk to exercise indexing.
+    private searchEnabledNow: () => boolean = () => loadSettings().searchEnabled
   ) {
     this.store = new Store(historyLimit);
     mkdirSync(stateDir, { recursive: true });
@@ -232,7 +239,14 @@ export class Hub {
   startSearch(): void {
     const index = this.searchIndex;
     if (!index) return;
-    const sweep = () => index.sweep({ budgetMs: searchSweepBudgetMs });
+    // The setting is re-read every tick rather than captured at startup, so
+    // turning search off stops reading transcripts immediately. Captured once,
+    // a hub would keep indexing until it was restarted while the app reported
+    // the feature as off.
+    const sweep = () => {
+      if (!this.searchEnabledNow()) return;
+      index.sweep({ budgetMs: searchSweepBudgetMs });
+    };
     sweep();
     this.timers.push(setInterval(sweep, searchSweepIntervalMs));
   }

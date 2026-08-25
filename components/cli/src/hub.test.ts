@@ -81,6 +81,13 @@ async function getExchanges(hub: Hub, key: string, query = "", server = fakeServ
   return (await hub.handle(req, server))!;
 }
 
+async function getSearchStatus(hub: Hub, server = fakeServer): Promise<Response> {
+  return (await hub.handle(
+    new Request("http://127.0.0.1:8377/search/status", { headers: { Host: "127.0.0.1:8377" } }),
+    server,
+  ))!;
+}
+
 async function getSearch(hub: Hub, query = "?q=needle", server = fakeServer): Promise<Response> {
   const req = new Request(`http://127.0.0.1:8377/search${query}`, {
     headers: { Host: "127.0.0.1:8377" },
@@ -89,7 +96,11 @@ async function getSearch(hub: Hub, query = "?q=needle", server = fakeServer): Pr
 }
 
 function searchHub(dir: string, token = "", enabled = true): Hub {
-  return track(new Hub(dir, "test", token, "127.0.0.1", "", 0, false, 0, 1000, enabled));
+  // The live check is injected so indexing can be exercised without a settings
+  // file on disk; production reads it from the user's settings each sweep.
+  return track(new Hub(
+    dir, "test", token, "127.0.0.1", "", 0, false, 0, 1000, enabled, () => enabled,
+  ));
 }
 
 let hubs: Hub[] = [];
@@ -461,6 +472,53 @@ describe("search", () => {
         if (value === undefined) delete process.env[name];
         else process.env[name] = value;
       });
+    }
+  });
+
+  // Turning the setting off has to stop transcripts being read straight away.
+  // Read once at startup, a hub kept indexing until it was restarted while
+  // every surface reported the feature as off.
+  test("turning search off stops the sweep without a restart", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sbsweepoff-"));
+    const uuid = "33333333-3333-4333-8333-333333333333";
+    const transcript = join(root, "codex", "2026", "08", "19", `rollout-x-${uuid}.jsonl`);
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, [
+      JSON.stringify({ type: "session_meta", payload: { session_id: uuid, cwd: "/work/off" } }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-08-19T10:01:00.000Z",
+        payload: { type: "user_message", message: "needle in a transcript" },
+      }),
+    ].join("\n") + "\n");
+
+    const previousCodex = process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR;
+    const previousClaude = process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR;
+    const previousCursor = process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR;
+    process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR = join(root, "codex");
+    process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR = join(root, "claude");
+    process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR = join(root, "cursor");
+
+    let enabled = false;
+    const hub = track(new Hub(
+      join(root, "state"), "test", "", "127.0.0.1", "", 0, false, 0, 1000, true,
+      () => enabled,
+    ));
+    try {
+      // Off from the first tick: the index exists but nothing is written to it.
+      hub.startSearch();
+      const offBody = await (await getSearchStatus(hub)).json();
+      expect(offBody.status.turnsIndexed).toBe(0);
+
+      // Flipping it on lets the very next sweep index, with no restart.
+      enabled = true;
+      hub.startSearch();
+      const onBody = await (await getSearchStatus(hub)).json();
+      expect(onBody.status.turnsIndexed).toBeGreaterThan(0);
+    } finally {
+      process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR = previousCodex;
+      process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR = previousClaude;
+      process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR = previousCursor;
     }
   });
 

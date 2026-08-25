@@ -16,6 +16,7 @@ import type { RequestHandler } from "./hub";
 import { PermanentError, Spool } from "./spool";
 import { Store } from "./state";
 import { openIndex, type SearchIndex } from "./searchindex";
+import { loadSettings } from "./config";
 import { buildStamp } from "./build";
 import { hubLog } from "./log";
 
@@ -66,6 +67,8 @@ export interface ForwarderOptions {
   historyLimit: number;
   /** Index local transcripts and serve /search from them. Off by default. */
   searchEnabled?: boolean;
+  /** Whether search is still enabled, asked once per sweep. See Hub. */
+  searchEnabledNow?: () => boolean;
 }
 
 export class Forwarder implements RequestHandler {
@@ -271,8 +274,13 @@ export class Forwarder implements RequestHandler {
   startSearch(): void {
     const index = this.searchIndex;
     if (!index) return;
+    // Re-read per tick for the same reason as the hub: turning the setting off
+    // has to stop transcripts being read without waiting for a restart.
     this.searchTimer = setInterval(
-      () => index.sweep({ budgetMs: searchSweepBudgetMs }),
+      () => {
+        if (!(this.opts.searchEnabledNow ?? (() => loadSettings().searchEnabled))()) return;
+        index.sweep({ budgetMs: searchSweepBudgetMs });
+      },
       searchSweepIntervalMs,
     );
   }

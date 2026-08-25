@@ -405,6 +405,21 @@ click its light for the status popover.</div>
   <p>Writes merge key by key, so unknown keys survive. A missing or broken file falls back to
   defaults and keeps the hook path working.</p>
 
+  <h2>The session contents search toggle</h2>
+  <p>Off by default, in the General tab. On, the hub indexes the agent transcripts on
+  this machine so the jumplist can search what was said inside a session, including
+  sessions that have ended. Off, no transcripts are read; an index already built stays
+  on disk rather than being deleted, which is what the status line says.</p>
+  <p>The status line moves while a build runs, because a first pass over a large corpus
+  takes minutes and a pane that says nothing during it reads as a broken switch. It
+  counts <b>sessions</b>, not transcript files: a session's subagent transcripts are
+  separate files sharing its id, so a file count overstates sessions several times over.
+  The line polls only while the window is open.</p>
+  <p>The hub re-reads this setting on every sweep, so turning it off stops transcripts
+  being read without waiting for a restart. It lives in General rather than its own tab
+  because it is one preference with a status line; it earns a tab when index management
+  or excluded folders arrive.</p>
+
   <h2>The /clear and /rename toggles</h2>
   <p>Claude Code fires <code>SessionEnd</code> with reason <code>clear</code> on <code>/clear</code>.
   Checked (default), the session ends and leaves the board. Unchecked, the hook maps it to
@@ -424,6 +439,13 @@ click its light for the status popover.</div>
     <tr><td class="str">Builds a local index. Transcript search never crosses machines.</td><td>General tab, under the search toggle</td><td>Always</td></tr>
     <tr><td class="str">Record Shortcut</td><td>General tab, shortcut recorder</td><td>When no shortcut is recorded</td></tr>
     <tr><td class="str">Press Shortcut</td><td>General tab, shortcut recorder</td><td>While recording a shortcut</td></tr>
+    <tr><td class="str">Search session contents</td><td>General tab, search section</td><td>Always</td></tr>
+    <tr><td class="str">Builds a local index of session transcripts so the jumplist can find sessions by their contents, including ended sessions. The index is never uploaded.</td><td>General tab, under the search checkbox</td><td>Always</td></tr>
+    <tr><td class="str">Off. Transcripts are not being indexed. Any existing index stays on this machine.</td><td>General tab, search status line</td><td>The setting is off. Turning it off stops indexing at the next sweep; it does not delete an index already built</td></tr>
+    <tr><td class="str">Waiting for the hub.</td><td>General tab, search status line</td><td>Search is on but the hub has not answered yet</td></tr>
+    <tr><td class="str">Building: 16,894 messages across 278 sessions. 12 transcripts remaining.</td><td>General tab, search status line</td><td>The first index build has not finished</td></tr>
+    <tr><td class="str">Updating: 16,894 messages across 278 sessions. 12 transcripts remaining.</td><td>General tab, search status line</td><td>The first build is done and new or changed transcripts are being indexed</td></tr>
+    <tr><td class="str">Ready: 16,894 messages across 278 sessions (33.6 MB).</td><td>General tab, search status line</td><td>Nothing is pending</td></tr>
     <tr><td class="str">Remove the session on /clear</td><td>Agents tab, both agent sections</td><td>Always; the session leaves the board when checked</td></tr>
     <tr><td class="str">Rename the session on /rename</td><td>Agents tab, both agent sections</td><td>Always</td></tr>
     <tr><td class="str">Local - 127.0.0.1:8377</td><td>Status pill, green dot</td><td>Running mode is Local and the hub answers</td></tr>
