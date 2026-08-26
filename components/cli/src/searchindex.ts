@@ -131,6 +131,8 @@ export interface SearchIndex extends SearchQuery {
   sweep(opts: SweepOptions): SweepSummary;
   /** Reads current durable counts and the retained discovery work list. */
   status(): IndexStatus;
+  /** Empties the index and rediscovers, so the next sweeps rebuild it from scratch. */
+  rebuild(): void;
   /** Releases this process's SQLite connection while leaving the index intact. */
   close(): void;
 }
@@ -223,6 +225,26 @@ class SqliteSearchIndex implements SearchIndex {
 
   search(q: string, limit: number, liveSessions: readonly Event[] = []): SearchResult[] {
     return this.query.search(q, limit, liveSessions);
+  }
+
+  // Emptied in place rather than by deleting the database files: the hub holds
+  // this connection open, and unlinking underneath it would leave the process
+  // writing to a file nothing can read.
+  rebuild(): void {
+    if (this.readonly) throw new Error("cannot rebuild a read-only index");
+    this.db.transaction(() => {
+      this.db.run("DELETE FROM turns_fts");
+      this.db.run("DELETE FROM turns");
+      this.db.run("DELETE FROM files");
+      this.db.run("DELETE FROM meta");
+    })();
+    this.pending = [];
+    this.pendingIndex = 0;
+    this.vanished = [];
+    this.vanishedIndex = 0;
+    this.discoveredCount = 0;
+    this.lastDiscoveryMs = Number.NEGATIVE_INFINITY;
+    this.refreshDiscovery();
   }
 
   private refreshDiscovery(): void {

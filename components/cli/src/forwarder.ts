@@ -145,6 +145,9 @@ export class Forwarder implements RequestHandler {
     if (req.method === "GET" && url.pathname === "/search/status") {
       return this.handleSearchStatus();
     }
+    if (req.method === "POST" && url.pathname === "/search/rebuild") {
+      return this.handleSearchRebuild();
+    }
     if (req.method === "GET" && url.pathname === "/search") {
       return this.handleSearch(url);
     }
@@ -273,6 +276,16 @@ export class Forwarder implements RequestHandler {
       query,
       results: index.search(query, searchResultLimit, this.store.list()),
     });
+  }
+
+  // Rebuilding is the hub's job because it owns the open connection. It empties
+  // the index and returns at once: the sweep refills it, so the caller sees
+  // progress where it already watches for it rather than waiting on this.
+  private handleSearchRebuild(): Response {
+    const index = this.activeIndex();
+    if (!index) return noStoreJSON({ error: "search_disabled", enabled: false }, 409);
+    index.rebuild();
+    return noStoreJSON({ enabled: true, status: index.status() });
   }
 
   private handleSearchStatus(): Response {

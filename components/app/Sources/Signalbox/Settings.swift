@@ -217,10 +217,9 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
     private var iconPopup: NSPopUpButton?
     private var clearCheckbox: NSButton?
     private var searchCheckbox: NSButton?
-    private var searchStatusLabel: NSTextField?
-    private var searchStatusTimer: Timer?
-    /// Asks the hub for index progress. Set by the app delegate.
-    var searchStatusProvider: (@MainActor () async -> SearchIndexStatus?)?
+    private var rebuildButton: NSButton?
+    /// Empties the index so the hub rebuilds it. Set by the app delegate.
+    var rebuildIndexAction: (@MainActor () async -> Bool)?
     private var renameCheckbox: NSButton?
     private var codexClearCheckbox: NSButton?
     private var codexRenameCheckbox: NSButton?
@@ -291,15 +290,6 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         // A settings window nobody has open has no business talking to the hub
         // every few seconds, so this surface owns one reference to the monitor.
         monitor.begin("settings") { [weak self] in self?.applyHealth() }
-        // A first build takes minutes, so the line has to move while the window
-        // is open; a static count reads as a stuck toggle. Only while open, for
-        // the same reason the health monitor is reference counted.
-        refreshSearchStatus()
-        searchStatusTimer?.invalidate()
-        searchStatusTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) {
-            [weak self] _ in
-            Task { @MainActor in self?.refreshSearchStatus() }
-        }
         // Accessory apps stay background by default; a settings window is a
         // real window and needs the app frontmost to take keys and clicks.
         // orderFrontRegardless because activate alone can leave the window
@@ -406,6 +396,10 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         return pane(containing: stack)
     }
 
+    // The switch and the one expensive action, and nothing else. Index progress
+    // lives on the jumplist's search row, where it is load-bearing: a search run
+    // against a half-built index quietly misses things, and that is the moment
+    // the user needs to know. Spotlight, Photos and Alfred all split it this way.
     private func buildSearchPane() -> NSView {
         let checkbox = NSButton(
             checkboxWithTitle: "Search session contents",
@@ -415,11 +409,15 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         checkbox.state = SharedSettings.searchEnabled ? .on : .off
         self.searchCheckbox = checkbox
 
-        let status = caption("")
-        self.searchStatusLabel = status
+        let rebuild = NSButton(
+            title: "Rebuild Index\u{2026}", target: self, action: #selector(rebuildIndexClicked(_:))
+        )
+        rebuild.bezelStyle = .rounded
+        rebuild.isEnabled = SharedSettings.searchEnabled
+        self.rebuildButton = rebuild
 
-        let stack = verticalStack([checkbox, status])
-        stack.setCustomSpacing(6, after: checkbox)
+        let stack = verticalStack([checkbox, rebuild])
+        stack.setCustomSpacing(14, after: checkbox)
         return pane(containing: stack)
     }
 
@@ -815,8 +813,6 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
 
     func windowWillClose(_ notification: Notification) {
         monitor.end("settings")
-        searchStatusTimer?.invalidate()
-        searchStatusTimer = nil
         logToastTimer?.invalidate()
         logToastTimer = nil
         logToastLabel?.stringValue = ""
@@ -901,55 +897,33 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         }
     }
 
-    private static func counted(_ value: Int) -> String {
-        NumberFormatter.localizedString(from: NSNumber(value: value), number: .decimal)
-    }
-
     @objc private func searchEnabledChanged(_ sender: NSButton) {
         SharedSettings.searchEnabled = sender.state == .on
-        // The hub reads this file when it starts a sweep, so the change takes
-        // effect on its own; the status line is what tells the user that.
-        refreshSearchStatus()
+        // The hub re-reads the setting on its next sweep, so nothing else here
+        // has to make it take effect.
+        rebuildButton?.isEnabled = sender.state == .on
+    }
+
+    // Rebuilding throws away a working index and spends minutes rebuilding it,
+    // so it asks first. The alert is the confirmation; there is no caption
+    // warning about it on the pane.
+    @objc private func rebuildIndexClicked(_ sender: NSButton) {
+        let alert = NSAlert()
+        alert.messageText = "Rebuild the search index?"
+        alert.informativeText =
+            "Searching will return fewer results until the index is built again."
+        alert.addButton(withTitle: "Rebuild")
+        alert.addButton(withTitle: "Cancel")
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            Task { @MainActor in _ = await self?.rebuildIndexAction?() }
+        }
     }
 
     // Index progress, polled while the window is open. A first build over a
     // large corpus takes minutes, and a settings pane that says nothing during
     // it reads as a broken toggle.
-    private func refreshSearchStatus() {
-        guard let label = searchStatusLabel else { return }
-        if !SharedSettings.searchEnabled {
-            label.stringValue = "Off"
-            return
-        }
-        guard let provider = searchStatusProvider else {
-            label.stringValue = "Waiting for the hub"
-            return
-        }
-        Task { @MainActor in
-            guard let status = await provider() else {
-                label.stringValue = "Waiting for the hub"
-                return
-            }
-            let size = ByteCountFormatter.string(
-                fromByteCount: Int64(status.indexSizeBytes), countStyle: .file
-            )
-            // Counts read in the user's locale, and sessions rather than files:
-            // a session's subagent transcripts are separate files sharing its
-            // id, so a file count overstates the sessions by several times.
-            let messages = Self.counted(status.turnsIndexed)
-            let sessions = Self.counted(status.sessionsKnown)
-            if status.filesPending > 0 {
-                let verb = status.firstBuildInProgress ? "Building" : "Updating"
-                let remaining = Self.counted(status.filesPending)
-                label.stringValue =
-                    "\(verb) - \(messages) messages across \(sessions) sessions, "
-                    + "\(remaining) transcripts to go"
-            } else {
-                label.stringValue =
-                    "Ready - \(messages) messages across \(sessions) sessions, \(size)"
-            }
-        }
-    }
 
     @objc private func clearEndsChanged(_ sender: NSButton) {
         SharedSettings.claudeClearEnds = sender.state == .on

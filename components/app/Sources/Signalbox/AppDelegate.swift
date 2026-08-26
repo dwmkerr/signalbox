@@ -270,6 +270,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // Empties the index so the hub rebuilds it. The hub owns the open database,
+    // so this cannot be done from here directly.
+    func rebuildSearchIndex() async -> Bool {
+        guard let url = URL(string: "\(hubURL)/search/rebuild") else { return false }
+        var request = HubAuth.request(url)
+        request.httpMethod = "POST"
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        guard let (_, response) = try? await urlSession.data(for: request),
+              let http = response as? HTTPURLResponse
+        else { return false }
+        return http.statusCode == 200
+    }
+
     // The hit count shown on the promotion row. It runs while the user types,
     // so it asks for a single result and reads only the count.
     func fetchSearchStatus() async -> SearchIndexStatus? {
@@ -625,7 +638,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         palette?.searchProvider = { [weak self] query, limit in
             await self?.fetchSearch(query: query, limit: limit) ?? .unreachable
         }
-        settings?.searchStatusProvider = { [weak self] in await self?.fetchSearchStatus() }
+        palette?.searchStatusProvider = { [weak self] in await self?.fetchSearchStatus() }
+        settings?.rebuildIndexAction = { [weak self] in await self?.rebuildSearchIndex() ?? false }
         KeyboardShortcuts.onKeyDown(for: .openJumplist) { [weak self] in self?.palette?.toggle() }
     }
 

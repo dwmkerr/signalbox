@@ -55,6 +55,10 @@ struct PaletteRow {
     // before committing to it.
     var isFallback = false
     var fallbackHits: Int?
+    // Percent complete while the index is still building. A search run against
+    // a half-built index quietly misses things, so the row says so where the
+    // search is actually happening.
+    var indexPercent: Int?
 }
 
 // Mark tints per the amber scheme: amber = needs your input (act), blue =
@@ -799,6 +803,8 @@ final class PaletteController: NSObject {
     // as well as the results themselves, so the panel can tell "off" and "this
     // hub does not serve search" apart from "nothing matched".
     var searchProvider: (@MainActor (String, Int) async -> SearchAvailability)?
+    /// Index progress, so the search row can say when results are incomplete.
+    var searchStatusProvider: (@MainActor () async -> SearchIndexStatus?)?
 
     // All rows from the provider, and the slice that survives the search
     // filter - every selection/cycle operation works on the filtered view.
@@ -826,6 +832,8 @@ final class PaletteController: NSObject {
     // Whether the hub behind this panel serves search at all. A forwarder and a
     // disabled setting both mean no promotion row, for different reasons.
     private var searchServed = false
+    // Percent complete while the index builds, nil once it is current.
+    private var indexPercent: Int?
     // The ended result the user pressed return on, which is shown its resume
     // instructions rather than being resumed for them.
     private var resumeHintUuid: String?
@@ -1098,6 +1106,7 @@ final class PaletteController: NSObject {
             )
             fallback.isFallback = true
             fallback.fallbackHits = fallbackHits
+            fallback.indexPercent = indexPercent
             display.append(fallback)
         }
         return display
@@ -1145,8 +1154,22 @@ final class PaletteController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
     }
 
+    // Asked alongside the hit count rather than on a timer: the only moment the
+    // build state matters is when someone is about to search.
+    private func refreshIndexProgress() async {
+        guard let searchStatusProvider else { return }
+        guard let status = await searchStatusProvider(), status.filesPending > 0 else {
+            indexPercent = nil
+            return
+        }
+        let total = status.filesKnown + status.filesPending
+        guard total > 0 else { indexPercent = nil; return }
+        indexPercent = Int((Double(status.filesKnown) / Double(total)) * 100)
+    }
+
     private func refreshHitCount(_ term: String) async {
         guard let searchProvider else { return }
+        await refreshIndexProgress()
         let outcome = await searchProvider(term, Self.contentResultLimit)
         // The field may have moved on while the request was in flight.
         guard term == query.trimmingCharacters(in: .whitespaces) else { return }
@@ -2558,7 +2581,7 @@ private final class PaletteRowView: NSTableRowView {
 // hit count so the user knows whether promoting is worth it before pressing
 // return, and stays quiet about the count until one arrives.
 private final class FallbackRowView: NSView {
-    init(query: String, hits: Int?) {
+    init(query: String, hits: Int?, indexPercent: Int?) {
         super.init(frame: .zero)
         let key = NSTextField(labelWithString: "↩")
         key.font = .systemFont(ofSize: s(11), weight: .semibold)
@@ -2573,9 +2596,15 @@ private final class FallbackRowView: NSView {
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
 
-        let count = NSTextField(labelWithString: hits.map { "\($0) hits" } ?? "")
+        // While the index builds, the row reports that instead of a count: the
+        // count would be true and misleading, because the answer is still
+        // growing.
+        let trailing = indexPercent.map { "indexing \($0)%" }
+            ?? hits.map { "\($0) hits" }
+            ?? ""
+        let count = NSTextField(labelWithString: trailing)
         count.font = .systemFont(ofSize: s(11))
-        count.textColor = Theme.textDim
+        count.textColor = indexPercent == nil ? Theme.textDim : Theme.attention
         count.translatesAutoresizingMaskIntoConstraints = false
         addSubview(count)
 
@@ -2736,7 +2765,9 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
             return HiddenDividerView(count: row.hiddenCount, expanded: hiddenExpanded)
         }
         if row.isFallback {
-            return FallbackRowView(query: query, hits: row.fallbackHits)
+            return FallbackRowView(
+                query: query, hits: row.fallbackHits, indexPercent: row.indexPercent
+            )
         }
         let cell = SessionCellView(row: row)
         // Hidden rows read as dismissed: dimmed, and inert (see shouldSelectRow).

@@ -526,6 +526,53 @@ describe("search", () => {
     }
   });
 
+  test("rebuild empties the index and lets the sweep refill it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sbrebuild-"));
+    const uuid = "44444444-4444-4444-8444-444444444444";
+    const transcript = join(root, "codex", "2026", "08", "19", `rollout-x-${uuid}.jsonl`);
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, [
+      JSON.stringify({ type: "session_meta", payload: { session_id: uuid, cwd: "/work/rb" } }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-08-19T10:01:00.000Z",
+        payload: { type: "user_message", message: "needle in a transcript" },
+      }),
+    ].join("\n") + "\n");
+
+    const previous = process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR;
+    const previousClaude = process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR;
+    const previousCursor = process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR;
+    process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR = join(root, "codex");
+    process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR = join(root, "claude");
+    process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR = join(root, "cursor");
+
+    const hub = searchHub(join(root, "state"));
+    try {
+      hub.startSearch();
+      expect((await (await getSearchStatus(hub)).json()).status.turnsIndexed).toBeGreaterThan(0);
+
+      const res = (await hub.handle(
+        new Request("http://127.0.0.1:8377/search/rebuild", {
+          method: "POST", headers: { Host: "127.0.0.1:8377" },
+        }),
+        fakeServer,
+      ))!;
+      expect(res.status).toBe(200);
+      // Emptied at once, and the caller is told so rather than being made to
+      // wait for the refill.
+      expect((await res.json()).status.turnsIndexed).toBe(0);
+
+      // The ordinary sweep puts it back; rebuilding is not a separate pipeline.
+      hub.startSearch();
+      expect((await (await getSearchStatus(hub)).json()).status.turnsIndexed).toBeGreaterThan(0);
+    } finally {
+      process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR = previous;
+      process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR = previousClaude;
+      process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR = previousCursor;
+    }
+  });
+
   test("disabled search returns a marker rather than an empty result list", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sbhub-search-off-"));
     const hub = searchHub(dir, "", false);

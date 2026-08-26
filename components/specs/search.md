@@ -180,6 +180,17 @@ upstream hub: the answer always comes from the local index or not at all. A
 forwarder with search off answers `409` like any other hub, not a
 forwarder-specific status, because the reason is the same one.
 
+`POST /search/rebuild` empties the index and returns immediately with the same
+body as `/search/status`. The sweep refills it, so the caller watches progress
+where it already does rather than waiting on this call. `409` when search is
+off. The hub owns the open database, which is why rebuilding is a request to it
+rather than something a client does by deleting files.
+
+Index progress is surfaced on the jumplist's search row, not in Settings: a
+search run against a half-built index quietly misses results, so the build state
+belongs where the search happens. Settings holds only the toggle and the rebuild
+action.
+
 ## Turn extraction
 
 A turn is one displayed user prompt or assistant reply from an eligible transcript line. Tool calls, tool output, reasoning, system instructions, metadata, and lifecycle records are not turns. Empty displayed text and malformed JSON lines are skipped. Only complete newline-terminated records are consumed, so a line still being written remains at the current `byte_offset` for the next sweep.

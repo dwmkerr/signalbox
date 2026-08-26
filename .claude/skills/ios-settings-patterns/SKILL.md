@@ -124,6 +124,27 @@ From this project's own research (six independent agents, `integration/remote-hu
    unless the user is being asked to consent to something surprising at that
    moment.
 
+## Worked example: session contents search
+
+The feature is a local transcript index: a toggle, a long first build, a size on
+disk, and a rebuild. Four wrong answers were tried before the right one, and
+each is a pattern above.
+
+1. A checkbox and a three-line paragraph in the General pane. Wrong: the
+   paragraph is documentation, and the pane's other controls each have a label
+   and one caption.
+2. The same, with better prose. Still wrong: improving the wording of a
+   paragraph that should not exist.
+3. Its own tab with a labelled status block (Time Machine shape). Closer, but
+   it puts progress where nobody is looking when it matters.
+4. What shipped: a Search tab holding the checkbox and a **Rebuild Index...**
+   button, and the progress moved to the jumplist's search row as
+   `indexing 62%`. That is the moment the state changes what the user should
+   believe, because a search against a half-built index silently under-reports.
+
+The general lesson: ask where the state changes a decision, and put it there.
+Settings is where you change the setting, not where you watch the work.
+
 ## Before you ship a settings change
 
 - Could the label alone carry it, with no caption?
