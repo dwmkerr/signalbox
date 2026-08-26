@@ -159,7 +159,7 @@ enum SharedSettings {
 }
 
 enum SettingsTab: String, CaseIterable {
-    case general, agents, hub, logs
+    case general, agents, search, hub, logs
 
     var title: String { rawValue.capitalized }
     var toolbarIdentifier: NSToolbarItem.Identifier {
@@ -176,6 +176,7 @@ enum SettingsTab: String, CaseIterable {
         switch self {
         case .general: return ["gearshape"]
         case .agents: return ["terminal"]
+        case .search: return ["magnifyingglass"]
         case .hub: return ["dot.radiowaves.left.and.right", "antenna.radiowaves.left.and.right"]
         case .logs: return ["doc.plaintext"]
         }
@@ -329,6 +330,7 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         panes = [
             .general: buildGeneralPane(),
             .agents: buildAgentsPane(),
+            .search: buildSearchPane(),
             .hub: buildHubPane(),
             .logs: buildLogsPane(),
         ]
@@ -389,30 +391,10 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         let captionIndent = NSView()
         let captionRow = horizontalRow([captionIndent, filterCaption])
 
-        let searchHeading = sectionHeading("Session contents search")
-        let searchCheckbox = NSButton(
-            checkboxWithTitle: "Search session contents",
-            target: self,
-            action: #selector(searchEnabledChanged(_:))
-        )
-        searchCheckbox.state = SharedSettings.searchEnabled ? .on : .off
-        self.searchCheckbox = searchCheckbox
-        let searchCaption = caption(
-            "Builds a local index of session transcripts so the jumplist can find sessions "
-            + "by their contents, including ended sessions. The index is never uploaded."
-        )
-        let searchStatus = caption("")
-        self.searchStatusLabel = searchStatus
-
         let stack = verticalStack([
             iconRow, shortcutRow, shortcutCaptionRow, filterRow, captionRow,
-            searchHeading, searchCheckbox, searchCaption, searchStatus,
         ])
         stack.setCustomSpacing(2, after: filterRow)
-        stack.setCustomSpacing(16, after: captionRow)
-        stack.setCustomSpacing(4, after: searchHeading)
-        stack.setCustomSpacing(2, after: searchCheckbox)
-        stack.setCustomSpacing(6, after: searchCaption)
         // One label column, right aligned, so the three controls line up the
         // way every other settings window on macOS lays a form out. Activated
         // only now: cross-row constraints need the shared stack ancestor, and
@@ -421,6 +403,23 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         for view in [shortcutLabel, filterLabel, shortcutCaptionIndent, captionIndent] {
             view.widthAnchor.constraint(equalTo: iconLabel.widthAnchor).isActive = true
         }
+        return pane(containing: stack)
+    }
+
+    private func buildSearchPane() -> NSView {
+        let checkbox = NSButton(
+            checkboxWithTitle: "Search session contents",
+            target: self,
+            action: #selector(searchEnabledChanged(_:))
+        )
+        checkbox.state = SharedSettings.searchEnabled ? .on : .off
+        self.searchCheckbox = checkbox
+
+        let status = caption("")
+        self.searchStatusLabel = status
+
+        let stack = verticalStack([checkbox, status])
+        stack.setCustomSpacing(6, after: checkbox)
         return pane(containing: stack)
     }
 
@@ -919,17 +918,16 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
     private func refreshSearchStatus() {
         guard let label = searchStatusLabel else { return }
         if !SharedSettings.searchEnabled {
-            label.stringValue =
-                "Off. Transcripts are not being indexed. Any existing index stays on this machine."
+            label.stringValue = "Off"
             return
         }
         guard let provider = searchStatusProvider else {
-            label.stringValue = "Waiting for the hub."
+            label.stringValue = "Waiting for the hub"
             return
         }
         Task { @MainActor in
             guard let status = await provider() else {
-                label.stringValue = "Waiting for the hub."
+                label.stringValue = "Waiting for the hub"
                 return
             }
             let size = ByteCountFormatter.string(
@@ -944,11 +942,11 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
                 let verb = status.firstBuildInProgress ? "Building" : "Updating"
                 let remaining = Self.counted(status.filesPending)
                 label.stringValue =
-                    "\(verb): \(messages) messages across \(sessions) sessions. "
-                    + "\(remaining) transcripts remaining."
+                    "\(verb) - \(messages) messages across \(sessions) sessions, "
+                    + "\(remaining) transcripts to go"
             } else {
                 label.stringValue =
-                    "Ready: \(messages) messages across \(sessions) sessions (\(size))."
+                    "Ready - \(messages) messages across \(sessions) sessions, \(size)"
             }
         }
     }
