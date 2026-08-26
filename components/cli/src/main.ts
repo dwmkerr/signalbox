@@ -749,7 +749,9 @@ function runHub(args: string[]): void {
     remote,
     port,
     settings.hub.historyLimit,
-    settings.searchEnabled
+    // Read live, not captured: the Settings toggle has to take effect without
+    // restarting the hub the app supervises.
+    () => loadSettings().searchEnabled
   );
   const expire = expireAgeMs();
   hub.startExpiry(10 * 60 * 1000, expire);

@@ -99,7 +99,7 @@ function searchHub(dir: string, token = "", enabled = true): Hub {
   // The live check is injected so indexing can be exercised without a settings
   // file on disk; production reads it from the user's settings each sweep.
   return track(new Hub(
-    dir, "test", token, "127.0.0.1", "", 0, false, 0, 1000, enabled, () => enabled,
+    dir, "test", token, "127.0.0.1", "", 0, false, 0, 1000, () => enabled,
   ));
 }
 
@@ -501,20 +501,24 @@ describe("search", () => {
 
     let enabled = false;
     const hub = track(new Hub(
-      join(root, "state"), "test", "", "127.0.0.1", "", 0, false, 0, 1000, true,
-      () => enabled,
+      join(root, "state"), "test", "", "127.0.0.1", "", 0, false, 0, 1000, () => enabled,
     ));
     try {
-      // Off from the first tick: the index exists but nothing is written to it.
+      // Off: no index is opened and the route says so.
       hub.startSearch();
-      const offBody = await (await getSearchStatus(hub)).json();
-      expect(offBody.status.turnsIndexed).toBe(0);
+      expect((await (await getSearchStatus(hub)).json()).enabled).toBe(false);
 
-      // Flipping it on lets the very next sweep index, with no restart.
+      // On: the next sweep opens the index and starts filling it, with no
+      // restart. This is what a user ticking the box actually does.
       enabled = true;
       hub.startSearch();
       const onBody = await (await getSearchStatus(hub)).json();
+      expect(onBody.enabled).toBe(true);
       expect(onBody.status.turnsIndexed).toBeGreaterThan(0);
+
+      // Off again: it stops serving without needing a restart either.
+      enabled = false;
+      expect((await (await getSearchStatus(hub)).json()).enabled).toBe(false);
     } finally {
       process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR = previousCodex;
       process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR = previousClaude;

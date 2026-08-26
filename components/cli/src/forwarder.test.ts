@@ -20,6 +20,9 @@ const port = 8377;
 function newForwarder(
   extra: { searchEnabled?: boolean } = {}
 ): { forwarder: Forwarder; dir: string } {
+  // Pinned explicitly: without it the forwarder falls back to the developer's
+  // own ~/.config/signalbox/settings.json, so the suite would pass or fail
+  // depending on whether the machine running it has search turned on.
   const dir = mkdtempSync(join(tmpdir(), "sbforwarder-"));
   const forwarder = track(new Forwarder({
     upstream,
@@ -28,6 +31,7 @@ function newForwarder(
     version: "test",
     port,
     historyLimit: 1000,
+    searchEnabledNow: () => extra.searchEnabled ?? false,
     ...extra,
   }));
   return { forwarder, dir };

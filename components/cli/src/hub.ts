@@ -54,7 +54,7 @@ export class Hub {
   // non-loopback clients must present; empty means no token configured (the
   // loopback-only default, where a token is never required).
   constructor(
-    stateDir: string,
+    private stateDirPath: string,
     private version: string,
     private token: string = "",
     // The hub's own bind address, echoed to a freshly minted pairing code so
@@ -81,17 +81,15 @@ export class Hub {
     // the URL it happened to dial.
     private port: number = 0,
     private historyLimit: number = DefaultHistoryLimit,
-    searchEnabled: boolean = false,
-    // Whether search is still enabled, asked once per sweep. The constructor
-    // flag decides whether to open an index at all; this decides whether to
-    // keep writing to it, so turning the setting off stops transcripts being
-    // read without waiting for a restart. Injectable so a test does not need a
-    // settings file on disk to exercise indexing.
+    // Whether search is enabled, asked on every sweep and every request rather
+    // than captured once, so ticking the box in Settings takes effect within a
+    // sweep instead of at the next restart. Injectable so a test does not need
+    // a settings file on disk to exercise indexing.
     private searchEnabledNow: () => boolean = () => loadSettings().searchEnabled
   ) {
     this.store = new Store(historyLimit);
-    mkdirSync(stateDir, { recursive: true });
-    this.logPath = join(stateDir, "events.jsonl");
+    mkdirSync(this.stateDirPath, { recursive: true });
+    this.logPath = join(this.stateDirPath, "events.jsonl");
     if (existsSync(this.logPath)) {
       for (const line of readFileSync(this.logPath, "utf8").split("\n")) {
         const trimmed = line.trim();
@@ -118,7 +116,7 @@ export class Hub {
     }
     // Keep an fd open for appends (append mode).
     this.logFd = openSync(this.logPath, "a");
-    if (searchEnabled) this.searchIndex = openIndex(stateDir);
+
   }
 
   close(): void {
@@ -237,16 +235,11 @@ export class Hub {
 
   /** Starts bounded local transcript indexing when the privacy-sensitive feature is enabled. */
   startSearch(): void {
-    const index = this.searchIndex;
-    if (!index) return;
     // The setting is re-read every tick rather than captured at startup, so
     // turning search off stops reading transcripts immediately. Captured once,
     // a hub would keep indexing until it was restarted while the app reported
     // the feature as off.
-    const sweep = () => {
-      if (!this.searchEnabledNow()) return;
-      index.sweep({ budgetMs: searchSweepBudgetMs });
-    };
+    const sweep = () => this.activeIndex()?.sweep({ budgetMs: searchSweepBudgetMs });
     sweep();
     this.timers.push(setInterval(sweep, searchSweepIntervalMs));
   }
@@ -336,8 +329,24 @@ export class Hub {
     });
   }
 
+  // The index is opened the first time the setting says yes, and dropped when
+  // it says no, so ticking the box in Settings takes effect within a sweep
+  // rather than at the next restart. Opened once at construction, a hub that
+  // started with the setting off could never serve search however the user
+  // changed it.
+  private activeIndex(): SearchIndex | null {
+    if (!this.searchEnabledNow()) {
+      this.searchIndex?.close();
+      this.searchIndex = null;
+      return null;
+    }
+    if (!this.searchIndex) this.searchIndex = openIndex(this.stateDirPath);
+    return this.searchIndex;
+  }
+
   private handleSearch(url: URL): Response {
-    if (!this.searchIndex) {
+    const index = this.activeIndex();
+    if (!index) {
       return noStoreJSON({ error: "search_disabled", enabled: false }, 409);
     }
     const query = url.searchParams.get("q");
@@ -345,15 +354,14 @@ export class Hub {
     return noStoreJSON({
       enabled: true,
       query,
-      results: this.searchIndex.search(query, searchResultLimit, this.sessions()),
+      results: index.search(query, searchResultLimit, this.sessions()),
     });
   }
 
   private handleSearchStatus(): Response {
-    if (!this.searchIndex) {
-      return noStoreJSON({ enabled: false, status: "disabled" });
-    }
-    return noStoreJSON({ enabled: true, status: this.searchIndex.status() });
+    const index = this.activeIndex();
+    if (!index) return noStoreJSON({ enabled: false, status: "disabled" });
+    return noStoreJSON({ enabled: true, status: index.status() });
   }
 
   // checkBearer returns a 401 Response when the request does not carry the

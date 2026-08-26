@@ -989,6 +989,12 @@ final class PaletteController: NSObject {
         exchangeRequest.removeAll()
         let previousKey = selectedKey()
         let previousIndex = tableView.selectedRow
+        // The promotion row has no session key, so it has to be remembered as
+        // itself. Without this a reload drops the cursor back into the session
+        // list, and a working session reloads often enough that the row cannot
+        // be pressed at all.
+        let wasFallbackSelected = rows.indices.contains(previousIndex)
+            && rows[previousIndex].isFallback
         allRows = rowsProvider()
         rows = composeRows()
         tableView.reloadData()
@@ -998,9 +1004,13 @@ final class PaletteController: NSObject {
             renderPreview()
             return
         }
-        if preservingSelection,
+        if preservingSelection, wasFallbackSelected, let index = fallbackIndex {
+            select(index)
+        } else if preservingSelection,
            let previousKey,
-           let index = rows.firstIndex(where: { $0.sessionKey == previousKey && !$0.isHidden && !$0.isDivider }) {
+           let index = rows.firstIndex(where: {
+               $0.sessionKey == previousKey && !$0.isHidden && !$0.isDivider && !$0.isFallback
+           }) {
             // Never move the cursor under the user: follow the session_key
             // across reorders.
             select(index)
@@ -1153,9 +1163,29 @@ final class PaletteController: NSObject {
             fallbackHits = nil
             contentAvailability = outcome
         }
-        if !contentMode {
-            rows = composeRows()
-            tableView.reloadData()
+        if !contentMode { refreshFallbackRow() }
+    }
+
+    // Only the promotion row changed, so rebuild the rows and put the cursor
+    // back where it was. A bare reloadData here clears the selection, which
+    // lands about 200ms after typing stops - exactly when the user is reaching
+    // for return.
+    private func refreshFallbackRow() {
+        let previousIndex = tableView.selectedRow
+        let wasFallbackSelected = rows.indices.contains(previousIndex)
+            && rows[previousIndex].isFallback
+        let previousKey = selectedKey()
+        rows = composeRows()
+        tableView.reloadData()
+        if wasFallbackSelected, let index = fallbackIndex {
+            select(index)
+        } else if let previousKey,
+                  let index = rows.firstIndex(where: {
+                      $0.sessionKey == previousKey && !$0.isHidden && !$0.isDivider && !$0.isFallback
+                  }) {
+            select(index)
+        } else if visibleCount > 0 {
+            select(min(max(previousIndex, 0), visibleCount - 1))
         }
     }
 
@@ -1293,10 +1323,12 @@ final class PaletteController: NSObject {
         return rows[index].sessionKey
     }
 
-    // Selection only ever lands on a visible session row (the leading span);
-    // the Hidden divider and hidden rows are inert.
+    // Selection lands on a visible session row (the leading span) or on the
+    // promotion row, which sits past the Hidden section but is an action rather
+    // than an inert divider. The Hidden divider and hidden rows stay inert.
     private func select(_ index: Int) {
-        guard index >= 0, index < visibleCount, rows.indices.contains(index) else { return }
+        guard index >= 0, rows.indices.contains(index) else { return }
+        guard index < visibleCount || rows[index].isFallback else { return }
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         tableView.scrollRowToVisible(index)
     }

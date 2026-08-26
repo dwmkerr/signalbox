@@ -97,7 +97,7 @@ export class Forwarder implements RequestHandler {
 
   constructor(private opts: ForwarderOptions) {
     this.store = new Store(opts.historyLimit);
-    if (opts.searchEnabled) this.searchIndex = openIndex(opts.stateDir);
+
     this.spool = new Spool(
       opts.stateDir,
       "forward-spool.jsonl",
@@ -248,8 +248,22 @@ export class Forwarder implements RequestHandler {
     return Response.json({ spooled: true }, { status: 202 });
   }
 
+  // Opened when the setting first says yes and dropped when it says no, so the
+  // Settings toggle works without restarting the hub the app supervises.
+  private activeIndex(): SearchIndex | null {
+    const enabled = (this.opts.searchEnabledNow ?? (() => loadSettings().searchEnabled))();
+    if (!enabled) {
+      this.searchIndex?.close();
+      this.searchIndex = null;
+      return null;
+    }
+    if (!this.searchIndex) this.searchIndex = openIndex(this.opts.stateDir);
+    return this.searchIndex;
+  }
+
   private handleSearch(url: URL): Response {
-    if (!this.searchIndex) {
+    const index = this.activeIndex();
+    if (!index) {
       return noStoreJSON({ error: "search_disabled", enabled: false }, 409);
     }
     const query = url.searchParams.get("q");
@@ -257,30 +271,24 @@ export class Forwarder implements RequestHandler {
     return noStoreJSON({
       enabled: true,
       query,
-      results: this.searchIndex.search(query, searchResultLimit, this.store.list()),
+      results: index.search(query, searchResultLimit, this.store.list()),
     });
   }
 
   private handleSearchStatus(): Response {
-    if (!this.searchIndex) {
-      return noStoreJSON({ enabled: false, status: "disabled" });
-    }
-    return noStoreJSON({ enabled: true, status: this.searchIndex.status() });
+    const index = this.activeIndex();
+    if (!index) return noStoreJSON({ enabled: false, status: "disabled" });
+    return noStoreJSON({ enabled: true, status: index.status() });
   }
 
   // startSearch runs the same bounded sweep the hub runs. Discovery walks this
   // machine's transcript directories, so the index it builds is local by
   // construction.
   startSearch(): void {
-    const index = this.searchIndex;
-    if (!index) return;
     // Re-read per tick for the same reason as the hub: turning the setting off
     // has to stop transcripts being read without waiting for a restart.
     this.searchTimer = setInterval(
-      () => {
-        if (!(this.opts.searchEnabledNow ?? (() => loadSettings().searchEnabled))()) return;
-        index.sweep({ budgetMs: searchSweepBudgetMs });
-      },
+      () => this.activeIndex()?.sweep({ budgetMs: searchSweepBudgetMs }),
       searchSweepIntervalMs,
     );
   }
