@@ -43,6 +43,10 @@ struct ChatView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 16)
         }
+        // Opens on the newest exchange, the way every messaging app does: the
+        // last thing said is what you came to read, and older history is a
+        // deliberate scroll up.
+        .defaultScrollAnchor(.bottom)
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle(session.name)
         .navigationBarTitleDisplayMode(.inline)
