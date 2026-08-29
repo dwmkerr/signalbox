@@ -50,6 +50,20 @@ struct ChatView: View {
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle(session.name)
         .navigationBarTitleDisplayMode(.inline)
+        // Jump belongs in the trailing nav-bar slot, where per-screen actions
+        // live on iOS, and carries the same arrow as the row so it reads as the
+        // same action. Absent on information-only rows, which have nothing to
+        // jump to, matching how the row itself behaves.
+        .toolbar {
+            if !session.infoOnly {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { Task { await hub.jump(session) } } label: {
+                        Image(systemName: "arrow.uturn.forward")
+                    }
+                    .tint(Theme.blue)
+                }
+            }
+        }
         .task { await loadInitial() }
     }
 

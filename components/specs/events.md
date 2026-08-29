@@ -46,7 +46,7 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   "agent": "claude",
 
   // What happened. Agent lifecycle: busy, attention, done, error, ended.
-  // User actions: seen, hide, show, pin, unpin, label, tag, untag (they change
+  // User actions: seen, unseen, hide, show, pin, unpin, label, tag, untag (they change
   // how a session is shown, never what the agent did). `jump` is a command,
   // not an event - see commands below.
   "event": "done",
@@ -163,6 +163,7 @@ The hub keeps one row per `session_key`, following these rules:
   for each session alongside the latest row breadcrumb. Read them with
   [`GET /exchanges`](#the-hub-api).
 - **Tags carry.** `tags` persist across agent events that omit them (like `prompt`/`reply`), but an event carrying its own `tags` keeps them - even when the session already existed untagged. `tag`/`untag` events add or remove them. Filter with `state --tag` / `--exclude-tag`.
+- **`seen` and `unseen` are inverses, but only one is engagement.** `seen` sets `acked` and counts as engagement, so it moves the row's `engaged_ts` and therefore its place in the board's recency order. `unseen` clears `acked` and does NOT: marking something unread is setting it aside to come back to, not dealing with it, so a deferred row must not climb the board. `unseen` exists because opening a session on the phone marks it read, and a read state with no way back makes the unread signal untrustworthy.
 - **New activity resets your flags.** Any agent event clears `acked` and `hidden` - a hidden session that speaks again comes back.
 - **A pin is yours until you drop it.** `pinned` (set by `pin`, cleared by `unpin`) carries across agent events like `label`: new activity never clears it, so a pinned session that speaks again stays pinned. Only `unpin` or `hide` removes a pin. `ended`/expiry removes the whole session; a pin does not resurrect or protect it.
 

@@ -62,6 +62,14 @@ export class Store {
         }
         return;
       }
+      // Deliberately NOT engagement, unlike seen: marking something unread is
+      // setting it aside to come back to, not dealing with it, so it must not
+      // move the row up the recency order it is trying to stay in.
+      case ev.Unseen: {
+        const cur = this.sessions.get(e.session_key);
+        if (cur) cur.acked = false;
+        return;
+      }
       case ev.Hide: {
         const cur = this.sessions.get(e.session_key);
         if (cur) {

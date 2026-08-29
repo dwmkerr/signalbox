@@ -18,6 +18,10 @@ export const Done = "done";
 export const Busy = "busy";
 export const Ended = "ended";
 export const Seen = "seen";
+// The inverse of seen: puts a row back in the unread state after it has been
+// looked at. Needed because opening a session on the phone marks it read, and
+// a read state you cannot undo makes the unread dot untrustworthy.
+export const Unseen = "unseen";
 export const Hide = "hide";
 export const Show = "show";
 export const Pin = "pin";
@@ -172,7 +176,9 @@ export function cropLabel(s: string): string {
 }
 
 export function validType(t: string): boolean {
-  return [Attention, Error, Done, Busy, Ended, Seen, Hide, Show, Pin, Unpin, Label, Tag, Untag].includes(t);
+  return [
+    Attention, Error, Done, Busy, Ended, Seen, Unseen, Hide, Show, Pin, Unpin, Label, Tag, Untag,
+  ].includes(t);
 }
 
 export function shortHostname(): string {
@@ -271,6 +277,10 @@ function newUserEvent(eventType: string, sessionKey: string, reason: string): Ev
 
 export function newSeen(sessionKey: string): Event {
   return newUserEvent(Seen, sessionKey, "");
+}
+
+export function newUnseen(sessionKey: string): Event {
+  return newUserEvent(Unseen, sessionKey, "");
 }
 
 export function newHide(sessionKey: string): Event {

@@ -49,22 +49,20 @@ struct SessionsView: View {
                                 // Long-press for the pin/unpin menu, the Messages
                                 // gesture. The hub owns the partition, so this
                                 // only fires an event; it never re-sorts here.
-                                .contextMenu { pinMenu(session) }
+                                .contextMenu { pinMenu(session); readMenu(session) }
+                                // Leading swipe toggles read state, the way it
+                                // does in Messages and Mail. A toggle always does
+                                // something, so unlike the old one-way Seen it
+                                // needs no special case to stay honest on a row
+                                // that is already read.
                                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    if !session.infoOnly {
-                                        Button { jump(session) } label: { Label("Jump", systemImage: "arrow.uturn.forward") }
-                                            .tint(Theme.blue)
-                                    }
+                                    readToggleButton(session)
                                 }
+                                // Jump has left the swipes: it reaches across to
+                                // another machine and moves a window, which is a
+                                // deliberate act better suited to the button than
+                                // to a gesture. The arrow still carries it.
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    // Seen only when it would change something: a
-                                    // quiet acked row and a busy row are no-ops, and
-                                    // an action that sometimes does nothing teaches
-                                    // users to trust none of them. Hide is always on.
-                                    if session.isUnread {
-                                        Button { Task { await hub.ack(session) } } label: { Label("Seen", systemImage: "checkmark") }
-                                            .tint(Theme.amber)
-                                    }
                                     Button { Task { await hub.hide(session) } } label: { Label("Hide", systemImage: "eye.slash") }
                                         .tint(Theme.faint)
                                 }
@@ -86,7 +84,7 @@ struct SessionsView: View {
                                         .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                                         .listRowSeparator(.hidden)
                                         .listRowBackground(Color.clear)
-                                        .contextMenu { pinMenu(session) }
+                                        .contextMenu { pinMenu(session); readMenu(session) }
                                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                             Button { Task { await hub.unhide(session) } } label: { Label("Unhide", systemImage: "eye") }
                                                 .tint(Theme.blue)
@@ -424,7 +422,12 @@ struct SessionsView: View {
             // machine, so reading what happened is the useful thing to do with
             // a row and jumping is the deliberate one - which is why jump keeps
             // its own button rather than owning the whole row.
-            .onTapGesture { chatSession = session }
+            .onTapGesture {
+                chatSession = session
+                // Opening the thread is reading it. Leaving the dot lit would
+                // make it untrustworthy, and Mark as Unread is the way back.
+                if session.isUnread { Task { await hub.ack(session) } }
+            }
 
             if !session.infoOnly && !dimmed {
                 Button { jump(session) } label: {
@@ -451,6 +454,36 @@ struct SessionsView: View {
                               lineWidth: pressed == session.key ? 1.5 : 1)
         )
         .opacity(dimmed ? 0.55 : 1)
+    }
+
+    // The read-state toggle, offered as a swipe and in the context menu the way
+    // Messages and Mail offer both.
+    @ViewBuilder
+    private func readToggleButton(_ session: Session) -> some View {
+        if session.isUnread {
+            Button { Task { await hub.ack(session) } } label: {
+                Label("Read", systemImage: "envelope.open")
+            }
+            .tint(Theme.amber)
+        } else {
+            Button { Task { await hub.unack(session) } } label: {
+                Label("Unread", systemImage: "envelope.badge")
+            }
+            .tint(Theme.blue)
+        }
+    }
+
+    @ViewBuilder
+    private func readMenu(_ session: Session) -> some View {
+        if session.isUnread {
+            Button { Task { await hub.ack(session) } } label: {
+                Label("Mark as Read", systemImage: "envelope.open")
+            }
+        } else {
+            Button { Task { await hub.unack(session) } } label: {
+                Label("Mark as Unread", systemImage: "envelope.badge")
+            }
+        }
     }
 
     // The pin/unpin context-menu entry. Hiding a pinned session unpins it, so a
@@ -495,6 +528,9 @@ struct SessionsView: View {
         pressed = session.key
         Task {
             await hub.jump(session)
+            // Jumping is engaging with the session, so it clears the dot - the
+            // jumplist has always done this and iOS differing was drift.
+            if session.isUnread { await hub.ack(session) }
             try? await Task.sleep(nanoseconds: 250_000_000)
             pressed = nil
         }

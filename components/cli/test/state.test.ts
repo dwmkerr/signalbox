@@ -25,6 +25,24 @@ function keys(s: Store): string[] {
   return s.list().map((e) => e.session_key);
 }
 
+describe("unseen", () => {
+  test("returns a row to unread without moving it up the recency order", () => {
+    const store = new Store();
+    store.apply(mk("claude:a", ev.Done, t(1), 1));
+    store.apply(mk("claude:a", ev.Seen, t(2), 2));
+    const acked = store.list().find((row) => row.session_key === "claude:a");
+    expect(acked?.acked).toBe(true);
+    const engagedAfterSeen = acked?.engaged_ts;
+
+    store.apply(mk("claude:a", ev.Unseen, t(3), 3));
+    const after = store.list().find((row) => row.session_key === "claude:a");
+    expect(after?.acked).toBe(false);
+    // Setting a row aside is not engagement: the sort key must not move, or a
+    // session would climb the board every time it was deferred.
+    expect(after?.engaged_ts).toBe(engagedAfterSeen);
+  });
+});
+
 describe("engagement MRU", () => {
   test("session_start does not engage; prompt busy does; seen does", () => {
     const s = new Store();

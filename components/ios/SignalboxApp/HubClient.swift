@@ -501,6 +501,14 @@ final class HubClient: ObservableObject {
                          "event": "seen", "session_key": session.key])
     }
 
+    /// Returns a row to the unread state. The wire calls this `unseen`; unlike
+    /// `seen` it is not engagement, so it never moves the row up the board.
+    func unack(_ session: Session) async {
+        await postEvent(["v": 1, "id": UUID().uuidString, "ts": nowTS(),
+                         "host": deviceHost(), "agent": agentOf(session.key),
+                         "event": "unseen", "session_key": session.key])
+    }
+
     func hide(_ session: Session) async {
         await postEvent(["v": 1, "id": UUID().uuidString, "ts": nowTS(),
                          "host": deviceHost(), "agent": agentOf(session.key),
