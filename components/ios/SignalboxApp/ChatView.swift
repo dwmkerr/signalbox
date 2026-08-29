@@ -18,13 +18,13 @@ struct ChatView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 14) {
-                if failed && exchanges.isEmpty {
+                if failed && visibleExchanges.isEmpty {
                     failureState
-                } else if loading && exchanges.isEmpty {
+                } else if loading && visibleExchanges.isEmpty {
                     ProgressView()
                         .tint(Theme.dim)
                         .frame(maxWidth: .infinity, minHeight: 240)
-                } else if exchanges.isEmpty {
+                } else if visibleExchanges.isEmpty {
                     Text("No history yet")
                         .font(.system(size: 14))
                         .foregroundStyle(Theme.dim)
@@ -35,11 +35,8 @@ struct ChatView: View {
                     } else if hasMore {
                         olderButton
                     }
-                    ForEach(exchanges) { exchange in
+                    ForEach(visibleExchanges) { exchange in
                         exchangeView(exchange)
-                    }
-                    if let pending = pendingExchange {
-                        exchangeView(pending)
                     }
                 }
             }
@@ -171,6 +168,14 @@ struct ChatView: View {
     // Showing it here keeps the conversation honest - you sent something, so it
     // belongs in the thread - without waiting on a wire change the remote hub
     // would have to be redeployed for.
+    // One list, so the turn in flight is an ordinary row. Kept separate before,
+    // it could not appear at all on a session with no committed history, and it
+    // sat outside the ForEach that LazyVStack materialises.
+    private var visibleExchanges: [Exchange] {
+        guard let pending = pendingExchange else { return exchanges }
+        return exchanges + [pending]
+    }
+
     private var pendingExchange: Exchange? {
         let live = hub.sessions.first { $0.key == session.key } ?? session
         guard live.event == "busy", let prompt = live.prompt, !prompt.isEmpty else { return nil }
