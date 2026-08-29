@@ -660,58 +660,6 @@ final class AgentGlyphView: NSView {
     }
 }
 
-// The mock's working mark: a faint ring with a darker quarter-arc rotating at
-// 0.9s/turn. Core Animation drives it so scrolling and timers stay out of it.
-final class SpinnerMarkView: NSView {
-    private let arcLayer = CAShapeLayer()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        let side: CGFloat = s(11)
-        let lineWidth: CGFloat = s(1.7)
-        let circle = CGPath(
-            ellipseIn: CGRect(x: 0, y: 0, width: side, height: side)
-                .insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
-            transform: nil
-        )
-
-        let track = CAShapeLayer()
-        track.frame = CGRect(x: 0, y: 0, width: side, height: side)
-        track.path = circle
-        track.fillColor = nil
-        track.strokeColor = Theme.spinFaint.cgColor
-        track.lineWidth = lineWidth
-        layer?.addSublayer(track)
-
-        arcLayer.frame = CGRect(x: 0, y: 0, width: side, height: side)
-        arcLayer.path = circle
-        arcLayer.fillColor = nil
-        arcLayer.strokeColor = Theme.spinArc.cgColor
-        arcLayer.lineWidth = lineWidth
-        arcLayer.lineCap = .round
-        arcLayer.strokeEnd = 0.25
-        layer?.addSublayer(arcLayer)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    override var intrinsicContentSize: NSSize { NSSize(width: s(11), height: s(11)) }
-
-    // Animations are dropped when the layer leaves the window; re-arm on attach.
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard window != nil else { return }
-        arcLayer.removeAnimation(forKey: "spin")
-        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-        spin.fromValue = 0
-        spin.toValue = -2 * Double.pi
-        spin.duration = 0.9
-        spin.repeatCount = .infinity
-        arcLayer.add(spin, forKey: "spin")
-    }
-}
 
 // MARK: - Panel
 
@@ -2826,10 +2774,6 @@ private final class SessionCellView: NSTableCellView {
     }
 
     private func build() {
-        let mark = makeMarkView()
-        mark.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(mark)
-
         let glyph = AgentGlyphView(agent: row.agent)
         glyph.translatesAutoresizingMaskIntoConstraints = false
         addSubview(glyph)
@@ -2885,8 +2829,6 @@ private final class SessionCellView: NSTableCellView {
         addSubview(right)
 
         NSLayoutConstraint.activate([
-            mark.centerXAnchor.constraint(equalTo: leadingAnchor, constant: Self.markCenterX),
-            mark.centerYAnchor.constraint(equalTo: centerYAnchor),
             glyph.centerXAnchor.constraint(equalTo: leadingAnchor, constant: Self.glyphCenterX),
             glyph.centerYAnchor.constraint(equalTo: centerYAnchor),
             glyph.widthAnchor.constraint(equalToConstant: s(22)),
@@ -2899,7 +2841,11 @@ private final class SessionCellView: NSTableCellView {
 
         let prompt = (row.detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let reply = (row.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let detail = (row.mark == .working || reply.isEmpty) ? prompt : reply
+        // No runtime here: the age column already carries elapsed time, and a
+        // second copy in the breadcrumb would not tick with it.
+        let detail = row.mark == .working
+            ? "Working\u{2026}"
+            : (reply.isEmpty ? prompt : reply)
         if detail.isEmpty {
             titleRow.centerYAnchor.constraint(equalTo: centerYAnchor).isActive = true
         } else {
@@ -2990,34 +2936,6 @@ private final class SessionCellView: NSTableCellView {
         return dot
     }
 
-    private func makeMarkView() -> NSView {
-        switch row.mark {
-        case .working:
-            return SpinnerMarkView(frame: NSRect(x: 0, y: 0, width: s(11), height: s(11)))
-        case .attention, .unread, .read:
-            let ring = NSView()
-            ring.wantsLayer = true
-            ring.layer?.borderColor = Theme.ring.cgColor
-            ring.layer?.borderWidth = s(1.4)
-            ring.layer?.cornerRadius = s(4)
-            NSLayoutConstraint.activate([
-                ring.widthAnchor.constraint(equalToConstant: s(8)),
-                ring.heightAnchor.constraint(equalToConstant: s(8)),
-            ])
-            return ring
-        case .failed:
-            // Not in the mock's data; keep the contract's red xmark - the
-            // only red in the system.
-            let view = NSImageView()
-            let config = NSImage.SymbolConfiguration(pointSize: s(12), weight: .regular)
-            view.image = NSImage(
-                systemSymbolName: "xmark.circle.fill",
-                accessibilityDescription: row.statusWord
-            )?.withSymbolConfiguration(config)
-            view.contentTintColor = .systemRed
-            return view
-        }
-    }
 
     private func applyColors() {
         let selected = backgroundStyle == .emphasized

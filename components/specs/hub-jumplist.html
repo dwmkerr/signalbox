@@ -229,30 +229,21 @@
   bar items for the light, these facts, or its links.</p>
 
   <h2>Status marks</h2>
-  <p>A row answers two different questions, and they get two different slots. The
-  leading mark says what the agent is doing. The trailing dot says whether it wants
-  you. They change for different reasons - the first when the agent acts, the second
-  when you look - so one glyph cannot carry both.</p>
-
-  <p><b>Leading, the activity:</b></p>
+  <p>One mark, on the trailing edge beside the age: whether this row wants you.</p>
   <ul>
-    <li><span class="spin" style="display:inline-block;vertical-align:-1px"></span> spinner - working</li>
-    <li><span class="red">✕ red</span> - failed (fix)</li>
-    <li>○ faint ring - idle; nothing is running right now</li>
-  </ul>
-
-  <p><b>Trailing, beside the age, whether it wants you:</b></p>
-  <ul>
-    <li><span class="amber">● amber</span> - needs your input (act)</li>
-    <li><span class="blue">● blue</span> - output updated (look)</li>
+    <li><span class="amber">&#9679; amber</span> - needs your input (act)</li>
+    <li><span class="blue">&#9679; blue</span> - output updated (look)</li>
     <li>no dot - read, or working</li>
   </ul>
-
-  <p>A working row shows a spinner and no dot: a spinner is an activity, not a
-  notification, and a dot that also meant "busy" would mean neither thing clearly.
-  A failed row shows both, because a failure is something that happened and
-  something that wants you. A bold title still means unread, and the amber dot
-  alone still means the session is asking for you.</p>
+  <p>What the agent is <i>doing</i> is not a mark. A working session says
+  <b>Working...</b> on its subtext line, which is where messaging apps put activity -
+  WhatsApp and Telegram replace the message preview with "typing...", and none of them
+  keeps a glyph column for it. Idle rows therefore say nothing at all on either side,
+  which is the point: the default posture stays silent, and only a row that wants you
+  draws the eye. Elapsed time is the age column's job, so the subtext does not repeat
+  it.</p>
+  <p>A bold title still means unread, and the amber dot alone still means the session
+  is asking for you.</p>
 
   <h2>Subtext</h2>
   <p>The line under each name follows the one-line preview rule from
@@ -504,11 +495,6 @@ function ageStr(s){ if(s<60) return s+"s"; if(s<3600) return Math.floor(s/60)+"m
 // The leading mark is the activity only. Whether the row wants you is the
 // trailing dot, because the two answer different questions and change at
 // different rates.
-function markHTML(st){
-  if(st==="working") return '<div class="spin"></div>';
-  if(st==="error") return '<div class="xmark">&#10005;</div>';
-  return '<div class="ring"></div>';
-}
 // A working row has no dot: a spinner is an activity, not a notification. A
 // failed row has both. The element is always emitted so the age column does not
 // shift as rows are read.
@@ -653,14 +639,18 @@ function tagPills(s){
 }
 // The freshest half of the exchange: prompt while working, reply once the
 // session has finished, asked, or failed.
-function subtext(s){ return (s.state==="working" || !s.reply) ? s.prompt : s.reply; }
+function subtext(s){
+  // Activity lives on this line, not in a glyph column. Elapsed time is the
+  // age column's job, so it is not repeated here.
+  if (s.state === "working") return "Working\u2026";
+  return s.reply || s.prompt;
+}
 
 function renderList(){
   const v = visible();
   if (!v.includes(sel)) sel = defaultSel();
   const rows = v.map(i=>{const s=SESSIONS[i];return `
     <div class="row ${i===sel?"sel":""} ${needsCheck(s)?"unread":""}" onclick="select(${i})" oncontextmenu="event.preventDefault();showCtxMenu(${i},event.clientX,event.clientY)">
-      <div class="mark">${markHTML(s.state)}</div>
       <div class="glyph">${AG[s.agent]||AG.generic}</div>
       <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${previewMd(subtext(s))}</div></div>
       <div class="right">${s.pinned?`<span class="pin">${PIN}</span>`:""}<span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span>${attentionHTML(s.state)}</div>

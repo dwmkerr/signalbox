@@ -1,78 +1,5 @@
 import SwiftUI
 
-// One board row: status mark, agent glyph, name, host, age, subtext. The same
-// anatomy as the jumplist, plus the host chip carrying more weight here -
-// on a phone nothing is local, so the machine is what tells you whether the
-// row can be acted on at all.
-struct RowView: View {
-    let session: Session
-    var showHost = true
-
-    private var mark: Mark { Mark.of(session) }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 9) {
-            MarkView(mark: mark)
-                .padding(.top, 5)
-            Image(systemName: agentGlyph(session.agent))
-                .font(.system(size: 12))
-                .foregroundStyle(agentColor(session.agent))
-                .frame(width: 17)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(session.name)
-                        .font(.system(size: 14.5, weight: session.isUnread ? .bold : .regular))
-                        .foregroundStyle(session.isUnread ? Theme.text : Theme.dim)
-                        .lineLimit(1)
-                    if showHost { HostChip(host: session.host) }
-                    Spacer(minLength: 4)
-                    Text(shortAge(session.date))
-                        .font(.system(size: 11.5).monospacedDigit())
-                        .foregroundStyle(Theme.faint)
-                }
-                if let text = subtext(session), !text.isEmpty {
-                    Text(text)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(session.acked ? Theme.faint : Theme.dim)
-                        .lineLimit(2)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
-}
-
-// The leading indicator: what the agent is doing. Whether it wants you is a
-// separate question, answered by the trailing dot.
-struct MarkView: View {
-    let mark: Mark
-
-    var body: some View {
-        Group {
-            switch mark.activity {
-            case .working:
-                // A spinner, because "working" is the one status that is about
-                // time passing rather than a thing that happened.
-                ProgressView()
-                    .controlSize(.mini)
-                    .scaleEffect(0.6)
-                    .frame(width: 9, height: 9)
-            case .failed:
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Theme.red)
-                    .frame(width: 9, height: 9)
-            case .idle:
-                Circle()
-                    .strokeBorder(Theme.faint.opacity(0.6), lineWidth: 1.5)
-                    .frame(width: 9, height: 9)
-            }
-        }
-    }
-}
-
 // The trailing indicator: whether this row wants you. Takes the slot a badge
 // occupies in any messaging app, and holds the row's width even when empty so
 // titles do not shift as sessions are read.
@@ -83,19 +10,6 @@ struct AttentionDot: View {
         Circle()
             .fill(mark.attentionDot ?? .clear)
             .frame(width: 9, height: 9)
-    }
-}
-
-struct HostChip: View {
-    let host: String
-
-    var body: some View {
-        Text(host)
-            .font(.system(size: 10.5, design: .monospaced))
-            .foregroundStyle(Theme.dim)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 4))
     }
 }
 

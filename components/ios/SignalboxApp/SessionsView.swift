@@ -378,8 +378,6 @@ struct SessionsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.faint)
                         .frame(width: 9)
-                } else {
-                    MarkView(mark: Mark.of(session))
                 }
                 Image(systemName: agentGlyph(session.agent))
                     .font(.system(size: 15))
@@ -408,7 +406,22 @@ struct SessionsView: View {
                                 .foregroundStyle(Theme.faint)
                         }
                     }
-                    if let preview = subtext(session), !preview.isEmpty {
+                    // What the agent is doing goes in the subtitle, where every
+                    // messaging app puts it: WhatsApp and Telegram replace the
+                    // message preview with "typing...", and none of them keeps a
+                    // glyph column for it. Idle rows then say nothing at all,
+                    // which is the point - the default posture stays silent.
+                    if session.event == "busy" {
+                        HStack(spacing: 5) {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .scaleEffect(0.55)
+                                .frame(width: 9, height: 9)
+                            Text("Working\u{2026}")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Theme.dim)
+                        }
+                    } else if let preview = subtext(session), !preview.isEmpty {
                         Text(markdownText(preview))
                             .font(.system(size: 12.5))
                             .foregroundStyle(Theme.dim)
