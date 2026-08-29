@@ -379,9 +379,7 @@ struct SessionsView: View {
                         .foregroundStyle(Theme.faint)
                         .frame(width: 9)
                 }
-                Image(systemName: agentGlyph(session.agent))
-                    .font(.system(size: 15))
-                    .foregroundStyle(agentColor(session.agent))
+                AgentMark(agent: session.agent)
                     .frame(width: 20)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
@@ -412,17 +410,30 @@ struct SessionsView: View {
                     // glyph column for it. Idle rows then say nothing at all,
                     // which is the point - the default posture stays silent.
                     if session.event == "busy" {
+                        // The label stays faint and the prompt follows it: what
+                        // the agent is working ON is the useful part, and a
+                        // bright "Working..." would take the width the prompt
+                        // wants. Blue read badly on black, so the spinner is
+                        // plain white at low opacity.
                         HStack(spacing: 5) {
                             ProgressView()
                                 .controlSize(.mini)
                                 .scaleEffect(0.55)
+                                .tint(Theme.text.opacity(0.75))
                                 .frame(width: 9, height: 9)
-                            // Brighter and slightly heavier than a breadcrumb:
-                            // this is a live state, and at Theme.dim it read as
-                            // just more stale preview text.
                             Text("Working\u{2026}")
-                                .font(.system(size: 12.5, weight: .medium))
-                                .foregroundStyle(Theme.text)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Theme.faint)
+                            if let prompt = session.prompt, !prompt.isEmpty {
+                                // Italic because this is your own words quoted
+                                // back, not the agent speaking: the same line
+                                // carries a reply once the turn is done, and the
+                                // two must not look alike.
+                                Text(prompt)
+                                    .font(.system(size: 12.5).italic())
+                                    .foregroundStyle(Theme.dim)
+                                    .lineLimit(1)
+                            }
                         }
                     } else if let preview = subtext(session), !preview.isEmpty {
                         Text(markdownText(preview))

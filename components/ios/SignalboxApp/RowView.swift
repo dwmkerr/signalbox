@@ -1,5 +1,49 @@
 import SwiftUI
 
+/// Claude's mark: eight rays from the centre, the same geometry the jumplist
+/// draws. SF Symbols has no match - `sparkle` is a four-point sparkle and reads
+/// as a different product - and the glyph is the row's identity, so the two
+/// surfaces must not disagree about it.
+struct ClaudeSunburst: View {
+    var body: some View {
+        Canvas { context, size in
+            let centre = CGPoint(x: size.width / 2, y: size.height / 2)
+            let radius = min(size.width, size.height) / 2
+            var path = Path()
+            for i in 0..<8 {
+                let angle = Double(i) * .pi / 4
+                path.move(to: centre)
+                path.addLine(to: CGPoint(
+                    x: centre.x + radius * cos(angle),
+                    y: centre.y + radius * sin(angle)
+                ))
+            }
+            context.stroke(
+                path,
+                with: .color(agentColor("claude")),
+                style: StrokeStyle(lineWidth: 1.6, lineCap: .round)
+            )
+        }
+    }
+}
+
+/// The row's agent mark. Claude is drawn; the rest map to SF Symbols whose
+/// shapes already match what the jumplist draws.
+struct AgentMark: View {
+    let agent: String
+    var size: CGFloat = 15
+
+    var body: some View {
+        if agent.lowercased() == "claude" {
+            ClaudeSunburst().frame(width: size + 2, height: size + 2)
+        } else {
+            Image(systemName: agentGlyph(agent))
+                .font(.system(size: size))
+                .foregroundStyle(agentColor(agent))
+        }
+    }
+}
+
 // The trailing indicator: whether this row wants you. Takes the slot a badge
 // occupies in any messaging app, and holds the row's width even when empty so
 // titles do not shift as sessions are read.

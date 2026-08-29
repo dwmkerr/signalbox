@@ -1324,7 +1324,8 @@ final class PaletteController: NSObject {
         spinIndex = (spinIndex + 1) % Self.spinGlyphs.count
         let now = Date()
         tableView.enumerateAvailableRowViews { rowView, _ in
-            (rowView.view(atColumn: 0) as? SessionCellView)?.tick(now: now)
+            (rowView.view(atColumn: 0) as? SessionCellView)?
+                .tick(now: now, spin: Self.spinGlyphs[self.spinIndex])
         }
         // Only the working preview shows a moving glyph/runtime; static
         // previews would just re-render identically.
@@ -2745,13 +2746,17 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
 // Layout per the mock row: [mark 14][glyph 22][title + breadcrumb][pill/age],
 // 10pt gaps, inside a 10pt row margin + 10pt padding.
 private final class SessionCellView: NSTableCellView {
-    private static var markCenterX: CGFloat { s(27) } // 20 content start + 14/2
-    private static var glyphCenterX: CGFloat { s(55) } // 20 + 14 + 10 + 22/2
-    private static var textLeading: CGFloat { s(76) } // 20 + 14 + 10 + 22 + 10
+    // The activity mark used to occupy the first slot; with it gone the glyph
+    // takes the content start, or the row reads as indented by an empty column.
+    private static var glyphCenterX: CGFloat { s(31) } // 20 content start + 22/2
+    private static var textLeading: CGFloat { s(52) } // 20 + 22 + 10
 
     private let row: PaletteRow
     private let titleLabel = NSTextField(labelWithString: "")
     private let ageLabel = NSTextField(labelWithString: "")
+    // Cycled by the panel's tick, so a working row is visibly alive rather than
+    // just labelled as such.
+    private let spinLabel = NSTextField(labelWithString: "")
 
     init(row: PaletteRow) {
         self.row = row
@@ -2769,8 +2774,9 @@ private final class SessionCellView: NSTableCellView {
         didSet { applyColors() }
     }
 
-    func tick(now: Date) {
+    func tick(now: Date, spin: String) {
         ageLabel.stringValue = ageString(from: row.ageStart, to: now)
+        if row.mark == .working { spinLabel.stringValue = spin }
     }
 
     private func build() {
@@ -2841,8 +2847,9 @@ private final class SessionCellView: NSTableCellView {
 
         let prompt = (row.detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let reply = (row.reply ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        // No runtime here: the age column already carries elapsed time, and a
-        // second copy in the breadcrumb would not tick with it.
+        // While working the line is built by hand below, so this only has to be
+        // non-empty for the layout branch that decides whether there is a
+        // subtext line at all.
         let detail = row.mark == .working
             ? "Working\u{2026}"
             : (reply.isEmpty ? prompt : reply)
@@ -2863,22 +2870,52 @@ private final class SessionCellView: NSTableCellView {
                 paragraphSpacing: 0,
                 indent: 0
             )
-            let spans = previewLine(detail, cropped: row.cropped)
             let breadcrumb = NSTextField(labelWithString: "")
-            // Whitespace collapse includes newlines, so explicit breaks never reach AppKit.
-            breadcrumb.attributedStringValue = render(spans: spans, style: breadcrumbStyle)
+            if row.mark == .working {
+                let line = NSMutableAttributedString(string: "", attributes: [:])
+                line.append(NSAttributedString(string: "Working\u{2026}", attributes: [
+                    .font: font, .foregroundColor: Theme.textDim,
+                ]))
+                if !prompt.isEmpty {
+                    line.append(NSAttributedString(string: "  ", attributes: [.font: font]))
+                    // Italic because this is the user's own words quoted back,
+                    // not the agent speaking - the same line shows a reply when
+                    // the turn is done, and the two must not look alike.
+                    line.append(NSAttributedString(string: prompt, attributes: [
+                        .font: breadcrumbStyle.italicFont, .foregroundColor: Theme.textDim,
+                    ]))
+                }
+                breadcrumb.attributedStringValue = line
+                spinLabel.stringValue = "\u{273B}"
+                spinLabel.font = font
+                spinLabel.textColor = Theme.textDim
+                spinLabel.translatesAutoresizingMaskIntoConstraints = false
+                addSubview(spinLabel)
+            } else {
+                let spans = previewLine(detail, cropped: row.cropped)
+                // Whitespace collapse includes newlines, so explicit breaks never reach AppKit.
+                breadcrumb.attributedStringValue = render(spans: spans, style: breadcrumbStyle)
+            }
             breadcrumb.font = font
-            // A live state, not a stale breadcrumb: at textDim "Working..." read
-            // as just more old preview text.
-            breadcrumb.textColor = row.mark == .working ? Theme.titleUnread : Theme.textDim
+            breadcrumb.textColor = Theme.textDim
             breadcrumb.lineBreakMode = .byTruncatingTail
             breadcrumb.maximumNumberOfLines = 1
             breadcrumb.translatesAutoresizingMaskIntoConstraints = false
             addSubview(breadcrumb)
+            if row.mark == .working {
+                NSLayoutConstraint.activate([
+                    spinLabel.leadingAnchor.constraint(
+                        equalTo: leadingAnchor, constant: Self.textLeading),
+                    spinLabel.centerYAnchor.constraint(equalTo: breadcrumb.centerYAnchor),
+                ])
+            }
             NSLayoutConstraint.activate([
                 titleRow.topAnchor.constraint(equalTo: topAnchor, constant: s(8)),
                 breadcrumb.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: s(2)),
-                breadcrumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading),
+                breadcrumb.leadingAnchor.constraint(
+                    equalTo: leadingAnchor,
+                    constant: row.mark == .working ? Self.textLeading + s(15) : Self.textLeading
+                ),
                 breadcrumb.trailingAnchor.constraint(
                     lessThanOrEqualTo: right.leadingAnchor, constant: -s(8)
                 ),
