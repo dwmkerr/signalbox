@@ -381,6 +381,16 @@ struct SessionsView: View {
                 }
                 AgentMark(agent: session.agent)
                     .frame(width: 20)
+                // Beside the title rather than down on the subtext line: the
+                // title is the line you scan, so a working session announces
+                // itself where the eye already is.
+                if session.event == "busy" {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.6)
+                        .tint(Theme.faint)
+                        .frame(width: 11)
+                }
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(session.name)
@@ -416,11 +426,6 @@ struct SessionsView: View {
                         // wants. Blue read badly on black, so the spinner is
                         // plain white at low opacity.
                         HStack(spacing: 5) {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .scaleEffect(0.55)
-                                .tint(Theme.faint)
-                                .frame(width: 9, height: 9)
                             Text("Working\u{2026}")
                                 .font(.system(size: 12.5))
                                 .foregroundStyle(Theme.faint.opacity(0.85))

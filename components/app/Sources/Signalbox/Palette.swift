@@ -2800,6 +2800,17 @@ private final class SessionCellView: NSTableCellView {
         titleRow.orientation = .horizontal
         titleRow.alignment = .centerY
         titleRow.spacing = s(6)
+        if row.mark == .working {
+            spinner.style = .spinning
+            spinner.controlSize = .small
+            spinner.isIndeterminate = true
+            spinner.startAnimation(nil)
+            NSLayoutConstraint.activate([
+                spinner.widthAnchor.constraint(equalToConstant: s(11)),
+                spinner.heightAnchor.constraint(equalToConstant: s(11)),
+            ])
+            titleRow.addArrangedSubview(spinner)
+        }
         titleRow.addArrangedSubview(titleLabel)
         for tag in row.tags.prefix(3) {
             titleRow.addArrangedSubview(tagPill(tag))
@@ -2891,12 +2902,6 @@ private final class SessionCellView: NSTableCellView {
                     ]))
                 }
                 breadcrumb.attributedStringValue = line
-                spinner.style = .spinning
-                spinner.controlSize = .small
-                spinner.isIndeterminate = true
-                spinner.startAnimation(nil)
-                spinner.translatesAutoresizingMaskIntoConstraints = false
-                addSubview(spinner)
             } else {
                 let spans = previewLine(detail, cropped: row.cropped)
                 // Whitespace collapse includes newlines, so explicit breaks never reach AppKit.
@@ -2908,22 +2913,10 @@ private final class SessionCellView: NSTableCellView {
             breadcrumb.maximumNumberOfLines = 1
             breadcrumb.translatesAutoresizingMaskIntoConstraints = false
             addSubview(breadcrumb)
-            if row.mark == .working {
-                NSLayoutConstraint.activate([
-                    spinner.leadingAnchor.constraint(
-                        equalTo: leadingAnchor, constant: Self.textLeading),
-                    spinner.centerYAnchor.constraint(equalTo: breadcrumb.centerYAnchor),
-                    spinner.widthAnchor.constraint(equalToConstant: s(11)),
-                    spinner.heightAnchor.constraint(equalToConstant: s(11)),
-                ])
-            }
             NSLayoutConstraint.activate([
                 titleRow.topAnchor.constraint(equalTo: topAnchor, constant: s(8)),
                 breadcrumb.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: s(2)),
-                breadcrumb.leadingAnchor.constraint(
-                    equalTo: leadingAnchor,
-                    constant: row.mark == .working ? Self.textLeading + s(15) : Self.textLeading
-                ),
+                breadcrumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading),
                 breadcrumb.trailingAnchor.constraint(
                     lessThanOrEqualTo: right.leadingAnchor, constant: -s(8)
                 ),
