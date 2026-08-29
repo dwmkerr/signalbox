@@ -828,7 +828,11 @@ final class PaletteController: NSObject {
     private var spinIndex = 0
 
     // Working-state glyphs cycled once per second, matching the mock.
-    private static let spinGlyphs = ["·", "✢", "✳", "∗", "✻", "✽"]
+    // Braille, the CLI convention: the preview pane imitates a terminal, so a
+    // glyph belongs there where the row uses the platform's own indicator. The
+    // set it replaced was Claude Code's statusline spinner, which is the wrong
+    // mark to wear on a codex or cursor session.
+    private static let spinGlyphs = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     private static let feedbackURL = URL(string: "https://github.com/dwmkerr/signalbox/issues/67")!
 
     // Mock geometry: 960-wide panel, 46pt header, 34pt footer, 430pt list -
@@ -1324,8 +1328,7 @@ final class PaletteController: NSObject {
         spinIndex = (spinIndex + 1) % Self.spinGlyphs.count
         let now = Date()
         tableView.enumerateAvailableRowViews { rowView, _ in
-            (rowView.view(atColumn: 0) as? SessionCellView)?
-                .tick(now: now, spin: Self.spinGlyphs[self.spinIndex])
+            (rowView.view(atColumn: 0) as? SessionCellView)?.tick(now: now)
         }
         // Only the working preview shows a moving glyph/runtime; static
         // previews would just re-render identically.
@@ -2385,8 +2388,10 @@ final class PaletteController: NSObject {
             if newest, row.mark == .working {
                 let runtime = ageString(from: row.ageStart, to: now)
                 let glyph = Self.spinGlyphs[spinIndex]
+                // Not amber: amber means "needs your input" on this board, and
+                // one colour cannot mean two things.
                 text.append(NSAttributedString(string: "\(glyph)\tWorking… (\(runtime))", attributes: [
-                    .font: mono, .foregroundColor: Theme.amber, .paragraphStyle: bodyParagraph,
+                    .font: mono, .foregroundColor: Theme.textMid, .paragraphStyle: bodyParagraph,
                 ]))
                 continue
             }
@@ -2754,9 +2759,10 @@ private final class SessionCellView: NSTableCellView {
     private let row: PaletteRow
     private let titleLabel = NSTextField(labelWithString: "")
     private let ageLabel = NSTextField(labelWithString: "")
-    // Cycled by the panel's tick, so a working row is visibly alive rather than
-    // just labelled as such.
-    private let spinLabel = NSTextField(labelWithString: "")
+    // The platform's own activity indicator: it animates itself, so no tick
+    // drives it, and it borrows no agent's mark. The glyph cycle it replaced was
+    // Claude Code's statusline spinner, which is wrong on a codex row.
+    private let spinner = NSProgressIndicator()
 
     init(row: PaletteRow) {
         self.row = row
@@ -2774,9 +2780,8 @@ private final class SessionCellView: NSTableCellView {
         didSet { applyColors() }
     }
 
-    func tick(now: Date, spin: String) {
+    func tick(now: Date) {
         ageLabel.stringValue = ageString(from: row.ageStart, to: now)
-        if row.mark == .working { spinLabel.stringValue = spin }
     }
 
     private func build() {
@@ -2874,7 +2879,7 @@ private final class SessionCellView: NSTableCellView {
             if row.mark == .working {
                 let line = NSMutableAttributedString(string: "", attributes: [:])
                 line.append(NSAttributedString(string: "Working\u{2026}", attributes: [
-                    .font: font, .foregroundColor: Theme.textDim,
+                    .font: font, .foregroundColor: Theme.ring,
                 ]))
                 if !prompt.isEmpty {
                     line.append(NSAttributedString(string: "  ", attributes: [.font: font]))
@@ -2886,11 +2891,12 @@ private final class SessionCellView: NSTableCellView {
                     ]))
                 }
                 breadcrumb.attributedStringValue = line
-                spinLabel.stringValue = "\u{273B}"
-                spinLabel.font = font
-                spinLabel.textColor = Theme.textDim
-                spinLabel.translatesAutoresizingMaskIntoConstraints = false
-                addSubview(spinLabel)
+                spinner.style = .spinning
+                spinner.controlSize = .small
+                spinner.isIndeterminate = true
+                spinner.startAnimation(nil)
+                spinner.translatesAutoresizingMaskIntoConstraints = false
+                addSubview(spinner)
             } else {
                 let spans = previewLine(detail, cropped: row.cropped)
                 // Whitespace collapse includes newlines, so explicit breaks never reach AppKit.
@@ -2904,9 +2910,11 @@ private final class SessionCellView: NSTableCellView {
             addSubview(breadcrumb)
             if row.mark == .working {
                 NSLayoutConstraint.activate([
-                    spinLabel.leadingAnchor.constraint(
+                    spinner.leadingAnchor.constraint(
                         equalTo: leadingAnchor, constant: Self.textLeading),
-                    spinLabel.centerYAnchor.constraint(equalTo: breadcrumb.centerYAnchor),
+                    spinner.centerYAnchor.constraint(equalTo: breadcrumb.centerYAnchor),
+                    spinner.widthAnchor.constraint(equalToConstant: s(11)),
+                    spinner.heightAnchor.constraint(equalToConstant: s(11)),
                 ])
             }
             NSLayoutConstraint.activate([

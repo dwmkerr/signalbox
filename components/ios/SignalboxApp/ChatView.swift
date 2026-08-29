@@ -178,13 +178,23 @@ struct ChatView: View {
 
     private var pendingExchange: Exchange? {
         let live = hub.sessions.first { $0.key == session.key } ?? session
-        guard live.event == "busy", let prompt = live.prompt, !prompt.isEmpty else { return nil }
-        // Once the turn commits, the real exchange carries this prompt and the
-        // synthetic one must not double it.
-        guard exchanges.last?.prompt != prompt else { return nil }
-        return Exchange(
-            prompt: prompt, reply: nil, ts: "", cropped: false, seq: Int.max
-        )
+        switch live.event {
+        case "busy":
+            guard let prompt = live.prompt, !prompt.isEmpty else { return nil }
+            // Once the turn commits, the real exchange carries this prompt and
+            // the synthetic one must not double it.
+            guard exchanges.last?.prompt != prompt else { return nil }
+            return Exchange(prompt: prompt, reply: nil, ts: "", cropped: false, seq: Int.max)
+        case "attention":
+            // The reducer ignores attention events by contract (events.md,
+            // history rule 1), so the one message actually waiting on you is
+            // the one the conversation would otherwise omit.
+            guard let ask = live.reply, !ask.isEmpty else { return nil }
+            guard exchanges.last?.reply != ask else { return nil }
+            return Exchange(prompt: nil, reply: ask, ts: "", cropped: false, seq: Int.max)
+        default:
+            return nil
+        }
     }
 
     private func loadInitial() async {

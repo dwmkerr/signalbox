@@ -419,11 +419,11 @@ struct SessionsView: View {
                             ProgressView()
                                 .controlSize(.mini)
                                 .scaleEffect(0.55)
-                                .tint(Theme.text.opacity(0.75))
+                                .tint(Theme.faint)
                                 .frame(width: 9, height: 9)
                             Text("Working\u{2026}")
                                 .font(.system(size: 12.5))
-                                .foregroundStyle(Theme.faint)
+                                .foregroundStyle(Theme.faint.opacity(0.85))
                             if let prompt = session.prompt, !prompt.isEmpty {
                                 // Italic because this is your own words quoted
                                 // back, not the agent speaking: the same line
