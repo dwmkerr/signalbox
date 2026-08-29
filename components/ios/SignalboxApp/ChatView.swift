@@ -64,7 +64,20 @@ struct ChatView: View {
                 }
             }
         }
-        .task { await loadInitial() }
+        // The page used to load once and never change, so a reply that arrived
+        // while it was open never appeared - the row on the list updated and the
+        // conversation did not. The session's seq advances whenever the hub
+        // applies an event for it, and its date moves with it, which is the
+        // cheapest per-session signal that there is something new to fetch.
+        .onChange(of: hub.sessions.first(where: { $0.key == session.key })?.date) {
+            Task { await loadNewer() }
+        }
+        .task {
+            await loadInitial()
+            // Opening the thread is reading it. Leaving the dot lit would make
+            // it untrustworthy, and Mark as Unread is the way back.
+            if session.isUnread { await hub.ack(session) }
+        }
     }
 
     private var olderButton: some View {
@@ -162,6 +175,19 @@ struct ChatView: View {
         } catch {
             if !Task.isCancelled { failed = true }
         }
+    }
+
+    // Merges rather than replaces: someone who has scrolled back through older
+    // pages must not lose them because a new reply landed.
+    private func loadNewer() async {
+        guard !loading else { return }
+        loading = true
+        defer { loading = false }
+        guard let doc = try? await hub.exchanges(for: session.key, limit: pageLimit) else { return }
+        let newestSeen = exchanges.last?.seq ?? Int.min
+        let fresh = doc.exchanges.filter { $0.seq > newestSeen }
+        guard !fresh.isEmpty else { return }
+        exchanges.append(contentsOf: fresh)
     }
 
     private func loadOlder() async {

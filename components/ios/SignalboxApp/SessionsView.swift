@@ -417,9 +417,12 @@ struct SessionsView: View {
                                 .controlSize(.mini)
                                 .scaleEffect(0.55)
                                 .frame(width: 9, height: 9)
+                            // Brighter and slightly heavier than a breadcrumb:
+                            // this is a live state, and at Theme.dim it read as
+                            // just more stale preview text.
                             Text("Working\u{2026}")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(Theme.dim)
+                                .font(.system(size: 12.5, weight: .medium))
+                                .foregroundStyle(Theme.text)
                         }
                     } else if let preview = subtext(session), !preview.isEmpty {
                         Text(markdownText(preview))
@@ -435,12 +438,11 @@ struct SessionsView: View {
             // machine, so reading what happened is the useful thing to do with
             // a row and jumping is the deliberate one - which is why jump keeps
             // its own button rather than owning the whole row.
-            .onTapGesture {
-                chatSession = session
-                // Opening the thread is reading it. Leaving the dot lit would
-                // make it untrustworthy, and Mark as Unread is the way back.
-                if session.isUnread { Task { await hub.ack(session) } }
-            }
+            // The ack belongs to the chat page opening, not to the tap: acking
+            // here resynced the session list mid-push, and rebuilding the list
+            // under a navigation that has not settled cancels it, so the page
+            // never appeared.
+            .onTapGesture { chatSession = session }
 
             if !session.infoOnly && !dimmed {
                 Button { jump(session) } label: {

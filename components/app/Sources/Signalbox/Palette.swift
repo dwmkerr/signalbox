@@ -2868,7 +2868,9 @@ private final class SessionCellView: NSTableCellView {
             // Whitespace collapse includes newlines, so explicit breaks never reach AppKit.
             breadcrumb.attributedStringValue = render(spans: spans, style: breadcrumbStyle)
             breadcrumb.font = font
-            breadcrumb.textColor = Theme.textDim
+            // A live state, not a stale breadcrumb: at textDim "Working..." read
+            // as just more old preview text.
+            breadcrumb.textColor = row.mark == .working ? Theme.titleUnread : Theme.textDim
             breadcrumb.lineBreakMode = .byTruncatingTail
             breadcrumb.maximumNumberOfLines = 1
             breadcrumb.translatesAutoresizingMaskIntoConstraints = false
