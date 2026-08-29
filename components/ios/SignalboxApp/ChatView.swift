@@ -38,6 +38,9 @@ struct ChatView: View {
                     ForEach(exchanges) { exchange in
                         exchangeView(exchange)
                     }
+                    if let pending = pendingExchange {
+                        exchangeView(pending)
+                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -161,6 +164,22 @@ struct ChatView: View {
             return nil
         }
         return text
+    }
+
+    // The prompt you just sent is not in the history yet: an exchange commits
+    // when its reply arrives, so a turn in flight lives only on the session row.
+    // Showing it here keeps the conversation honest - you sent something, so it
+    // belongs in the thread - without waiting on a wire change the remote hub
+    // would have to be redeployed for.
+    private var pendingExchange: Exchange? {
+        let live = hub.sessions.first { $0.key == session.key } ?? session
+        guard live.event == "busy", let prompt = live.prompt, !prompt.isEmpty else { return nil }
+        // Once the turn commits, the real exchange carries this prompt and the
+        // synthetic one must not double it.
+        guard exchanges.last?.prompt != prompt else { return nil }
+        return Exchange(
+            prompt: prompt, reply: nil, ts: "", cropped: false, seq: Int.max
+        )
     }
 
     private func loadInitial() async {

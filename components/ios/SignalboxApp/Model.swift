@@ -129,6 +129,17 @@ struct Exchange: Decodable, Identifiable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case prompt, reply, ts, cropped, seq
     }
+
+    /// Builds an exchange the hub did not send. The chat page uses this for the
+    /// turn in flight: an exchange commits only once its reply arrives, so a
+    /// prompt you just sent has no committed row to render.
+    init(prompt: String?, reply: String?, ts: String, cropped: Bool, seq: Int) {
+        self.prompt = prompt
+        self.reply = reply
+        self.ts = ts
+        self.cropped = cropped
+        self.seq = seq
+    }
 }
 
 struct ExchangesDoc: Decodable {
