@@ -94,6 +94,12 @@ export class Forwarder implements RequestHandler {
   private searchTimer: ReturnType<typeof setInterval> | null = null;
   private streamCleanups = new Set<() => void>();
   private failureLogged = false;
+  private initialReplayComplete = false;
+  private deliveredHighWater = 0;
+  private synchronizationWaiters = new Set<{
+    resolve: () => void;
+    reject: (reason: Error) => void;
+  }>();
 
   constructor(private opts: ForwarderOptions) {
     this.store = new Store(opts.historyLimit);
@@ -193,6 +199,21 @@ export class Forwarder implements RequestHandler {
     }, drainTickMs);
   }
 
+  // A local listener must not expose the upstream's historical replay as live
+  // transitions. The hub's sync frame is the exact boundary; an older upstream
+  // has no such frame, so its first heartbeat is the compatible boundary that
+  // is structurally emitted only after the replay has been queued.
+  synchronize(): Promise<void> {
+    if (this.closed) return Promise.reject(new Error("forwarder is closed"));
+    const waiting = new Promise<void>((resolve, reject) => {
+      this.synchronizationWaiters.add({ resolve, reject });
+    });
+    this.start();
+    if (this.initialReplayComplete) this.kickDrain();
+    this.checkSynchronization();
+    return waiting;
+  }
+
   close(): void {
     this.closed = true;
     this.connected = false;
@@ -208,6 +229,16 @@ export class Forwarder implements RequestHandler {
     this.drainTimer = null;
     for (const cleanup of this.streamCleanups) cleanup();
     this.streamCleanups.clear();
+    for (const waiter of this.synchronizationWaiters) {
+      waiter.reject(new Error("forwarder closed before synchronization"));
+    }
+    this.synchronizationWaiters.clear();
+  }
+
+  // The startup importer and local POST path share the same durable outbound
+  // queue, so switching to an upstream cannot strand the hook-path spool.
+  async enqueue(event: Event): Promise<void> {
+    await this.spool.append(JSON.stringify(event));
   }
 
   private async handleEvents(req: Request): Promise<Response> {
@@ -243,7 +274,7 @@ export class Forwarder implements RequestHandler {
     // make the hook spool locally after this process had also delivered the
     // event, creating a duplicate; one local append and one async drain avoid it.
     try {
-      await this.spool.append(JSON.stringify(e));
+      await this.enqueue(e);
     } catch (err) {
       return jsonError(500, String(err));
     }
@@ -448,7 +479,7 @@ export class Forwarder implements RequestHandler {
         this.hasConnected = true;
         this.failureLogged = false;
         backoff = reconnectMinMs;
-        this.kickDrain();
+        if (this.synchronizationWaiters.size === 0) this.kickDrain();
         this.resetIdleWatchdog(controller);
         await this.consumeStream(res.body, controller);
         if (!this.closed) throw new Error("upstream stream ended");
@@ -486,6 +517,8 @@ export class Forwarder implements RequestHandler {
           } else if (line.startsWith("data:")) {
             this.dispatchDownlink(label, line.slice("data:".length).trimStart());
             label = "signal";
+          } else if (line.startsWith(": heartbeat")) {
+            this.markReplayComplete();
           }
         }
       }
@@ -496,6 +529,13 @@ export class Forwarder implements RequestHandler {
 
   private dispatchDownlink(label: string, payload: string): void {
     try {
+      if (label === "sync") {
+        const boundary = JSON.parse(payload) as { seq?: unknown };
+        if (typeof boundary.seq === "number" && boundary.seq <= this.lastSeq) {
+          this.markReplayComplete();
+        }
+        return;
+      }
       if (label === "command") {
         const c = JSON.parse(payload) as Command;
         for (const send of this.cmdSubs) {
@@ -516,6 +556,7 @@ export class Forwarder implements RequestHandler {
         this.events.splice(0, this.events.length - maxCachedEvents);
       }
       if ((e.seq ?? 0) > this.lastSeq) this.lastSeq = e.seq!;
+      this.checkSynchronization();
       for (const send of this.subs) {
         try {
           send(e);
@@ -545,7 +586,15 @@ export class Forwarder implements RequestHandler {
   }
 
   private kickDrain(): void {
-    void this.drain().catch((err) => this.log(`drain: ${String(err)}`));
+    void this.drain()
+      .then(() => {
+        if (this.synchronizationWaiters.size > 0 && this.spool.count() > 0) {
+          this.kickDrain();
+          return;
+        }
+        this.checkSynchronization();
+      })
+      .catch((err) => this.log(`drain: ${String(err)}`));
   }
 
   private drain(): Promise<number> {
@@ -563,7 +612,15 @@ export class Forwarder implements RequestHandler {
       signal: AbortSignal.timeout(postTimeoutMs),
     });
     const body = (await res.text()).trim();
-    if (res.ok) return;
+    if (res.ok) {
+      try {
+        const accepted = JSON.parse(body) as { seq?: unknown };
+        if (typeof accepted.seq === "number") {
+          this.deliveredHighWater = Math.max(this.deliveredHighWater, accepted.seq);
+        }
+      } catch {}
+      return;
+    }
     if (res.status >= 400 && res.status < 500) {
       throw new PermanentError(`upstream rejected event: ${res.status}${body ? `: ${body}` : ""}`);
     }
@@ -582,6 +639,22 @@ export class Forwarder implements RequestHandler {
     if (this.failureLogged) return;
     this.log(`upstream disconnected: ${String(err)}`);
     this.failureLogged = true;
+  }
+
+  private markReplayComplete(): void {
+    this.initialReplayComplete = true;
+    if (this.synchronizationWaiters.size > 0 && this.spool.count() > 0) {
+      this.kickDrain();
+    }
+    this.checkSynchronization();
+  }
+
+  private checkSynchronization(): void {
+    if (!this.initialReplayComplete) return;
+    if (this.spool.count() > 0) return;
+    if (this.lastSeq < this.deliveredHighWater) return;
+    for (const waiter of this.synchronizationWaiters) waiter.resolve();
+    this.synchronizationWaiters.clear();
   }
 
   private log(message: string): void {
