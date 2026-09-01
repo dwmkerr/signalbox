@@ -1,3 +1,7 @@
+<!-- openspec-flow badge-start -->
+[![openspec-flow](https://github.com/dwmkerr/signalbox/actions/workflows/openspec-flow.yml/badge.svg)](https://github.com/dwmkerr/signalbox/actions/workflows/openspec-flow.yml)
+<!-- openspec-flow badge-end -->
+
 <h1 align="center">Are you tab-hunting your agents?</h1>
 
 <p align="center">
@@ -105,3 +109,16 @@ There is also a native [tmux jump list](docs/tmux.md) (`<Leader>J`).
 ## License
 
 [MIT](LICENSE).
+
+<!-- openspec-flow install-start -->
+## openspec-flow
+
+This repo uses [openspec-flow](https://github.com/dwmkerr/openspec-flow) to drive spec-driven development from GitHub issues.
+
+1. Open an issue describing the feature, fix, or task.
+2. Add the `openspec:go` label.
+3. openspec-flow opens a **spec PR** (`openspec:spec`). Review, comment, iterate (add `openspec:go` to the PR to re-run). Merge when happy.
+4. openspec-flow opens an **impl PR** (`openspec:impl`). Review, iterate, merge. The originating issue closes automatically.
+
+Required Actions secret: `CLAUDE_CODE_OAUTH_TOKEN` (recommended) or `ANTHROPIC_API_KEY`. Set exactly one.
+<!-- openspec-flow install-end -->
