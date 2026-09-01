@@ -1,0 +1,14 @@
+{"type":"user","cwd":"/work/claude-project","timestamp":"2026-08-19T09:00:00.000Z","message":{"role":"user","content":"[Image #1] Fix the transcript parser"}}
+{"type":"assistant","cwd":"/work/claude-project","timestamp":"2026-08-19T09:00:01.000Z","message":{"role":"assistant","content":[{"type":"text","text":"I will inspect it."},{"type":"tool_use","name":"Read"},{"type":"text","text":"Then add tests."}]}}
+{"type":"user","cwd":"/work/claude-project","message":{"role":"assistant","content":"roles disagree"}}
+{"type":"system","cwd":"/work/claude-project","message":{"content":"system prompt"}}
+{"type":"attachment","cwd":"/work/claude-project","message":{"content":"attachment"}}
+{"type":"file-history-snapshot","cwd":"/work/claude-project","message":{"content":"history"}}
+{"type":"last-prompt","cwd":"/work/claude-project","message":{"content":"last prompt"}}
+{"type":"mode","cwd":"/work/claude-project","message":{"content":"mode"}}
+{"type":"permission-mode","cwd":"/work/claude-project","message":{"content":"permission mode"}}
+{"type":"ai-title","cwd":"/work/claude-project","message":{"content":"title"}}
+{"type":"queue-operation","cwd":"/work/claude-project","message":{"content":"queue"}}
+{"type":"assistant","cwd":"/work/claude-project","message":{"role":"assistant","content":"<system-reminder>hidden</system-reminder>"}}
+{"type":"user","cwd":"/work/claude-project","message":{"role":"user","content":[{"type":"tool_result","content":"hidden"}]}}
+not-json

@@ -1,0 +1,13 @@
+{"timestamp":"2026-08-19T09:30:00.000Z","type":"session_meta","payload":{"session_id":"22222222-2222-4222-8222-222222222222","cwd":"/work/codex-project"}}
+{"timestamp":"2026-08-19T09:30:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Implement bounded parsing"}}
+{"timestamp":"2026-08-19T09:30:02.000Z","type":"response_item","payload":{"type":"message","role":"developer","content":"developer prompt"}}
+{"timestamp":"2026-08-19T09:30:03.000Z","type":"event_msg","payload":{"type":"agent_message","message":"The parser is bounded."}}
+{"timestamp":"2026-08-19T09:30:04.000Z","type":"event_msg","payload":{"type":"token_count","message":"100"}}
+{"timestamp":"2026-08-19T09:30:05.000Z","type":"custom_tool_call","payload":{"message":"tool call"}}
+{"timestamp":"2026-08-19T09:30:06.000Z","type":"custom_tool_call_output","payload":{"message":"tool output"}}
+{"timestamp":"2026-08-19T09:30:07.000Z","type":"world_state","payload":{"message":"world"}}
+{"timestamp":"2026-08-19T09:30:08.000Z","type":"turn_context","payload":{"message":"context"}}
+{"timestamp":"2026-08-19T09:30:09.000Z","type":"task_started","payload":{"message":"started"}}
+{"timestamp":"2026-08-19T09:30:10.000Z","type":"task_complete","payload":{"message":"complete"}}
+{"timestamp":"2026-08-19T09:30:11.000Z","type":"patch_apply_end","payload":{"message":"patch"}}
+not-json

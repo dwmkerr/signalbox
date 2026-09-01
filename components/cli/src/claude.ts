@@ -272,7 +272,7 @@ function lastRoleText(path: string, role: string): string {
 // contentText extracts displayed text from a message content payload: only
 // text blocks count - tool_use and thinking blocks are machinery the user
 // never saw as the reply.
-function contentText(content: unknown): string {
+export function contentText(content: unknown): string {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
   const parts: string[] = [];

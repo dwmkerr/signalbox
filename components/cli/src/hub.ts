@@ -12,8 +12,13 @@ import { Store, DefaultHistoryLimit } from "./state";
 import type { Exchange } from "./state";
 import { procAlive } from "./proc";
 import { buildStamp } from "./build";
+import { openIndex, type SearchIndex } from "./searchindex";
+import { loadSettings } from "./config";
 
 const heartbeatMs = 15_000;
+export const searchSweepIntervalMs = 250;
+export const searchSweepBudgetMs = 10;
+export const searchResultLimit = 50;
 // Bounds a single POST body; events are tiny, so anything bigger is junk.
 const maxBodyBytes = 1 << 20;
 
@@ -42,13 +47,14 @@ export class Hub {
   private logFd: number;
   private timers: ReturnType<typeof setInterval>[] = [];
   private logPath: string;
+  private searchIndex: SearchIndex | null = null;
 
   // Rebuilds state from events.jsonl in stateDir (creating it if needed).
   // Seq continues from the highest persisted value. token is the bearer secret
   // non-loopback clients must present; empty means no token configured (the
   // loopback-only default, where a token is never required).
   constructor(
-    stateDir: string,
+    private stateDirPath: string,
     private version: string,
     private token: string = "",
     // The hub's own bind address, echoed to a freshly minted pairing code so
@@ -74,11 +80,16 @@ export class Hub {
     // to tell a person where to reach the hub must not have to guess it from
     // the URL it happened to dial.
     private port: number = 0,
-    private historyLimit: number = DefaultHistoryLimit
+    private historyLimit: number = DefaultHistoryLimit,
+    // Whether search is enabled, asked on every sweep and every request rather
+    // than captured once, so ticking the box in Settings takes effect within a
+    // sweep instead of at the next restart. Injectable so a test does not need
+    // a settings file on disk to exercise indexing.
+    private searchEnabledNow: () => boolean = () => loadSettings().searchEnabled
   ) {
     this.store = new Store(historyLimit);
-    mkdirSync(stateDir, { recursive: true });
-    this.logPath = join(stateDir, "events.jsonl");
+    mkdirSync(this.stateDirPath, { recursive: true });
+    this.logPath = join(this.stateDirPath, "events.jsonl");
     if (existsSync(this.logPath)) {
       for (const line of readFileSync(this.logPath, "utf8").split("\n")) {
         const trimmed = line.trim();
@@ -105,6 +116,7 @@ export class Hub {
     }
     // Keep an fd open for appends (append mode).
     this.logFd = openSync(this.logPath, "a");
+
   }
 
   close(): void {
@@ -112,6 +124,8 @@ export class Hub {
     try {
       closeSync(this.logFd);
     } catch {}
+    this.searchIndex?.close();
+    this.searchIndex = null;
   }
 
   // The forwarder's drain is at-least-once, so a crash between send and
@@ -219,6 +233,17 @@ export class Hub {
     this.timers.push(setInterval(sweep, intervalMs));
   }
 
+  /** Starts bounded local transcript indexing when the privacy-sensitive feature is enabled. */
+  startSearch(): void {
+    // The setting is re-read every tick rather than captured at startup, so
+    // turning search off stops reading transcripts immediately. Captured once,
+    // a hub would keep indexing until it was restarted while the app reported
+    // the feature as off.
+    const sweep = () => this.activeIndex()?.sweep({ budgetMs: searchSweepBudgetMs });
+    sweep();
+    this.timers.push(setInterval(sweep, searchSweepIntervalMs));
+  }
+
   // fetch handles one HTTP request; returns undefined for unknown routes.
   handle(req: Request, server: Bun.Server<undefined>): Response | Promise<Response> | undefined {
     const url = new URL(req.url);
@@ -273,6 +298,15 @@ export class Hub {
     if (req.method === "GET" && url.pathname === "/exchanges") {
       return this.handleExchanges(url);
     }
+    if (req.method === "GET" && url.pathname === "/search/status") {
+      return this.handleSearchStatus();
+    }
+    if (req.method === "POST" && url.pathname === "/search/rebuild") {
+      return this.handleSearchRebuild();
+    }
+    if (req.method === "GET" && url.pathname === "/search") {
+      return this.handleSearch(url);
+    }
     if (req.method === "GET" && url.pathname === "/stream") {
       return this.handleStream(req, url, server);
     }
@@ -296,6 +330,51 @@ export class Hub {
     return Response.json(exchangesBody(parsed.session!, list), {
       headers: { "Cache-Control": "no-store" },
     });
+  }
+
+  // The index is opened the first time the setting says yes, and dropped when
+  // it says no, so ticking the box in Settings takes effect within a sweep
+  // rather than at the next restart. Opened once at construction, a hub that
+  // started with the setting off could never serve search however the user
+  // changed it.
+  private activeIndex(): SearchIndex | null {
+    if (!this.searchEnabledNow()) {
+      this.searchIndex?.close();
+      this.searchIndex = null;
+      return null;
+    }
+    if (!this.searchIndex) this.searchIndex = openIndex(this.stateDirPath);
+    return this.searchIndex;
+  }
+
+  private handleSearch(url: URL): Response {
+    const index = this.activeIndex();
+    if (!index) {
+      return noStoreJSON({ error: "search_disabled", enabled: false }, 409);
+    }
+    const query = url.searchParams.get("q");
+    if (!query) return noStoreJSON({ error: "q is required" }, 400);
+    return noStoreJSON({
+      enabled: true,
+      query,
+      results: index.search(query, searchResultLimit, this.sessions()),
+    });
+  }
+
+  // Rebuilding is the hub's job because it owns the open connection. It empties
+  // the index and returns at once: the sweep refills it, so the caller sees
+  // progress where it already watches for it rather than waiting on this.
+  private handleSearchRebuild(): Response {
+    const index = this.activeIndex();
+    if (!index) return noStoreJSON({ error: "search_disabled", enabled: false }, 409);
+    index.rebuild();
+    return noStoreJSON({ enabled: true, status: index.status() });
+  }
+
+  private handleSearchStatus(): Response {
+    const index = this.activeIndex();
+    if (!index) return noStoreJSON({ enabled: false, status: "disabled" });
+    return noStoreJSON({ enabled: true, status: index.status() });
   }
 
   // checkBearer returns a 401 Response when the request does not carry the
@@ -614,6 +693,13 @@ export function validateBindConfig(bind: string, token: string): string | null {
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
+}
+
+export function noStoreJSON(body: unknown, status: number = 200): Response {
+  return Response.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
 // pairError is the one uniform /pair failure body. No code, expired, wrong,

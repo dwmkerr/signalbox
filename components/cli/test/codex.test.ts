@@ -1,8 +1,66 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mapCodexHook, codexReply, codexSessionName } from "../src/codex";
+import { mapCodexHook, codexReply, codexSessionName, resolveCodexTranscript } from "../src/codex";
+
+function spooledCodexEvent(payload: Record<string, unknown>, home: string): Record<string, unknown> {
+  const dir = mkdtempSync(join(tmpdir(), "sb-codex-hook-"));
+  const proc = Bun.spawnSync(
+    [process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "hook", "codex"],
+    {
+      env: {
+        ...process.env,
+        HOME: home,
+        SIGNALBOX_CONFIG: join(dir, "settings.json"),
+        SIGNALBOX_DATA_DIR: dir,
+        SIGNALBOX_PROFILE: "full",
+        SIGNALBOX_URL: "http://127.0.0.1:1",
+        TMUX: "",
+      },
+      stdin: new TextEncoder().encode(JSON.stringify(payload)),
+      stdout: "pipe",
+      stderr: "pipe",
+    }
+  );
+  expect(proc.exitCode).toBe(0);
+  return JSON.parse(readFileSync(join(dir, "spool.jsonl"), "utf8").trim());
+}
+
+describe("resolveCodexTranscript", () => {
+  test("finds a session in the newest date directories and misses an unknown id", () => {
+    const root = mkdtempSync(join(tmpdir(), "sb-codex-transcripts-"));
+    const sessions = join(root, "sessions");
+    const oldDir = join(sessions, "2025", "12", "31");
+    const newDir = join(sessions, "2026", "08", "19");
+    mkdirSync(oldDir, { recursive: true });
+    mkdirSync(newDir, { recursive: true });
+    const uuid = "11111111-2222-4333-8444-555555555555";
+    const oldPath = join(oldDir, `rollout-2025-12-31T23-00-00-${uuid}.jsonl`);
+    const newPath = join(newDir, `rollout-2026-08-19T09-30-00-${uuid}.jsonl`);
+    writeFileSync(oldPath, "");
+    writeFileSync(newPath, "");
+
+    expect(resolveCodexTranscript(uuid, sessions)).toBe(newPath);
+    expect(resolveCodexTranscript("99999999-9999-4999-8999-999999999999", sessions)).toBe("");
+  });
+
+  test("threads the resolved path into the built event", () => {
+    const home = mkdtempSync(join(tmpdir(), "sb-codex-home-"));
+    const dateDir = join(home, ".codex", "sessions", "2026", "08", "19");
+    mkdirSync(dateDir, { recursive: true });
+    const uuid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const transcript = join(dateDir, `rollout-2026-08-19T10-00-00-${uuid}.jsonl`);
+    writeFileSync(transcript, "");
+
+    const event = spooledCodexEvent({
+      hook_event_name: "SessionStart",
+      session_id: uuid,
+      cwd: "/tmp/project",
+    }, home);
+    expect(event.transcript).toBe(transcript);
+  });
+});
 
 describe("mapCodexHook", () => {
   const cases: [any, { eventType: string; reason: string; detail?: string } | null][] = [

@@ -46,7 +46,7 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   "agent": "claude",
 
   // What happened. Agent lifecycle: busy, attention, done, error, ended.
-  // User actions: seen, hide, show, pin, unpin, label, tag, untag (they change
+  // User actions: seen, unseen, hide, show, pin, unpin, label, tag, untag (they change
   // how a session is shown, never what the agent did). `jump` is a command,
   // not an event - see commands below.
   "event": "done",
@@ -69,6 +69,11 @@ Every field explained in place. Optional fields are omitted from the JSON when e
 
   // Where the work is happening.
   "cwd": "/Users/dave/repos/work-project",
+
+  // Optional, local-only path to the agent transcript. session_key does not
+  // contain the transcript uuid, so this links a content-search hit to its
+  // live board row. The redacted profile and every forwarder uplink strip it.
+  "transcript": "/Users/dave/.claude/projects/-Users-dave-repos-work-project/9f2a.jsonl",
 
   // Names, in priority order: label is the user's own name for the session
   // (max 80 chars, set with `signalbox session rename` or the jumplist rename, and
@@ -158,6 +163,7 @@ The hub keeps one row per `session_key`, following these rules:
   for each session alongside the latest row breadcrumb. Read them with
   [`GET /exchanges`](#the-hub-api).
 - **Tags carry.** `tags` persist across agent events that omit them (like `prompt`/`reply`), but an event carrying its own `tags` keeps them - even when the session already existed untagged. `tag`/`untag` events add or remove them. Filter with `state --tag` / `--exclude-tag`.
+- **`seen` and `unseen` are inverses, but only one is engagement.** `seen` sets `acked` and counts as engagement, so it moves the row's `engaged_ts` and therefore its place in the board's recency order. `unseen` clears `acked` and does NOT: marking something unread is setting it aside to come back to, not dealing with it, so a deferred row must not climb the board. `unseen` exists because opening a session on the phone marks it read, and a read state with no way back makes the unread signal untrustworthy.
 - **New activity resets your flags.** Any agent event clears `acked` and `hidden` - a hidden session that speaks again comes back.
 - **A pin is yours until you drop it.** `pinned` (set by `pin`, cleared by `unpin`) carries across agent events like `label`: new activity never clears it, so a pinned session that speaks again stays pinned. Only `unpin` or `hide` removes a pin. `ended`/expiry removes the whole session; a pin does not resurrect or protect it.
 
@@ -300,7 +306,7 @@ the exchange, `cropped` marks a pair either side of which hit its cap, and `seq`
 is the ingest order of the event that closed it - which is why it doubles as
 the paging cursor. `prompt`, `reply` and `cropped` are omitted when empty.
 
-The hub appends every event to `events.jsonl` in the state dir and rebuilds its state from that file on boot; `seq` continues from the highest persisted value. Commands are not written, so they are never rebuilt or replayed. Only `application/json` may post (blocks cross-origin form posts from hostile pages), and bodies are capped at 1 MiB.
+The hub appends every event to `events.jsonl` in the state dir and rebuilds its state from that file on boot; `seq` continues from the highest persisted value. The optional `transcript` field is persisted when an event is sent directly to its local hub. This is intentional: that log sits on the machine that owns the transcript and already contains `cwd`, which is no less sensitive. A forwarder strips `transcript` before writing its spool or sending the event upstream, for every profile. Commands are not written, so they are never rebuilt or replayed. Only `application/json` may post (blocks cross-origin form posts from hostile pages), and bodies are capped at 1 MiB.
 
 **`seq` is monotonic within one hub's log, and only there.** A client can observe a domain change - the hub was replaced, or its machine switched between a local hub and a forwarder or remote hub - after which every seq it sees is lower than the one it holds. Clients must therefore adopt the domain of `/state` on every resync (assign the snapshot's highest seq, never fold it into a running high-water mark). A client that only ever raises its stored seq is permanently deaf after a regression: both the hub and the [forwarder](#the-forwarder) suppress live frames whose seq is at or below the client's `since`, so its next stream never emits a signal frame. The forwarder closes every downstream stream when its uplink reconnects, precisely so each client re-runs its existing reconnect and `/state` resync; the first connect closes nothing. Known limitation: the forwarder's own uplink cursor has the same monotonic shape, so a forwarder whose upstream is replaced (a redeploy onto a fresh volume) needs a restart.
 
@@ -328,7 +334,7 @@ The local listener is always unauthenticated http on `127.0.0.1` (port 8377 by d
 
 | Endpoint on a forwarder | Behaviour |
 |---|---|
-| `POST /events` | Normalize and validate, remove derived fields and `seq`, append to `${stateDir}/forward-spool.jsonl` under its `.lock`, start an asynchronous drain, and immediately return `202 {"spooled": true}` without waiting for the upstream. This response acknowledges spooling only and carries no `seq`; the upstream assigns one on ingest after the drain delivers the event, and the forwarder receives it later through the downlink. The hook client allows its POST only 200 ms; waiting for a WAN round trip would make the hook spool an event that the forwarder might also have delivered. The drain is the only sender of spooled events, so delivery stays FIFO and there is one spool. |
+| `POST /events` | Normalize and validate, remove `transcript`, derived fields and `seq`, append to `${stateDir}/forward-spool.jsonl` under its `.lock`, start an asynchronous drain, and immediately return `202 {"spooled": true}` without waiting for the upstream. `transcript` is removed for every profile because an upstream hub cannot read another machine's local transcript and must not persist its path. This response acknowledges spooling only and carries no `seq`; the upstream assigns one on ingest after the drain delivers the event, and the forwarder receives it later through the downlink. The hook client allows its POST only 200 ms; waiting for a WAN round trip would make the hook spool an event that the forwarder might also have delivered. The drain is the only sender of spooled events, so delivery stays FIFO and there is one spool. |
 | `POST /command` | Validate and synchronously proxy to the upstream. A successful upstream response supplies the same `{"ok": true, "delivered": N}` body; any upstream failure returns `502` with an error body. Commands are never spooled because a stale request has no meaning. |
 | `GET /state` | Return `{"sessions": [...]}` from the in-memory downlink cache. |
 | `GET /exchanges?session=K&limit=N&before=S` | Return the session's exchanges from the in-memory downlink cache, with the same shape, defaults, clamping and `400`/`404` behaviour as the hub's route. The forwarder writes no `events.jsonl`, so this is served from the reducer's ring like every other read; the ring is grown by the shared reducer as downlink frames arrive, which is why it needs no forwarder-specific code. A locally spooled `POST /events` never appears here until the upstream has assigned it a `seq` and the downlink has returned it. |
@@ -338,7 +344,7 @@ The local listener is always unauthenticated http on `127.0.0.1` (port 8377 by d
 
 The uplink opens `GET <upstream>/stream?since=<lastSeq>`, using `since=0` on first connect to build the cache from the full upstream log. It sends the resolved bearer when one is configured, resumes after the last seen upstream `seq`, and reconnects after 1 second with exponential backoff capped at 15 seconds. On a reconnect (never the first connect) the forwarder also closes every downstream stream, so its own clients resync from `/state` and adopt the upstream's seq domain (see the seq-domain note above). `signal` frames are normalized, applied to the cache, added to the bounded backlog and re-broadcast. `command` frames are only re-broadcast and never touch the cache. The same resolved credential is used for event and command POSTs; a tokenless forwarder sends no Authorization header, which supports an unauthenticated loopback upstream but normally leaves the upstream to reject the request.
 
-The forward spool is bounded by 10,000 events or 16 MiB, whichever limit is reached first. Overflow drops the oldest events and writes one log line when the overflow episode begins. Drains send the oldest event first. Spooled events carry no `seq` because the upstream assigns one on ingest.
+The forward spool is bounded by 10,000 events or 16 MiB, whichever limit is reached first. Overflow drops the oldest events and writes one log line when the overflow episode begins. Drains send the oldest event first. Spooled events carry no `seq` because the upstream assigns one on ingest, and no `transcript` because that path is meaningless to any machine but the one that owns it.
 
 Uplink delivery is at-least-once. A crash after a successful send but before the reconcile write can resend an event on the next drain.
 
@@ -373,9 +379,16 @@ remote hub. `prompt` and `reply` carry this content up to their caps of 1,024 an
 Emitters preserve raw Markdown so clients can render headings, lists, code and
 line breaks. Flattening the text before transmission removes that structure.
 
+The `transcript` path is the exception to the above: unlike `prompt` and `reply`
+it never travels, in any mode. Every forwarder strips it before spooling or
+uplink delivery, regardless of profile, because a hub on another machine cannot
+read the file it names, so sending it discloses a path for no benefit. The one
+gap, by design, is the opt-in diagnostic `raw` payload, which is forwarded
+verbatim and may contain an agent's own transcript path.
+
 For machines where even one line must not leave, the redacted profile
-(`SIGNALBOX_PROFILE=redacted`) drops `cwd`, `title`, `prompt`, `reply`,
-`cropped` and `raw`, and hashes the session id. `machine` remains so events from
-the same host can be correlated. It contains the retained hostname and a random
-suffix. The diagnostic `raw` field is opt-in via `SIGNALBOX_RAW` and is never
-set in normal operation.
+(`SIGNALBOX_PROFILE=redacted`) drops `cwd`, `transcript`, `title`, `prompt`,
+`reply`, `cropped` and `raw`, and hashes the session id. `machine` remains so
+events from the same host can be correlated. It contains the retained hostname
+and a random suffix. The diagnostic `raw` field is opt-in via `SIGNALBOX_RAW`
+and is never set in normal operation.

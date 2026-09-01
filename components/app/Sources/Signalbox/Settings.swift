@@ -145,10 +145,21 @@ enum SharedSettings {
             write(s)
         }
     }
+
+    // Off by default: indexing reads every transcript on the machine, which is
+    // work and disk nobody should spend without asking (specs/search.md).
+    static var searchEnabled: Bool {
+        get { read()["searchEnabled"] as? Bool ?? false }
+        set {
+            var s = read()
+            s["searchEnabled"] = newValue
+            write(s)
+        }
+    }
 }
 
 enum SettingsTab: String, CaseIterable {
-    case general, agents, hub, logs
+    case general, agents, search, hub, logs
 
     var title: String { rawValue.capitalized }
     var toolbarIdentifier: NSToolbarItem.Identifier {
@@ -165,6 +176,7 @@ enum SettingsTab: String, CaseIterable {
         switch self {
         case .general: return ["gearshape"]
         case .agents: return ["terminal"]
+        case .search: return ["magnifyingglass"]
         case .hub: return ["dot.radiowaves.left.and.right", "antenna.radiowaves.left.and.right"]
         case .logs: return ["doc.plaintext"]
         }
@@ -204,6 +216,10 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
     private var selectedTab: SettingsTab = .general
     private var iconPopup: NSPopUpButton?
     private var clearCheckbox: NSButton?
+    private var searchCheckbox: NSButton?
+    private var rebuildButton: NSButton?
+    /// Empties the index so the hub rebuilds it. Set by the app delegate.
+    var rebuildIndexAction: (@MainActor () async -> Bool)?
     private var renameCheckbox: NSButton?
     private var codexClearCheckbox: NSButton?
     private var codexRenameCheckbox: NSButton?
@@ -304,6 +320,7 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         panes = [
             .general: buildGeneralPane(),
             .agents: buildAgentsPane(),
+            .search: buildSearchPane(),
             .hub: buildHubPane(),
             .logs: buildLogsPane(),
         ]
@@ -376,6 +393,31 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         for view in [shortcutLabel, filterLabel, shortcutCaptionIndent, captionIndent] {
             view.widthAnchor.constraint(equalTo: iconLabel.widthAnchor).isActive = true
         }
+        return pane(containing: stack)
+    }
+
+    // The switch and the one expensive action, and nothing else. Index progress
+    // lives on the jumplist's search row, where it is load-bearing: a search run
+    // against a half-built index quietly misses things, and that is the moment
+    // the user needs to know. Spotlight, Photos and Alfred all split it this way.
+    private func buildSearchPane() -> NSView {
+        let checkbox = NSButton(
+            checkboxWithTitle: "Search session contents",
+            target: self,
+            action: #selector(searchEnabledChanged(_:))
+        )
+        checkbox.state = SharedSettings.searchEnabled ? .on : .off
+        self.searchCheckbox = checkbox
+
+        let rebuild = NSButton(
+            title: "Rebuild Index\u{2026}", target: self, action: #selector(rebuildIndexClicked(_:))
+        )
+        rebuild.bezelStyle = .rounded
+        rebuild.isEnabled = SharedSettings.searchEnabled
+        self.rebuildButton = rebuild
+
+        let stack = verticalStack([checkbox, rebuild])
+        stack.setCustomSpacing(14, after: checkbox)
         return pane(containing: stack)
     }
 
@@ -854,6 +896,34 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
             return missingMessage
         }
     }
+
+    @objc private func searchEnabledChanged(_ sender: NSButton) {
+        SharedSettings.searchEnabled = sender.state == .on
+        // The hub re-reads the setting on its next sweep, so nothing else here
+        // has to make it take effect.
+        rebuildButton?.isEnabled = sender.state == .on
+    }
+
+    // Rebuilding throws away a working index and spends minutes rebuilding it,
+    // so it asks first. The alert is the confirmation; there is no caption
+    // warning about it on the pane.
+    @objc private func rebuildIndexClicked(_ sender: NSButton) {
+        let alert = NSAlert()
+        alert.messageText = "Rebuild the search index?"
+        alert.informativeText =
+            "Searching will return fewer results until the index is built again."
+        alert.addButton(withTitle: "Rebuild")
+        alert.addButton(withTitle: "Cancel")
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            Task { @MainActor in _ = await self?.rebuildIndexAction?() }
+        }
+    }
+
+    // Index progress, polled while the window is open. A first build over a
+    // large corpus takes minutes, and a settings pane that says nothing during
+    // it reads as a broken toggle.
 
     @objc private func clearEndsChanged(_ sender: NSButton) {
         SharedSettings.claudeClearEnds = sender.state == .on

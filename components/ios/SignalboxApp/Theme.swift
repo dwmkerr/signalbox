@@ -36,6 +36,43 @@ enum Mark {
     /// The amber mark alone means "asking" - there is no extra badge anywhere
     /// else, and adding one here would break the shared language.
     var isAsking: Bool { self == .attention }
+
+    /// What the agent is doing, shown on the row's leading edge.
+    ///
+    /// A row answers two different questions, and one glyph cannot carry both:
+    /// what the agent is doing, and whether it wants you. They change for
+    /// different reasons - the first when the agent acts, the second when you
+    /// look - so they get their own slots, the way a messaging app separates an
+    /// avatar from an unread badge.
+    var activity: ActivityMark {
+        switch self {
+        case .working: return .working
+        case .failed: return .failed
+        case .attention, .unread, .read: return .idle
+        }
+    }
+
+    /// The trailing dot's colour, or nil when the row is not asking for you.
+    ///
+    /// Working has no dot: a spinner is an activity, not a notification, and a
+    /// dot that also meant "busy" would mean neither thing clearly. Failed keeps
+    /// one, because a failure is both something that happened and something
+    /// that wants you.
+    var attentionDot: Color? {
+        switch self {
+        case .attention: return Theme.amber
+        case .unread: return Theme.blue
+        case .failed: return Theme.amber
+        case .working, .read: return nil
+        }
+    }
+}
+
+/// The leading indicator: what the agent is doing right now.
+enum ActivityMark {
+    case working
+    case failed
+    case idle
 }
 
 enum Theme {

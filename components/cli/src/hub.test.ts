@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { Hub, isLoopbackHost, isLoopbackAddress, validateBindConfig } from "../src/hub";
-import { lanIPv4 } from "../src/pair";
-import * as ev from "../src/event";
-import type { Event } from "../src/event";
+import { dirname, join } from "node:path";
+import { Hub, isLoopbackHost, isLoopbackAddress, validateBindConfig } from "./hub";
+import { lanIPv4 } from "./pair";
+import * as ev from "./event";
+import type { Event } from "./event";
 
 // A fake Bun server: hub.handle calls timeout() and requestIP() on it. The
 // default peer is loopback, so every existing test drives the v0 path (no
@@ -79,6 +79,28 @@ async function getExchanges(hub: Hub, key: string, query = "", server = fakeServ
     { headers: { Host: "127.0.0.1:8377" } }
   );
   return (await hub.handle(req, server))!;
+}
+
+async function getSearchStatus(hub: Hub, server = fakeServer): Promise<Response> {
+  return (await hub.handle(
+    new Request("http://127.0.0.1:8377/search/status", { headers: { Host: "127.0.0.1:8377" } }),
+    server,
+  ))!;
+}
+
+async function getSearch(hub: Hub, query = "?q=needle", server = fakeServer): Promise<Response> {
+  const req = new Request(`http://127.0.0.1:8377/search${query}`, {
+    headers: { Host: "127.0.0.1:8377" },
+  });
+  return (await hub.handle(req, server))!;
+}
+
+function searchHub(dir: string, token = "", enabled = true): Hub {
+  // The live check is injected so indexing can be exercised without a settings
+  // file on disk; production reads it from the user's settings each sweep.
+  return track(new Hub(
+    dir, "test", token, "127.0.0.1", "", 0, false, 0, 1000, () => enabled,
+  ));
 }
 
 let hubs: Hub[] = [];
@@ -371,6 +393,211 @@ describe("exchanges", () => {
 
     const row = (await getState(hub)).sessions[0];
     expect(Object.hasOwn(row, "exchanges")).toBe(false);
+  });
+});
+
+describe("search", () => {
+  test("an unauthenticated non-loopback request is 401", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-search-"));
+    const hub = searchHub(dir, "search-token");
+    const res = await getSearch(hub, "?q=needle", serverFrom("192.168.1.20"));
+    expect(res.status).toBe(401);
+  });
+
+  test("enabled search returns grouped local results with no-store", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sbhub-search-"));
+    const transcriptRoot = join(root, "codex");
+    const sessionUuid = "22222222-2222-4222-8222-222222222222";
+    const transcript = join(
+      transcriptRoot,
+      "2026",
+      "08",
+      "19",
+      `rollout-2026-08-19T10-00-00-${sessionUuid}.jsonl`,
+    );
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, [
+      JSON.stringify({ type: "session_meta", payload: { session_id: sessionUuid, cwd: "/work/search" } }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-08-19T10:01:00.000Z",
+        payload: { type: "user_message", message: "needle in a transcript" },
+      }),
+    ].join("\n") + "\n");
+
+    const variables = [
+      "SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR",
+      "SIGNALBOX_CODEX_TRANSCRIPTS_DIR",
+      "SIGNALBOX_CURSOR_TRANSCRIPTS_DIR",
+    ] as const;
+    const previous = variables.map((name) => process.env[name]);
+    process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR = join(root, "claude");
+    process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR = transcriptRoot;
+    process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR = join(root, "cursor");
+
+    const hub = searchHub(join(root, "state"));
+    try {
+      await post(hub, wireEvent("codex:live", ev.Done, { transcript }));
+      hub.startSearch();
+      const res = await getSearch(hub);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+      const body = await res.json();
+      expect(body.enabled).toBe(true);
+      expect(body.query).toBe("needle");
+      expect(body.results).toEqual([{
+        sessionUuid,
+        agent: "codex",
+        cwd: "/work/search",
+        snippet: "<mark>needle</mark> in a transcript",
+        ts: "2026-08-19T10:01:00.000Z",
+        hitCount: 1,
+        state: "live",
+        sessionKey: "codex:live",
+      }]);
+
+      const status = (await hub.handle(
+        new Request("http://127.0.0.1:8377/search/status", {
+          headers: { Host: "127.0.0.1:8377" },
+        }),
+        fakeServer,
+      ))!;
+      expect(status.status).toBe(200);
+      expect(status.headers.get("Cache-Control")).toBe("no-store");
+      expect((await status.json()).status.turnsIndexed).toBe(1);
+    } finally {
+      hub.close();
+      variables.forEach((name, index) => {
+        const value = previous[index];
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      });
+    }
+  });
+
+  // Turning the setting off has to stop transcripts being read straight away.
+  // Read once at startup, a hub kept indexing until it was restarted while
+  // every surface reported the feature as off.
+  test("turning search off stops the sweep without a restart", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sbsweepoff-"));
+    const uuid = "33333333-3333-4333-8333-333333333333";
+    const transcript = join(root, "codex", "2026", "08", "19", `rollout-x-${uuid}.jsonl`);
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, [
+      JSON.stringify({ type: "session_meta", payload: { session_id: uuid, cwd: "/work/off" } }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-08-19T10:01:00.000Z",
+        payload: { type: "user_message", message: "needle in a transcript" },
+      }),
+    ].join("\n") + "\n");
+
+    const previousCodex = process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR;
+    const previousClaude = process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR;
+    const previousCursor = process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR;
+    process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR = join(root, "codex");
+    process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR = join(root, "claude");
+    process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR = join(root, "cursor");
+
+    let enabled = false;
+    const hub = track(new Hub(
+      join(root, "state"), "test", "", "127.0.0.1", "", 0, false, 0, 1000, () => enabled,
+    ));
+    try {
+      // Off: no index is opened and the route says so.
+      hub.startSearch();
+      expect((await (await getSearchStatus(hub)).json()).enabled).toBe(false);
+
+      // On: the next sweep opens the index and starts filling it, with no
+      // restart. This is what a user ticking the box actually does.
+      enabled = true;
+      hub.startSearch();
+      const onBody = await (await getSearchStatus(hub)).json();
+      expect(onBody.enabled).toBe(true);
+      expect(onBody.status.turnsIndexed).toBeGreaterThan(0);
+
+      // Off again: it stops serving without needing a restart either.
+      enabled = false;
+      expect((await (await getSearchStatus(hub)).json()).enabled).toBe(false);
+    } finally {
+      process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR = previousCodex;
+      process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR = previousClaude;
+      process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR = previousCursor;
+    }
+  });
+
+  test("rebuild empties the index and lets the sweep refill it", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sbrebuild-"));
+    const uuid = "44444444-4444-4444-8444-444444444444";
+    const transcript = join(root, "codex", "2026", "08", "19", `rollout-x-${uuid}.jsonl`);
+    mkdirSync(dirname(transcript), { recursive: true });
+    writeFileSync(transcript, [
+      JSON.stringify({ type: "session_meta", payload: { session_id: uuid, cwd: "/work/rb" } }),
+      JSON.stringify({
+        type: "event_msg",
+        timestamp: "2026-08-19T10:01:00.000Z",
+        payload: { type: "user_message", message: "needle in a transcript" },
+      }),
+    ].join("\n") + "\n");
+
+    const previous = process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR;
+    const previousClaude = process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR;
+    const previousCursor = process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR;
+    process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR = join(root, "codex");
+    process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR = join(root, "claude");
+    process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR = join(root, "cursor");
+
+    const hub = searchHub(join(root, "state"));
+    try {
+      hub.startSearch();
+      expect((await (await getSearchStatus(hub)).json()).status.turnsIndexed).toBeGreaterThan(0);
+
+      const res = (await hub.handle(
+        new Request("http://127.0.0.1:8377/search/rebuild", {
+          method: "POST", headers: { Host: "127.0.0.1:8377" },
+        }),
+        fakeServer,
+      ))!;
+      expect(res.status).toBe(200);
+      // Emptied at once, and the caller is told so rather than being made to
+      // wait for the refill.
+      expect((await res.json()).status.turnsIndexed).toBe(0);
+
+      // The ordinary sweep puts it back; rebuilding is not a separate pipeline.
+      hub.startSearch();
+      expect((await (await getSearchStatus(hub)).json()).status.turnsIndexed).toBeGreaterThan(0);
+    } finally {
+      process.env.SIGNALBOX_CODEX_TRANSCRIPTS_DIR = previous;
+      process.env.SIGNALBOX_CLAUDE_TRANSCRIPTS_DIR = previousClaude;
+      process.env.SIGNALBOX_CURSOR_TRANSCRIPTS_DIR = previousCursor;
+    }
+  });
+
+  test("disabled search returns a marker rather than an empty result list", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-search-off-"));
+    const hub = searchHub(dir, "", false);
+    const res = await getSearch(hub);
+    expect(res.status).toBe(409);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const body = await res.json();
+    expect(body).toEqual({ error: "search_disabled", enabled: false });
+    expect(Object.hasOwn(body, "results")).toBe(false);
+  });
+
+  test("a missing query is 400", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-search-"));
+    const hub = searchHub(dir);
+    const res = await getSearch(hub, "");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "q is required" });
+  });
+
+  test("the disabled sweep creates no index now or on the timer cadence", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sbhub-search-off-"));
+    const hub = searchHub(dir, "", false);
+    hub.startSearch();
+    await Bun.sleep(300);
+    expect(existsSync(join(dir, "search.db"))).toBe(false);
   });
 });
 

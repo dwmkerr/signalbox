@@ -363,6 +363,39 @@ describe("forwarder uplink", () => {
     expect(upstream.received.map((received) => received.body.session_key)).toEqual(["script:a", "script:b"]);
   });
 
+  test("strips transcript before spooling and forwarding", async () => {
+    const port = await unusedPort();
+    const { dir, url } = startForwarder(`http://127.0.0.1:${port}`);
+    const event = wireEvent("script:private", {
+      reason: "completed",
+      cwd: "/Users/alice/project",
+      transcript: "/Users/alice/.agent/transcripts/private.jsonl",
+      title: "Private task",
+      prompt: "Keep this breadcrumb",
+      reply: "Kept",
+      tags: ["work"],
+      origin: { kind: "tmux", tmux: { session: "work", window: 1, pane: "%4" } },
+      proc: { pid: 1234, name: "agent" },
+      raw: "{\"source\":\"fixture\"}",
+    });
+    const expected = structuredClone(event);
+    delete expected.transcript;
+
+    expect((await postJSON(url, "/events", event)).status).toBe(202);
+
+    const spoolPath = join(dir, "forward-spool.jsonl");
+    await waitFor("the event to remain spooled", () => {
+      return existsSync(spoolPath) && readSpool(spoolPath).length === 1;
+    });
+    expect(readSpool(spoolPath)).toEqual([expected]);
+
+    const upstream = trackFake(new FakeUpstream(port));
+    await waitFor("the recovered upstream to receive the event", () => {
+      return upstream.received.length === 1 && !existsSync(spoolPath);
+    });
+    expect(upstream.received.map((received) => received.body)).toEqual([expected]);
+  });
+
   test("subscriber streams close when the uplink reconnects", async () => {
     const upstream = trackFake(new FakeUpstream());
     const upstreamPort = listenerPort(upstream.server);

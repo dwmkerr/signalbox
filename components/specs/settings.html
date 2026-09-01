@@ -230,6 +230,11 @@ click its light for the status popover.</div>
         <span class="ctl"><span class="field">#tag or name</span></span>
       </div>
       <div class="subnote" style="margin-left:128px">Always applied on the jumplist</div>
+      <div class="frow">
+        <span class="lbl gcol">Session contents:</span>
+        <span class="ctl"><span class="check"></span> Search agent transcripts</span>
+      </div>
+      <div class="subnote" style="margin-left:128px">Builds a local index. Transcript search never crosses machines.</div>
     </div>
 
     <div class="pane" id="pane-agents">
@@ -299,12 +304,13 @@ click its light for the status popover.</div>
   <p>The settings window as four toolbar panes, plus the hub status light in the jumplist footer.
   The window title tracks the pane.</p>
   <ul>
-    <li><b>General</b> - three rows in one label column: the menu bar icon, the jumplist shortcut
+    <li><b>General</b> - four rows in one label column: the menu bar icon, the jumplist shortcut
     as a live recorder - click it, type a combination, and it applies immediately. It shows
     standard key glyphs, <kbd>&#8963;&#8997;J</kbd>, never the <code>ctrl+alt+j</code> config syntax;
-    clearing it leaves the jumplist reachable only from the menu bar; and the board filter field.
-    The recorder and filter each have a one-line caption.</li>
-    <li><b>Agents</b> - one section per agent, identical verb-first toggles. Sections, not tabs:
+    clearing it leaves the jumplist reachable only from the menu bar; the board filter field; and
+    local transcript search, off by default. The recorder, filter and search toggle each have a
+    one-line caption.</li>
+    <li><b>Search</b> - the session contents index, one checkbox and its status. <b>Agents</b> - one section per agent, identical verb-first toggles. Sections, not tabs:
     agents are an open-ended list and the tab strip stays fixed.</li>
     <li><b>Hub</b> - the mode control first, with Confirm and Cancel beside it while a change is
     pending, the status pill under it, then the selected mode's caption, sketch and controls. A
@@ -394,10 +400,26 @@ click its light for the status popover.</div>
   <table>
     <tr><th>Store</th><th>What</th><th>Why</th></tr>
     <tr><td><code>UserDefaults</code></td><td>menu bar icon (<code>menuBarIcon</code>), jumplist shortcut (<code>KeyboardShortcuts_openJumplist</code>, the live value written by the recorder: a JSON-encoded shortcut or boolean <code>false</code> when deliberately cleared; legacy <code>hotkey</code>, migration only: the old <code>ctrl+alt+j</code> config string, read once at first launch to seed the key above, then ignored and left in place; <code>defaults write</code> no longer changes anything), board tag filter (<code>tagFilter</code>), jumplist zoom (<code>uiScale</code>), login-item one-shot (<code>didRegisterLoginItem</code>)</td><td>only the app needs these</td></tr>
-    <tr><td><code>~/.config/signalbox/settings.json</code></td><td>toggles the CLI hooks must also see (<code>claudeClearEnds</code>, <code>claudeRenameTitle</code>, <code>codexClearEnds</code>, <code>codexRenameTitle</code>); plus the <code>hub</code> keys Confirm writes: <code>hub.bind</code> (<code>127.0.0.1</code> for Local, <code>0.0.0.0</code> for LAN; keywords <code>loopback</code>/<code>lan</code> still resolve), <code>hub.token</code> (bearer token; auto-minted on a wide bind; the Remote token field also writes it), <code>hub.upstream</code> (the remote hub URL for Remote mode; empty otherwise), <code>hub.remoteUrl</code> (the same address, remembered: no mode switch clears it, so Remote comes back with its URL already filled in). These keys are intent - what is actually running is whatever <code>/healthz</code> says.</td><td>the app writes the file and the hook path reads it on every fire; the hub reads the <code>hub</code> keys at start so the app-spawned hub needs no flags</td></tr>
+    <tr><td><code>~/.config/signalbox/settings.json</code></td><td>toggles the CLI hooks and hub must also see (<code>claudeClearEnds</code>, <code>claudeRenameTitle</code>, <code>codexClearEnds</code>, <code>codexRenameTitle</code>, <code>searchEnabled</code>); plus the <code>hub</code> keys Confirm writes: <code>hub.bind</code> (<code>127.0.0.1</code> for Local, <code>0.0.0.0</code> for LAN; keywords <code>loopback</code>/<code>lan</code> still resolve), <code>hub.token</code> (bearer token; auto-minted on a wide bind; the Remote token field also writes it), <code>hub.upstream</code> (the remote hub URL for Remote mode; empty otherwise), <code>hub.remoteUrl</code> (the same address, remembered: no mode switch clears it, so Remote comes back with its URL already filled in). These keys are intent - what is actually running is whatever <code>/healthz</code> says.</td><td>the app writes the file and the hook path reads it on every fire; the hub reads <code>searchEnabled</code> and the <code>hub</code> keys at start so the app-spawned hub needs no flags</td></tr>
   </table>
   <p>Writes merge key by key, so unknown keys survive. A missing or broken file falls back to
   defaults and keeps the hook path working.</p>
+
+  <h2>The Search tab</h2>
+  <p>Two controls: <b>Search session contents</b>, off by default, and
+  <b>Rebuild Index...</b>, enabled only while search is on. Nothing else.</p>
+  <p>Index progress is deliberately NOT here. It lives on the jumplist's search
+  row, which is where it changes what the user should believe: a search run against
+  a half-built index quietly misses things, and that is the moment to say so. Apple
+  splits it the same way - Spotlight shows its bar in the search window, Photos at
+  the foot of the Library window, and Alfred keeps only a Rebuild button in
+  preferences.</p>
+  <p>Rebuilding empties a working index and spends minutes refilling it, so it
+  confirms first with an alert rather than warning in a caption. The hub owns the
+  open database, so the app asks it to rebuild rather than deleting files itself.</p>
+  <p>The hub re-reads the setting on every sweep, and opens or drops its index to
+  match, so ticking the box takes effect without restarting the hub. Turning it off
+  does not delete an index already built.</p>
 
   <h2>The /clear and /rename toggles</h2>
   <p>Claude Code fires <code>SessionEnd</code> with reason <code>clear</code> on <code>/clear</code>.
@@ -413,8 +435,15 @@ click its light for the status popover.</div>
     <tr><th>String</th><th>Where</th><th>When it shows</th></tr>
     <tr><td class="str">Press the field to record a global shortcut</td><td>General tab, under the shortcut recorder</td><td>Always</td></tr>
     <tr><td class="str">Always applied on the jumplist</td><td>General tab, under the filter field</td><td>Always</td></tr>
+    <tr><td class="str">Session contents:</td><td>General tab, search label</td><td>Always</td></tr>
+    <tr><td class="str">Search agent transcripts</td><td>General tab, search toggle</td><td>Always; unchecked by default</td></tr>
+    <tr><td class="str">Builds a local index. Transcript search never crosses machines.</td><td>General tab, under the search toggle</td><td>Always</td></tr>
     <tr><td class="str">Record Shortcut</td><td>General tab, shortcut recorder</td><td>When no shortcut is recorded</td></tr>
     <tr><td class="str">Press Shortcut</td><td>General tab, shortcut recorder</td><td>While recording a shortcut</td></tr>
+    <tr><td class="str">Search session contents</td><td>Search tab, checkbox</td><td>Always</td></tr>
+    <tr><td class="str">Rebuild Index...</td><td>Search tab, button</td><td>Always; disabled while search is off</td></tr>
+    <tr><td class="str">Rebuild the search index?</td><td>Rebuild confirmation alert, title</td><td>The button is pressed</td></tr>
+    <tr><td class="str">Searching will return fewer results until the index is built again.</td><td>Rebuild confirmation alert, body</td><td>The button is pressed</td></tr>
     <tr><td class="str">Remove the session on /clear</td><td>Agents tab, both agent sections</td><td>Always; the session leaves the board when checked</td></tr>
     <tr><td class="str">Rename the session on /rename</td><td>Agents tab, both agent sections</td><td>Always</td></tr>
     <tr><td class="str">Local - 127.0.0.1:8377</td><td>Status pill, green dot</td><td>Running mode is Local and the hub answers</td></tr>

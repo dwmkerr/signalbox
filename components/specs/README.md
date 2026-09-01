@@ -16,6 +16,7 @@ Conventions:
 | [cli.md](cli.md) | Every CLI command, with the terminal output you should expect |
 | [adapters.md](adapters.md) | Agent integrations: hook → event mappings for Claude Code, OpenCode, pi, GitHub Actions |
 | [agent-markdown.md](agent-markdown.md) | How an agent's markdown is parsed and rendered on both apps: the grammar, the one-line preview rule, and the golden examples the package's tests mirror |
+| [search.md](search.md) | Local transcript search: schema, turn extraction, incremental indexing, and privacy boundary (**proposed**, not built) |
 | [hub-jumplist.html](hub-jumplist.html) | The jumplist (⌃⌥J) - interactive UI spec (open in a browser) |
 | [menubar.html](menubar.html) | Menu bar: icon (beacon default), status dot, dropdown, notifications |
 | [settings.html](settings.html) | Settings window - icon style, /clear and /rename behaviour, additional filters, the jumplist shortcut, where settings live |

@@ -46,6 +46,8 @@ export interface Settings {
   // as Claude's - inert if Codex never sends that reason.
   codexClearEnds: boolean;
   codexRenameTitle: boolean;
+  /** Gates local transcript indexing because complete session content is more sensitive than board events. */
+  searchEnabled: boolean;
   hub: HubSettings;
 }
 
@@ -60,6 +62,7 @@ const defaults: Settings = {
   claudeRenameTitle: true,
   codexClearEnds: true,
   codexRenameTitle: true,
+  searchEnabled: false,
   hub: {
     bind: "127.0.0.1",
     token: "",
@@ -117,6 +120,9 @@ export function loadSettings(): Settings {
   const codexRename = process.env.SIGNALBOX_CODEX_RENAME;
   if (codexRename === "0" || codexRename === "false") s.codexRenameTitle = false;
   if (codexRename === "1" || codexRename === "true") s.codexRenameTitle = true;
+  const search = process.env.SIGNALBOX_SEARCH;
+  if (search === "0" || search === "false") s.searchEnabled = false;
+  if (search === "1" || search === "true") s.searchEnabled = true;
   return s;
 }
 

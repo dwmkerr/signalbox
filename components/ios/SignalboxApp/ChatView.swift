@@ -18,13 +18,13 @@ struct ChatView: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 14) {
-                if failed && exchanges.isEmpty {
+                if failed && visibleExchanges.isEmpty {
                     failureState
-                } else if loading && exchanges.isEmpty {
+                } else if loading && visibleExchanges.isEmpty {
                     ProgressView()
                         .tint(Theme.dim)
                         .frame(maxWidth: .infinity, minHeight: 240)
-                } else if exchanges.isEmpty {
+                } else if visibleExchanges.isEmpty {
                     Text("No history yet")
                         .font(.system(size: 14))
                         .foregroundStyle(Theme.dim)
@@ -35,7 +35,7 @@ struct ChatView: View {
                     } else if hasMore {
                         olderButton
                     }
-                    ForEach(exchanges) { exchange in
+                    ForEach(visibleExchanges) { exchange in
                         exchangeView(exchange)
                     }
                 }
@@ -43,10 +43,41 @@ struct ChatView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 16)
         }
+        // Opens on the newest exchange, the way every messaging app does: the
+        // last thing said is what you came to read, and older history is a
+        // deliberate scroll up.
+        .defaultScrollAnchor(.bottom)
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle(session.name)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await loadInitial() }
+        // Jump belongs in the trailing nav-bar slot, where per-screen actions
+        // live on iOS, and carries the same arrow as the row so it reads as the
+        // same action. Absent on information-only rows, which have nothing to
+        // jump to, matching how the row itself behaves.
+        .toolbar {
+            if !session.infoOnly {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { Task { await hub.jump(session) } } label: {
+                        Image(systemName: "arrow.uturn.forward")
+                    }
+                    .tint(Theme.blue)
+                }
+            }
+        }
+        // The page used to load once and never change, so a reply that arrived
+        // while it was open never appeared - the row on the list updated and the
+        // conversation did not. The session's seq advances whenever the hub
+        // applies an event for it, and its date moves with it, which is the
+        // cheapest per-session signal that there is something new to fetch.
+        .onChange(of: hub.sessions.first(where: { $0.key == session.key })?.date) {
+            Task { await loadNewer() }
+        }
+        .task {
+            await loadInitial()
+            // Opening the thread is reading it. Leaving the dot lit would make
+            // it untrustworthy, and Mark as Unread is the way back.
+            if session.isUnread { await hub.ack(session) }
+        }
     }
 
     private var olderButton: some View {
@@ -132,6 +163,40 @@ struct ChatView: View {
         return text
     }
 
+    // The prompt you just sent is not in the history yet: an exchange commits
+    // when its reply arrives, so a turn in flight lives only on the session row.
+    // Showing it here keeps the conversation honest - you sent something, so it
+    // belongs in the thread - without waiting on a wire change the remote hub
+    // would have to be redeployed for.
+    // One list, so the turn in flight is an ordinary row. Kept separate before,
+    // it could not appear at all on a session with no committed history, and it
+    // sat outside the ForEach that LazyVStack materialises.
+    private var visibleExchanges: [Exchange] {
+        guard let pending = pendingExchange else { return exchanges }
+        return exchanges + [pending]
+    }
+
+    private var pendingExchange: Exchange? {
+        let live = hub.sessions.first { $0.key == session.key } ?? session
+        switch live.event {
+        case "busy":
+            guard let prompt = live.prompt, !prompt.isEmpty else { return nil }
+            // Once the turn commits, the real exchange carries this prompt and
+            // the synthetic one must not double it.
+            guard exchanges.last?.prompt != prompt else { return nil }
+            return Exchange(prompt: prompt, reply: nil, ts: "", cropped: false, seq: Int.max)
+        case "attention":
+            // The reducer ignores attention events by contract (events.md,
+            // history rule 1), so the one message actually waiting on you is
+            // the one the conversation would otherwise omit.
+            guard let ask = live.reply, !ask.isEmpty else { return nil }
+            guard exchanges.last?.reply != ask else { return nil }
+            return Exchange(prompt: nil, reply: ask, ts: "", cropped: false, seq: Int.max)
+        default:
+            return nil
+        }
+    }
+
     private func loadInitial() async {
         guard !loading, exchanges.isEmpty else { return }
         loading = true
@@ -144,6 +209,19 @@ struct ChatView: View {
         } catch {
             if !Task.isCancelled { failed = true }
         }
+    }
+
+    // Merges rather than replaces: someone who has scrolled back through older
+    // pages must not lose them because a new reply landed.
+    private func loadNewer() async {
+        guard !loading else { return }
+        loading = true
+        defer { loading = false }
+        guard let doc = try? await hub.exchanges(for: session.key, limit: pageLimit) else { return }
+        let newestSeen = exchanges.last?.seq ?? Int.min
+        let fresh = doc.exchanges.filter { $0.seq > newestSeen }
+        guard !fresh.isEmpty else { return }
+        exchanges.append(contentsOf: fresh)
     }
 
     private func loadOlder() async {

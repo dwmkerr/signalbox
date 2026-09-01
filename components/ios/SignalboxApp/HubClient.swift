@@ -501,6 +501,14 @@ final class HubClient: ObservableObject {
                          "event": "seen", "session_key": session.key])
     }
 
+    /// Returns a row to the unread state. The wire calls this `unseen`; unlike
+    /// `seen` it is not engagement, so it never moves the row up the board.
+    func unack(_ session: Session) async {
+        await postEvent(["v": 1, "id": UUID().uuidString, "ts": nowTS(),
+                         "host": deviceHost(), "agent": agentOf(session.key),
+                         "event": "unseen", "session_key": session.key])
+    }
+
     func hide(_ session: Session) async {
         await postEvent(["v": 1, "id": UUID().uuidString, "ts": nowTS(),
                          "host": deviceHost(), "agent": agentOf(session.key),
@@ -579,15 +587,41 @@ final class HubClient: ObservableObject {
         }
     }
 
+    // The response is checked, not discarded. A rejected action used to fail
+    // in complete silence - the row simply did not change, which is
+    // indistinguishable from the tap not registering, and a hub that does not
+    // understand a newer event type looks exactly like a broken button.
     private func postEvent(_ body: [String: Any]) async {
-        guard var request = request("events") else { return }
+        let key = body["session_key"] as? String ?? ""
+        guard var request = request("events") else {
+            say(key, "No hub configured", ok: false)
+            return
+        }
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         let session = makeSession(timeout: 10)
         defer { session.finishTasksAndInvalidate() }
-        _ = try? await session.data(for: request)
+        do {
+            let (data, response) = try await session.data(for: request)
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if !(200...299).contains(code) {
+                say(key, eventFailure(code: code, body: data), ok: false)
+            }
+        } catch {
+            say(key, "Couldn't reach the hub", ok: false)
+        }
         try? await resyncState()
+    }
+
+    // The hub explains itself in the body; prefer its words to a status code,
+    // because "unknown event type" tells the user something a 400 does not.
+    private func eventFailure(code: Int, body: Data) -> String {
+        if let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+           let message = obj["error"] as? String, !message.isEmpty {
+            return message
+        }
+        return "The hub rejected that (HTTP \(code))"
     }
 
     private func agentOf(_ key: String) -> String {

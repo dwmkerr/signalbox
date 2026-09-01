@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Command } from "../src/command";
-import type { Event } from "../src/event";
-import { Forwarder } from "../src/forwarder";
+import type { Command } from "./command";
+import type { Event } from "./event";
+import { Forwarder } from "./forwarder";
 
 function serverFrom(address: string): Bun.Server<undefined> {
   return {
@@ -17,7 +17,12 @@ const fakeServer = serverFrom("127.0.0.1");
 const upstream = "http://127.0.0.1:1";
 const port = 8377;
 
-function newForwarder(): { forwarder: Forwarder; dir: string } {
+function newForwarder(
+  extra: { searchEnabled?: boolean } = {}
+): { forwarder: Forwarder; dir: string } {
+  // Pinned explicitly: without it the forwarder falls back to the developer's
+  // own ~/.config/signalbox/settings.json, so the suite would pass or fail
+  // depending on whether the machine running it has search turned on.
   const dir = mkdtempSync(join(tmpdir(), "sbforwarder-"));
   const forwarder = track(new Forwarder({
     upstream,
@@ -26,6 +31,8 @@ function newForwarder(): { forwarder: Forwarder; dir: string } {
     version: "test",
     port,
     historyLimit: 1000,
+    searchEnabledNow: () => extra.searchEnabled ?? false,
+    ...extra,
   }));
   return { forwarder, dir };
 }
@@ -106,6 +113,36 @@ describe("forwarder routes", () => {
       fakeServer
     ))!;
     expect(res.status).toBe(403);
+  });
+
+  // A forwarder answers search from the index of the machine it runs on, the
+  // same machine that owns the transcripts, so nothing crosses a machine
+  // boundary. Refusing outright would break search for every remote-mode user
+  // while protecting nothing.
+  test("search is disabled by default, exactly as on a hub", async () => {
+    const { forwarder } = newForwarder();
+    for (const path of ["/search?q=needle", "/search/status"]) {
+      const res = (await forwarder.handle(request(path), fakeServer))!;
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+      const body = await res.json() as { enabled: boolean };
+      expect(body.enabled).toBe(false);
+    }
+  });
+
+  test("search serves the forwarder's own local index when enabled", async () => {
+    const { forwarder } = newForwarder({ searchEnabled: true });
+    const res = (await forwarder.handle(request("/search?q=needle"), fakeServer))!;
+    expect(res.status).toBe(200);
+    const body = await res.json() as { enabled: boolean; query: string; results: unknown[] };
+    expect(body.enabled).toBe(true);
+    expect(body.query).toBe("needle");
+    expect(Array.isArray(body.results)).toBe(true);
+  });
+
+  test("search requires a query", async () => {
+    const { forwarder } = newForwarder({ searchEnabled: true });
+    const res = (await forwarder.handle(request("/search"), fakeServer))!;
+    expect(res.status).toBe(400);
   });
 
   test("POST /events appends one event and returns immediately", async () => {

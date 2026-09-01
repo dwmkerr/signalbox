@@ -1,0 +1,7 @@
+{"role":"user","cwd":"/work/cursor-project","timestamp":"2026-08-19T10:00:00.000Z","message":{"content":"Search these sessions"}}
+{"role":"assistant","cwd":"/work/cursor-project","timestamp":"2026-08-19T10:00:01.000Z","message":{"content":[{"type":"text","text":"I found two."},{"type":"tool_use","name":"Search"},{"type":"text","text":"Here they are."}]}}
+{"role":"system","cwd":"/work/cursor-project","message":{"content":"system prompt"}}
+{"type":"message","message":{"role":"user","content":"nested role only"}}
+{"cwd":"/work/cursor-project","message":{"content":"missing role"}}
+{"role":"assistant","cwd":"/work/cursor-project","message":{"content":[{"type":"tool_result","content":"hidden"}]}}
+not-json

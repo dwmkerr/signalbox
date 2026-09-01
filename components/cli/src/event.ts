@@ -18,6 +18,10 @@ export const Done = "done";
 export const Busy = "busy";
 export const Ended = "ended";
 export const Seen = "seen";
+// The inverse of seen: puts a row back in the unread state after it has been
+// looked at. Needed because opening a session on the phone marks it read, and
+// a read state you cannot undo makes the unread dot untrustworthy.
+export const Unseen = "unseen";
 export const Hide = "hide";
 export const Show = "show";
 export const Pin = "pin";
@@ -90,6 +94,9 @@ export interface Event {
   reason?: string;
   session_key: string;
   cwd?: string;
+  // session_key uses <family>:<tmux-pane> or <family>:<shortHash(cwd)>, never
+  // the transcript uuid, so this path links a content-search hit to its live row.
+  transcript?: string;
   title?: string;
   // The human/trigger side of the exchange breadcrumb (your last prompt, a
   // CI trigger line, ...). Was `detail` before v0.2; readers still accept
@@ -169,7 +176,9 @@ export function cropLabel(s: string): string {
 }
 
 export function validType(t: string): boolean {
-  return [Attention, Error, Done, Busy, Ended, Seen, Hide, Show, Pin, Unpin, Label, Tag, Untag].includes(t);
+  return [
+    Attention, Error, Done, Busy, Ended, Seen, Unseen, Hide, Show, Pin, Unpin, Label, Tag, Untag,
+  ].includes(t);
 }
 
 export function shortHostname(): string {
@@ -270,6 +279,10 @@ export function newSeen(sessionKey: string): Event {
   return newUserEvent(Seen, sessionKey, "");
 }
 
+export function newUnseen(sessionKey: string): Event {
+  return newUserEvent(Unseen, sessionKey, "");
+}
+
 export function newHide(sessionKey: string): Event {
   return newUserEvent(Hide, sessionKey, "");
 }
@@ -365,6 +378,7 @@ export function validate(e: Event): string | null {
 export async function redact(e: Event): Promise<void> {
   // machine is hostname plus random hex; host is retained, so it discloses nothing new and preserves redacted identity.
   delete e.cwd;
+  delete e.transcript;
   delete e.title;
   delete e.prompt;
   delete e.reply;

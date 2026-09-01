@@ -15,7 +15,6 @@ struct SessionsView: View {
     // so its empty state agrees with Settings: a hub we set up but cannot reach is
     // "offline", not the cold "never paired" pitch. One truth, two surfaces.
     @Binding var hubURL: String
-    @State private var expanded: String?
     @State private var pressed: String?
     @State private var query = ""
     @State private var confirmDisconnect = false
@@ -50,22 +49,20 @@ struct SessionsView: View {
                                 // Long-press for the pin/unpin menu, the Messages
                                 // gesture. The hub owns the partition, so this
                                 // only fires an event; it never re-sorts here.
-                                .contextMenu { pinMenu(session); chatButton(session) }
+                                .contextMenu { pinMenu(session); readMenu(session) }
+                                // Leading swipe toggles read state, the way it
+                                // does in Messages and Mail. A toggle always does
+                                // something, so unlike the old one-way Seen it
+                                // needs no special case to stay honest on a row
+                                // that is already read.
                                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    if !session.infoOnly {
-                                        Button { jump(session) } label: { Label("Jump", systemImage: "arrow.uturn.forward") }
-                                            .tint(Theme.blue)
-                                    }
+                                    readToggleButton(session)
                                 }
+                                // Jump has left the swipes: it reaches across to
+                                // another machine and moves a window, which is a
+                                // deliberate act better suited to the button than
+                                // to a gesture. The arrow still carries it.
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    // Seen only when it would change something: a
-                                    // quiet acked row and a busy row are no-ops, and
-                                    // an action that sometimes does nothing teaches
-                                    // users to trust none of them. Hide is always on.
-                                    if session.isUnread {
-                                        Button { Task { await hub.ack(session) } } label: { Label("Seen", systemImage: "checkmark") }
-                                            .tint(Theme.amber)
-                                    }
                                     Button { Task { await hub.hide(session) } } label: { Label("Hide", systemImage: "eye.slash") }
                                         .tint(Theme.faint)
                                 }
@@ -87,7 +84,7 @@ struct SessionsView: View {
                                         .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                                         .listRowSeparator(.hidden)
                                         .listRowBackground(Color.clear)
-                                        .contextMenu { pinMenu(session); chatButton(session) }
+                                        .contextMenu { pinMenu(session); readMenu(session) }
                                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                             Button { Task { await hub.unhide(session) } } label: { Label("Unhide", systemImage: "eye") }
                                                 .tint(Theme.blue)
@@ -373,7 +370,6 @@ struct SessionsView: View {
     // status mark would be (it is deliberately silenced, so its live status is
     // not the point), and no jump arrow.
     private func card(_ session: Session, dimmed: Bool) -> some View {
-        let isOpen = expanded == session.key
         return HStack(spacing: 11) {
             // Tap this area to expand; the jump arrow is its own target.
             HStack(spacing: 11) {
@@ -382,13 +378,19 @@ struct SessionsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.faint)
                         .frame(width: 9)
-                } else {
-                    MarkView(mark: Mark.of(session))
                 }
-                Image(systemName: agentGlyph(session.agent))
-                    .font(.system(size: 15))
-                    .foregroundStyle(agentColor(session.agent))
+                AgentMark(agent: session.agent)
                     .frame(width: 20)
+                // Beside the title rather than down on the subtext line: the
+                // title is the line you scan, so a working session announces
+                // itself where the eye already is.
+                if session.event == "busy" {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.6)
+                        .tint(Theme.faint)
+                        .frame(width: 11)
+                }
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(session.name)
@@ -412,21 +414,51 @@ struct SessionsView: View {
                                 .foregroundStyle(Theme.faint)
                         }
                     }
-                    if let preview = subtext(session), !preview.isEmpty {
+                    // What the agent is doing goes in the subtitle, where every
+                    // messaging app puts it: WhatsApp and Telegram replace the
+                    // message preview with "typing...", and none of them keeps a
+                    // glyph column for it. Idle rows then say nothing at all,
+                    // which is the point - the default posture stays silent.
+                    if session.event == "busy" {
+                        // The label stays faint and the prompt follows it: what
+                        // the agent is working ON is the useful part, and a
+                        // bright "Working..." would take the width the prompt
+                        // wants. Blue read badly on black, so the spinner is
+                        // plain white at low opacity.
+                        HStack(spacing: 5) {
+                            Text("Working\u{2026}")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Theme.faint.opacity(0.85))
+                            if let prompt = session.prompt, !prompt.isEmpty {
+                                // Italic because this is your own words quoted
+                                // back, not the agent speaking: the same line
+                                // carries a reply once the turn is done, and the
+                                // two must not look alike.
+                                Text(prompt)
+                                    .font(.system(size: 12.5).italic())
+                                    .foregroundStyle(Theme.dim)
+                                    .lineLimit(1)
+                            }
+                        }
+                    } else if let preview = subtext(session), !preview.isEmpty {
                         Text(markdownText(preview))
                             .font(.system(size: 12.5))
                             .foregroundStyle(Theme.dim)
-                            .lineLimit(isOpen ? 5 : 1)
+                            .lineLimit(1)
                     }
                 }
                 Spacer(minLength: 4)
             }
             .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.easeOut(duration: 0.16)) {
-                    expanded = isOpen ? nil : session.key
-                }
-            }
+            // A tap opens the conversation. On a phone you are not at the
+            // machine, so reading what happened is the useful thing to do with
+            // a row and jumping is the deliberate one - which is why jump keeps
+            // its own button rather than owning the whole row.
+            // The ack belongs to the chat page opening, not to the tap: acking
+            // here resynced the session list mid-push, and rebuilding the list
+            // under a navigation that has not settled cancels it, so the page
+            // never appeared.
+            .onTapGesture { chatSession = session }
 
             if !session.infoOnly && !dimmed {
                 Button { jump(session) } label: {
@@ -438,6 +470,11 @@ struct SessionsView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            // Whether this row wants you, on the trailing edge where a badge
+            // belongs. Information-only rows carry no jump button but can still
+            // be unread, which is the clearest proof the two are independent.
+            if !dimmed { AttentionDot(mark: Mark.of(session)) }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 14)
@@ -450,6 +487,36 @@ struct SessionsView: View {
         .opacity(dimmed ? 0.55 : 1)
     }
 
+    // The read-state toggle, offered as a swipe and in the context menu the way
+    // Messages and Mail offer both.
+    @ViewBuilder
+    private func readToggleButton(_ session: Session) -> some View {
+        if session.isUnread {
+            Button { Task { await hub.ack(session) } } label: {
+                Label("Read", systemImage: "envelope.open")
+            }
+            .tint(Theme.amber)
+        } else {
+            Button { Task { await hub.unack(session) } } label: {
+                Label("Unread", systemImage: "envelope.badge")
+            }
+            .tint(Theme.blue)
+        }
+    }
+
+    @ViewBuilder
+    private func readMenu(_ session: Session) -> some View {
+        if session.isUnread {
+            Button { Task { await hub.ack(session) } } label: {
+                Label("Mark as Read", systemImage: "envelope.open")
+            }
+        } else {
+            Button { Task { await hub.unack(session) } } label: {
+                Label("Mark as Unread", systemImage: "envelope.badge")
+            }
+        }
+    }
+
     // The pin/unpin context-menu entry. Hiding a pinned session unpins it, so a
     // hidden row is never pinned and this only ever appears on the main list.
     @ViewBuilder
@@ -458,13 +525,6 @@ struct SessionsView: View {
             Button { Task { await hub.unpin(session) } } label: { Label("Unpin", systemImage: "pin.slash") }
         } else {
             Button { Task { await hub.pin(session) } } label: { Label("Pin", systemImage: "pin") }
-        }
-    }
-
-    @ViewBuilder
-    private func chatButton(_ session: Session) -> some View {
-        Button { chatSession = session } label: {
-            Label("Show Chat", systemImage: "bubble.left.and.bubble.right")
         }
     }
 
@@ -499,6 +559,9 @@ struct SessionsView: View {
         pressed = session.key
         Task {
             await hub.jump(session)
+            // Jumping is engaging with the session, so it clears the dot - the
+            // jumplist has always done this and iOS differing was drift.
+            if session.isUnread { await hub.ack(session) }
             try? await Task.sleep(nanoseconds: 250_000_000)
             pressed = nil
         }

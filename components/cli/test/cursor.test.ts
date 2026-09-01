@@ -1,9 +1,46 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle, vscodeBundle, editorTerminalOrigin, editorHost, hostPrefixedAgent } from "../src/cursor";
 import { agentFamily } from "../src/event";
+
+function spooledCursorEvent(payload: Record<string, unknown>): Record<string, unknown> {
+  const dir = mkdtempSync(join(tmpdir(), "sb-cursor-hook-"));
+  const home = mkdtempSync(join(tmpdir(), "sb-cursor-home-"));
+  const proc = Bun.spawnSync(
+    [process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "hook", "cursor"],
+    {
+      env: {
+        ...process.env,
+        HOME: home,
+        SIGNALBOX_CONFIG: join(dir, "settings.json"),
+        SIGNALBOX_DATA_DIR: dir,
+        SIGNALBOX_PROFILE: "full",
+        SIGNALBOX_URL: "http://127.0.0.1:1",
+        TMUX: "",
+      },
+      stdin: new TextEncoder().encode(JSON.stringify(payload)),
+      stdout: "pipe",
+      stderr: "pipe",
+    }
+  );
+  expect(proc.exitCode).toBe(0);
+  return JSON.parse(readFileSync(join(dir, "spool.jsonl"), "utf8").trim());
+}
+
+describe("Cursor transcript event", () => {
+  test("threads transcript_path into the built event", () => {
+    const transcript = "/tmp/cursor/project/agent-transcripts/id/id.jsonl";
+    const event = spooledCursorEvent({
+      hook_event_name: "sessionStart",
+      conversation_id: "cursor-transcript-test",
+      workspace_roots: ["/tmp/project"],
+      transcript_path: transcript,
+    });
+    expect(event.transcript).toBe(transcript);
+  });
+});
 
 describe("mapCursorHook", () => {
   const cases: [any, { eventType: string; reason: string } | null][] = [

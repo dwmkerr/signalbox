@@ -8,10 +8,15 @@ import type { Command } from "./command";
 import { logTo } from "./client";
 import * as ev from "./event";
 import type { Event } from "./event";
-import { parseExchangeQuery, exchangesBody, isLoopbackHost } from "./hub";
+import {
+  parseExchangeQuery, exchangesBody, isLoopbackHost, noStoreJSON,
+  searchResultLimit, searchSweepBudgetMs, searchSweepIntervalMs,
+} from "./hub";
 import type { RequestHandler } from "./hub";
 import { PermanentError, Spool } from "./spool";
 import { Store } from "./state";
+import { openIndex, type SearchIndex } from "./searchindex";
+import { loadSettings } from "./config";
 import { buildStamp } from "./build";
 import { hubLog } from "./log";
 
@@ -60,6 +65,10 @@ export interface ForwarderOptions {
   version: string;
   port: number;
   historyLimit: number;
+  /** Index local transcripts and serve /search from them. Off by default. */
+  searchEnabled?: boolean;
+  /** Whether search is still enabled, asked once per sweep. See Hub. */
+  searchEnabledNow?: () => boolean;
 }
 
 export class Forwarder implements RequestHandler {
@@ -74,15 +83,21 @@ export class Forwarder implements RequestHandler {
   private closed = false;
   private started = false;
   private uplinkController: AbortController | null = null;
+  // The local transcript index. A forwarder owns no session state, but the
+  // transcripts live on ITS machine, so it is the only process that can answer
+  // a contents search for them without the text crossing to another machine.
+  private searchIndex: SearchIndex | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectResolve: (() => void) | null = null;
   private drainTimer: ReturnType<typeof setInterval> | null = null;
+  private searchTimer: ReturnType<typeof setInterval> | null = null;
   private streamCleanups = new Set<() => void>();
   private failureLogged = false;
 
   constructor(private opts: ForwarderOptions) {
     this.store = new Store(opts.historyLimit);
+
     this.spool = new Spool(
       opts.stateDir,
       "forward-spool.jsonl",
@@ -126,6 +141,15 @@ export class Forwarder implements RequestHandler {
     }
     if (req.method === "GET" && url.pathname === "/exchanges") {
       return this.handleExchanges(url);
+    }
+    if (req.method === "GET" && url.pathname === "/search/status") {
+      return this.handleSearchStatus();
+    }
+    if (req.method === "POST" && url.pathname === "/search/rebuild") {
+      return this.handleSearchRebuild();
+    }
+    if (req.method === "GET" && url.pathname === "/search") {
+      return this.handleSearch(url);
     }
     if (req.method === "GET" && url.pathname === "/stream") {
       return this.handleStream(req, url, server);
@@ -212,6 +236,9 @@ export class Forwarder implements RequestHandler {
     delete e.pinned;
     delete e.engaged_ts;
     delete e.seq;
+    // A local hub uses this path to match search hits, but an upstream hub
+    // cannot read another machine's transcripts, so forwarding it only leaks.
+    delete e.transcript;
     // The hook gives its POST only 200 ms. Waiting for a WAN round trip would
     // make the hook spool locally after this process had also delivered the
     // event, creating a duplicate; one local append and one async drain avoid it.
@@ -222,6 +249,61 @@ export class Forwarder implements RequestHandler {
     }
     this.kickDrain();
     return Response.json({ spooled: true }, { status: 202 });
+  }
+
+  // Opened when the setting first says yes and dropped when it says no, so the
+  // Settings toggle works without restarting the hub the app supervises.
+  private activeIndex(): SearchIndex | null {
+    const enabled = (this.opts.searchEnabledNow ?? (() => loadSettings().searchEnabled))();
+    if (!enabled) {
+      this.searchIndex?.close();
+      this.searchIndex = null;
+      return null;
+    }
+    if (!this.searchIndex) this.searchIndex = openIndex(this.opts.stateDir);
+    return this.searchIndex;
+  }
+
+  private handleSearch(url: URL): Response {
+    const index = this.activeIndex();
+    if (!index) {
+      return noStoreJSON({ error: "search_disabled", enabled: false }, 409);
+    }
+    const query = url.searchParams.get("q");
+    if (!query) return noStoreJSON({ error: "q is required" }, 400);
+    return noStoreJSON({
+      enabled: true,
+      query,
+      results: index.search(query, searchResultLimit, this.store.list()),
+    });
+  }
+
+  // Rebuilding is the hub's job because it owns the open connection. It empties
+  // the index and returns at once: the sweep refills it, so the caller sees
+  // progress where it already watches for it rather than waiting on this.
+  private handleSearchRebuild(): Response {
+    const index = this.activeIndex();
+    if (!index) return noStoreJSON({ error: "search_disabled", enabled: false }, 409);
+    index.rebuild();
+    return noStoreJSON({ enabled: true, status: index.status() });
+  }
+
+  private handleSearchStatus(): Response {
+    const index = this.activeIndex();
+    if (!index) return noStoreJSON({ enabled: false, status: "disabled" });
+    return noStoreJSON({ enabled: true, status: index.status() });
+  }
+
+  // startSearch runs the same bounded sweep the hub runs. Discovery walks this
+  // machine's transcript directories, so the index it builds is local by
+  // construction.
+  startSearch(): void {
+    // Re-read per tick for the same reason as the hub: turning the setting off
+    // has to stop transcripts being read without waiting for a restart.
+    this.searchTimer = setInterval(
+      () => this.activeIndex()?.sweep({ budgetMs: searchSweepBudgetMs }),
+      searchSweepIntervalMs,
+    );
   }
 
   private async handleCommand(req: Request): Promise<Response> {

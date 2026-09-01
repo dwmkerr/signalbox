@@ -3,7 +3,8 @@
 // specs/cli.md: hook-path commands always exit 0; interactive commands may
 // fail loudly.
 
-import { basename } from "node:path";
+import { readFileSync, rmSync } from "node:fs";
+import { basename, join } from "node:path";
 import * as ev from "./event";
 import type { Event, Origin, Proc } from "./event";
 import { Client, fetchState, hubURL, stateDir, logTo, DefaultURL } from "./client";
@@ -18,15 +19,17 @@ import { runPair, lanIPv4 } from "./pair";
 import { captureProc, captureAgentProc } from "./proc";
 import { mapClaudeHook, claudeReply, sessionName, type ClaudeHook } from "./claude";
 import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle, editorTerminalOrigin, hostPrefixedAgent, type CursorHook } from "./cursor";
-import { mapCodexHook, codexReply, codexSessionName, type CodexHook } from "./codex";
+import { mapCodexHook, codexReply, codexSessionName, resolveCodexTranscript, type CodexHook } from "./codex";
 import {
   loadSettings, saveSettings, settingsPath, normalizeBindInput, lanHint,
   normalizeIntInput, normalizeUpstreamInput, shouldGenerateToken, generateToken,
 } from "./config";
 import { runSetup } from "./setup";
+import { openIndex, type IndexStatus, type SearchResult } from "./searchindex";
+import { Store } from "./state";
 import {
   glyph, coloredGlyph, statusWord, titleOf, age, printSessions, tmuxStatusLine,
-  cropRunes, dimOn, dimOff, needsYou, visible, termWidth,
+  cropRunes, dimOn, dimOff, needsYou, visible, termWidth, visibleWidth,
 } from "./display";
 
 // A plain const stamped by release-please; the compiled binary carries it.
@@ -46,6 +49,8 @@ usage: signalbox <command> [flags]
 
   init         guided setup: the app, coding-agent hooks, tmux
   state        show the board
+  search       search local session contents
+  index        inspect or rebuild the local search index
   jump <key>   jump to a session's origin and mark it seen
   pick         pick a waiting session interactively and jump to it
   fire         fire an event from a script, cron job, or CI
@@ -89,6 +94,8 @@ usage: signalbox <command> [flags]
                config set hub.historyLimit <1-100000>  exchanges kept per session
                config set hub.replyCap <1-1000000>     reply character cap
   state        show the board [--json] [--all] [--tag T] [--exclude-tag T]
+  search <query>  search local session contents [--json] [--limit 1-50]
+  index        inspect or rebuild the local search index [--status|--rebuild]
   jump <key>   jump to a session's origin (tmux pane or URL) and mark it seen
   pick         pick a waiting session interactively and jump to it
   fire         fire an event: --agent A --event E [--reason R] [--title T]
@@ -133,6 +140,7 @@ env: SIGNALBOX_URL (default ${DefaultURL})
      SIGNALBOX_TOKEN (bearer token; required to bind non-loopback, sent by clients)
      SIGNALBOX_UPSTREAM (hub: forward to this remote hub instead of owning state; --upstream wins)
      SIGNALBOX_REMOTE (hub: 1/true = remote mode, same as --remote)
+     SIGNALBOX_SEARCH (1/true enables local transcript search; off by default)
 `;
 }
 
@@ -209,6 +217,7 @@ async function buildEvent(opts: {
   originURL?: string;
   origin?: Origin | null;
   cwd?: string;
+  transcript?: string;
   proc?: Proc | null;
 }): Promise<Event> {
   const cwd = opts.cwd || process.cwd();
@@ -241,6 +250,7 @@ async function buildEvent(opts: {
   };
   if (opts.reason) e.reason = opts.reason;
   if (opts.title) e.title = opts.title;
+  if (opts.transcript) e.transcript = opts.transcript;
   // The single crop site: whatever the source, the cap and the `cropped`
   // marker are decided once here, so no adapter can disagree about them.
   const replyCap = opts.replyCap ?? loadSettings().hub.replyCap;
@@ -483,6 +493,7 @@ async function runClaudeHook(): Promise<void> {
     replyCap: settings.hub.replyCap,
     sessionKey: key,
     cwd: payload.cwd,
+    transcript: payload.transcript_path,
     proc,
   });
   // Diagnostic (off by default): SIGNALBOX_RAW attaches the untouched hook
@@ -532,6 +543,7 @@ async function runCursorHook(): Promise<void> {
     sessionKey: key,
     origin,
     cwd: workspace || undefined,
+    transcript: payload.transcript_path,
     proc,
   });
   if (process.env.SIGNALBOX_RAW) e.raw = text;
@@ -577,6 +589,7 @@ async function runCodexHook(): Promise<void> {
     replyCap: settings.hub.replyCap,
     sessionKey: key,
     cwd: payload.cwd,
+    transcript: payload.session_id ? resolveCodexTranscript(payload.session_id) : "",
     proc,
   });
   if (process.env.SIGNALBOX_RAW) e.raw = text;
@@ -649,9 +662,11 @@ function runHub(args: string[]): void {
       version,
       port,
       historyLimit: settings.hub.historyLimit,
+      searchEnabled: settings.searchEnabled,
     });
     listen(fwd, port, "127.0.0.1");
     fwd.start();
+    fwd.startSearch();
     // PID 1 has no default SIGTERM disposition, so stop the uplink and spool
     // work before the platform stops the container.
     process.on("SIGTERM", () => { fwd.close(); process.exit(0); });
@@ -733,13 +748,17 @@ function runHub(args: string[]): void {
     tls ? tlsPort : 0,
     remote,
     port,
-    settings.hub.historyLimit
+    settings.hub.historyLimit,
+    // Read live, not captured: the Settings toggle has to take effect without
+    // restarting the hub the app supervises.
+    () => loadSettings().searchEnabled
   );
   const expire = expireAgeMs();
   hub.startExpiry(10 * 60 * 1000, expire);
   // Much shorter than expiry: a dead process shows as an eternal spinner
   // until the sweep catches it.
   hub.startLiveness(30 * 1000);
+  hub.startSearch();
 
   // PID 1 has no default SIGTERM disposition, so close the append fd before the platform stops the container.
   process.on("SIGTERM", () => { hub.close(); process.exit(0); });
@@ -856,7 +875,7 @@ function runConfig(args: string[]): void {
   fatal(`unknown config subcommand ${JSON.stringify(sub)} (try: config get or config set <key> <value>; settable: hub.bind, hub.token, hub.upstream, hub.historyLimit, hub.replyCap)`);
 }
 
-// ---- state / pick / tmux-status / drain -------------------------------------------
+// ---- state / search / index / pick / tmux-status / drain --------------------------
 
 async function runState(args: string[]): Promise<void> {
   const { flags } = parseFlags(args, ["json", "all"]);
@@ -875,6 +894,188 @@ async function runState(args: string[]): Promise<void> {
     return;
   }
   console.log(printSessions(sessions, isTTY()));
+}
+
+const cliSearchResultLimit = 50;
+const searchDatabaseFiles = ["search.db-wal", "search.db-shm", "search.db"];
+const searchDisabledMessage =
+  "session contents search is off; enable it in Signalbox Settings, set searchEnabled to true in ~/.config/signalbox/settings.json, or use SIGNALBOX_SEARCH=1 in scripts";
+
+function checkSearchEnabled(): boolean {
+  if (loadSettings().searchEnabled) return true;
+  console.log(searchDisabledMessage);
+  return false;
+}
+
+function localSessions(dir: string): Event[] {
+  const store = new Store();
+  let content = "";
+  try {
+    content = readFileSync(join(dir, "events.jsonl"), "utf8");
+  } catch {
+    return [];
+  }
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const event: Event = JSON.parse(line);
+      ev.normalizeInbound(event);
+      store.apply(event);
+    } catch {
+      // A partial event log line must not make an otherwise healthy index unusable.
+    }
+  }
+  return store.list();
+}
+
+function searchSnippet(snippet: string): string {
+  return snippet
+    .replaceAll("<mark>", "")
+    .replaceAll("</mark>", "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function printSearchResults(results: SearchResult[]): string {
+  const header = ["STATE", "AGENT", "CWD", "HITS", "MATCH"];
+  const rows = results.map((result) => [
+    result.state === "live" ? "● live" : "· ended",
+    result.agent,
+    result.cwd ? basename(result.cwd) : "-",
+    String(result.hitCount),
+    searchSnippet(result.snippet),
+  ]);
+  const last = header.length - 1;
+  const widths = header.slice(0, last).map((cell) => visibleWidth(cell));
+  for (const row of rows) {
+    for (let i = 0; i < widths.length; i++) {
+      widths[i] = Math.max(widths[i], visibleWidth(row[i]));
+    }
+  }
+  let matchWidth = termWidth() - 2;
+  for (const width of widths) matchWidth -= width + 2;
+  const render = (row: string[]): string => {
+    let line = "";
+    for (let i = 0; i < widths.length; i++) {
+      line += row[i] + " ".repeat(widths[i] - visibleWidth(row[i]) + 2);
+    }
+    if (matchWidth > 3) line += cropRunes(row[last], matchWidth);
+    return line.replace(/\s+$/, "");
+  };
+  return [render(header), ...rows.map(render)].join("\n");
+}
+
+async function runSearch(args: string[]): Promise<void> {
+  const { flags, rest } = parseFlags(args, ["json"]);
+  if (!checkSearchEnabled()) return;
+  const query = rest.join(" ").trim();
+  if (!query) {
+    console.error("usage: signalbox search <query> [--json] [--limit 1-50]");
+    process.exit(2);
+  }
+  let limit = cliSearchResultLimit;
+  if (flags["limit"] !== undefined) {
+    const normalized = normalizeIntInput(flags["limit"], 1, cliSearchResultLimit);
+    if (normalized.error) fatal(`invalid --limit: ${normalized.error}`);
+    limit = normalized.value!;
+  }
+
+  const dir = stateDir();
+  const index = openIndex(dir, { readonly: true });
+  try {
+    const results = index.search(query, limit, localSessions(dir)).map((result) => ({
+      ...result,
+      snippet: searchSnippet(result.snippet),
+    }));
+    if (flags["json"]) {
+      console.log(JSON.stringify({ enabled: true, query, results }));
+    } else if (results.length === 0) {
+      console.log(`no matches for ${JSON.stringify(query)}`);
+    } else {
+      console.log(printSearchResults(results));
+    }
+  } finally {
+    index.close();
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+}
+
+function printIndexStatus(status: IndexStatus): string {
+  return [
+    `files known: ${status.filesKnown}`,
+    `files pending: ${status.filesPending}`,
+    `turns indexed: ${status.turnsIndexed}`,
+    `last sweep time: ${status.lastSweepTime ?? "never"}`,
+    `first build in progress: ${status.firstBuildInProgress}`,
+    `index size: ${formatBytes(status.indexSizeBytes)}`,
+  ].join("\n");
+}
+
+function printIndexProgress(status: IndexStatus): string {
+  return `indexing: ${status.turnsIndexed} turns from ${status.filesKnown} files, ${status.filesPending} pending`;
+}
+
+async function rebuildIndex(): Promise<void> {
+  const dir = stateDir();
+  console.log("rebuilding search index...");
+  for (const filename of searchDatabaseFiles) rmSync(join(dir, filename), { force: true });
+
+  const index = openIndex(dir);
+  try {
+    let status = index.status();
+    let lastProgress = printIndexProgress(status);
+    console.log(lastProgress);
+    let nextProgressAt = Date.now() + 1000;
+    let workRemains: boolean;
+    do {
+      const summary = index.sweep({ budgetMs: 50 });
+      workRemains = summary.workRemains;
+      status = index.status();
+      const progress = printIndexProgress(status);
+      const now = Date.now();
+      if (progress !== lastProgress && (now >= nextProgressAt || !workRemains)) {
+        console.log(progress);
+        lastProgress = progress;
+        nextProgressAt = now + 1000;
+      }
+      if (workRemains) await Bun.sleep(0);
+    } while (workRemains);
+    status = index.status();
+    console.log(
+      `search index rebuilt: ${status.turnsIndexed} turns from ${status.filesKnown} files (${formatBytes(status.indexSizeBytes)})`
+    );
+  } finally {
+    index.close();
+  }
+}
+
+function indexUsage(): string {
+  return "usage: signalbox index --status\n       signalbox index --rebuild";
+}
+
+async function runIndex(args: string[]): Promise<void> {
+  if (args.length !== 1 || (args[0] !== "--status" && args[0] !== "--rebuild")) {
+    console.error(indexUsage());
+    process.exit(2);
+  }
+  if (!checkSearchEnabled()) return;
+  if (args[0] === "--rebuild") {
+    await rebuildIndex();
+    return;
+  }
+
+  const index = openIndex(stateDir());
+  try {
+    console.log(printIndexStatus(index.status()));
+  } finally {
+    index.close();
+  }
 }
 
 function isTTY(): boolean {
@@ -1081,6 +1282,12 @@ switch (cmd) {
     break;
   case "state":
     await runState(args).catch(fatal);
+    break;
+  case "search":
+    await runSearch(args).catch(fatal);
+    break;
+  case "index":
+    await runIndex(args).catch(fatal);
     break;
   case "jump":
     if (args.length !== 1) {

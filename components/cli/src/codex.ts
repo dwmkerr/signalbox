@@ -4,7 +4,7 @@
 // Claude, the Stop payload carries `last_assistant_message` directly, so reply
 // capture needs no transcript read.
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, opendirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { cropTitle, Busy, Done, Attention, Ended } from "./event";
@@ -93,6 +93,107 @@ function permissionAsk(h: CodexHook): string {
 function commandText(cmd: unknown): string {
   if (typeof cmd === "string") return cmd.trim();
   if (Array.isArray(cmd)) return cmd.map(String).join(" ").trim();
+  return "";
+}
+
+// A hook normally finds its current transcript in the first date directory.
+// The caps keep a missing id from turning hook delivery into an unbounded walk
+// through years of history.
+const maxTranscriptDateDirs = 32;
+const maxTranscriptEntries = 4096;
+
+function newestDateParts(
+  path: string,
+  width: number,
+  min: number,
+  max: number,
+  budget: { entries: number }
+): string[] {
+  let dir;
+  try {
+    dir = opendirSync(path);
+  } catch {
+    return [];
+  }
+  const parts: string[] = [];
+  try {
+    while (budget.entries < maxTranscriptEntries) {
+      let entry;
+      try {
+        entry = dir.readSync();
+      } catch {
+        break;
+      }
+      if (!entry) break;
+      budget.entries++;
+      if (!entry.isDirectory() || entry.name.length !== width || !/^\d+$/.test(entry.name)) continue;
+      const value = Number(entry.name);
+      if (value >= min && value <= max) parts.push(entry.name);
+    }
+  } finally {
+    try {
+      dir.closeSync();
+    } catch {
+      // Closing a failed directory read cannot be allowed to break a hook.
+    }
+  }
+  return parts.sort((a, b) => b.localeCompare(a));
+}
+
+function findTranscriptInDateDir(path: string, suffix: string, budget: { entries: number }): string {
+  let dir;
+  try {
+    dir = opendirSync(path);
+  } catch {
+    return "";
+  }
+  try {
+    while (budget.entries < maxTranscriptEntries) {
+      let entry;
+      try {
+        entry = dir.readSync();
+      } catch {
+        return "";
+      }
+      if (!entry) return "";
+      budget.entries++;
+      if (entry.isFile() && entry.name.startsWith("rollout-") && entry.name.endsWith(suffix)) {
+        return join(path, entry.name);
+      }
+    }
+  } finally {
+    try {
+      dir.closeSync();
+    } catch {
+      // Closing a failed directory read cannot be allowed to break a hook.
+    }
+  }
+  return "";
+}
+
+// Codex omits transcript_path from hooks, so the session id has to be resolved
+// on the latency-sensitive hook path. Hard directory and entry caps make an
+// empty result safer than delaying the agent when the path cannot be found.
+export function resolveCodexTranscript(
+  sessionId: string,
+  sessionsDir = join(homedir(), ".codex", "sessions")
+): string {
+  if (!sessionId || sessionId.length > 128) return "";
+  const suffix = `-${sessionId}.jsonl`;
+  const budget = { entries: 0 };
+  let dates = 0;
+  for (const year of newestDateParts(sessionsDir, 4, 1, 9999, budget)) {
+    const yearDir = join(sessionsDir, year);
+    for (const month of newestDateParts(yearDir, 2, 1, 12, budget)) {
+      const monthDir = join(yearDir, month);
+      for (const day of newestDateParts(monthDir, 2, 1, 31, budget)) {
+        if (dates++ >= maxTranscriptDateDirs) return "";
+        const found = findTranscriptInDateDir(join(monthDir, day), suffix, budget);
+        if (found) return found;
+        if (budget.entries >= maxTranscriptEntries) return "";
+      }
+    }
+  }
   return "";
 }
 
