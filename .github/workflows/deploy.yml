@@ -11,6 +11,9 @@ on:
       push_latest:
         type: boolean
         default: false
+    secrets:
+      FLY_API_TOKEN:
+        required: false
   workflow_dispatch:
     inputs:
       version:

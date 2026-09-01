@@ -280,6 +280,7 @@ jobs:
       contents: read
       packages: write
     uses: ./.github/workflows/deploy.yml
+    secrets: inherit
     with:
       version: ${{ needs.release-please.outputs.tag_name }}
       push_latest: true
