@@ -11,6 +11,9 @@ on:
       push_latest:
         type: boolean
         default: false
+    secrets:
+      FLY_API_TOKEN:
+        required: true
   workflow_dispatch:
     inputs:
       version:
@@ -53,10 +56,11 @@ jobs:
 
   # Publishing an image is not deploying it: fly runs whatever was last pushed
   # to it, so without this a release updated ghcr and left the running hub on
-  # the previous build. Skipped rather than failed when FLY_API_TOKEN is absent,
-  # so a fork or a token-less repo still gets its image published.
+  # the previous build. Deliberately no skip-when-unset path - a release that
+  # quietly does not deploy is the failure this job exists to prevent, and it
+  # is better to fail the release loudly than to leave the hub behind again.
   fly:
-    needs: docker
+    needs: deploy
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -65,19 +69,11 @@ jobs:
         with:
           ref: ${{ inputs.version }}
 
-      - id: token
-        run: echo "present=${{ secrets.FLY_API_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
-
-      - if: steps.token.outputs.present == 'false'
-        run: echo "FLY_API_TOKEN is not set; skipping the hub deploy." >> "$GITHUB_STEP_SUMMARY"
-
-      - if: steps.token.outputs.present == 'true'
-        uses: superfly/flyctl-actions/setup-flyctl@master
+      - uses: superfly/flyctl-actions/setup-flyctl@master
 
       # Built here rather than deployed from the image just pushed, so the
       # deploy needs no registry credentials on the fly side.
-      - if: steps.token.outputs.present == 'true'
-        run: >
+      - run: >
           flyctl deploy
           --config components/deploy/fly/fly.toml
           --dockerfile components/deploy/Dockerfile
@@ -86,8 +82,16 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-      - if: steps.token.outputs.present == 'true'
+      # The deploy is not done because flyctl exited 0; it is done when the hub
+      # answers. Fails the release if it does not.
+      - name: Verify the hub answers
         run: |
-          echo "Deployed ${{ inputs.version }} to signalbox-hub." >> "$GITHUB_STEP_SUMMARY"
-          curl -sf --max-time 20 https://signalbox-hub.fly.dev/healthz \
-            | tee -a "$GITHUB_STEP_SUMMARY"
+          for attempt in $(seq 1 10); do
+            if curl -sf --max-time 10 https://signalbox-hub.fly.dev/healthz -o /tmp/healthz; then
+              cat /tmp/healthz >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "signalbox-hub did not answer /healthz after the deploy" >&2
+          exit 1
