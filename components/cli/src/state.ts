@@ -37,6 +37,11 @@ export class Store {
   private sessions = new Map<string, Event>();
   private history = new Map<string, Exchange[]>();
   private pending = new Map<string, Exchange>();
+  // Sessions whose newest committed exchange closes on an agent question. A
+  // question's text is final, unlike a Stop-time capture, so the write-race
+  // heal must not overwrite it - that would delete the very message the
+  // question rule exists to keep.
+  private askedLast = new Set<string>();
 
   constructor(private historyLimit: number = DefaultHistoryLimit) {}
 
@@ -51,6 +56,7 @@ export class Store {
         this.sessions.delete(e.session_key);
         this.history.delete(e.session_key);
         this.pending.delete(e.session_key);
+        this.askedLast.delete(e.session_key);
         return;
       case ev.Seen: {
         const cur = this.sessions.get(e.session_key);
@@ -193,8 +199,7 @@ export class Store {
     this.sessions.set(e.session_key, e);
   }
 
-  // Attention events never touch history because their reply is ask text. The
-  // event TYPE decides which turn a reply belongs to: a busy is a turn
+  // The event TYPE decides which turn a reply belongs to: a busy is a turn
   // STARTING, so a reply riding on it can only be the previous turn's final
   // text (the new turn has produced nothing yet) - it heals the outgoing
   // exchange. A done/error is a turn ENDING, so a prompt+reply on one event
@@ -202,8 +207,20 @@ export class Store {
   // opencode plugin). The heal exists because Stop-time capture can lose the
   // transcript write race; the next idle notification or prompt
   // deterministically carries the corrected final text.
+  //
+  // An attention splits by reason. A question is the agent's turn ending on
+  // YOU, so it closes the pair exactly like a done, with the ask as the reply:
+  // it is the one message in the conversation actually waiting on a human, and
+  // dropping it left your own answer sitting under nothing. A
+  // permission_request is machinery rather than conversation - nobody scrolls
+  // back to reread a tool approval - so it still never reaches history.
+  //
+  // `incoming` is the event as sent, not the row-carried copy, so the bare
+  // twin of a rich ask (which inherits reason/reply onto the row) carries no
+  // reason here and cannot record the same question twice.
   private recordExchange(incoming: Event, seq: number): void {
-    if (![ev.Busy, ev.Done, ev.Error].includes(incoming.event)) return;
+    const isQuestion = incoming.event === ev.Attention && incoming.reason === "question";
+    if (!isQuestion && ![ev.Busy, ev.Done, ev.Error].includes(incoming.event)) return;
 
     const key = incoming.session_key;
     const commit = (exchange: Exchange): void => {
@@ -227,7 +244,7 @@ export class Store {
       }
       const history = this.history.get(key);
       const latest = history?.[history.length - 1];
-      if (latest) {
+      if (latest && !this.askedLast.has(key)) {
         latest.reply = incoming.reply;
         if (incoming.cropped === true) latest.cropped = true;
         return;
@@ -242,6 +259,8 @@ export class Store {
     const openPrompt = (): void => {
       const existing = this.pending.get(key);
       if (existing) commit(existing);
+      // A new prompt answers whatever was asked, so the heal guard lifts.
+      this.askedLast.delete(key);
       this.pending.set(key, {
         prompt: incoming.prompt,
         ts: incoming.ts,
@@ -258,14 +277,15 @@ export class Store {
       return;
     }
 
-    // Turn end (done/error): prompt then reply, so a single event carrying
-    // both pairs them; then a completed pair commits.
+    // Turn end (done/error/question): prompt then reply, so a single event
+    // carrying both pairs them; then a completed pair commits.
     if (incoming.prompt) openPrompt();
     if (incoming.reply) applyReply();
     const pending = this.pending.get(key);
     if (pending?.prompt && pending.reply) {
       commit(pending);
       this.pending.delete(key);
+      if (isQuestion) this.askedLast.add(key);
     }
   }
 

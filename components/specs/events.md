@@ -176,15 +176,20 @@ incomplete.
 
 Agent events update history by these rules:
 
-1. Ignore `attention` events. Their replies describe the pending ask and do not belong in exchange history.
+1. An `attention` splits by `reason`. A `question` is a turn ending on the user, so it closes the pending exchange exactly like a `done`, with the ask as the reply - it is the one message in the conversation waiting on a human, and dropping it left the user's next prompt committed under nothing. Every other `attention`, `permission_request` included, is ignored: a tool approval is machinery, not conversation. The reason is read from the event as sent, so the bare twin of an enriched ask (which inherits `reason` and `reply` onto the row) cannot record the same question twice.
 2. For `busy`, apply any reply to the outgoing exchange before opening the new prompt. A `busy` event does not close the new exchange.
 3. For `done` or `error`, apply the prompt and reply in that order. Commit the pending exchange when both values are present.
 4. Opening a new prompt commits an older pending exchange, including an incomplete one, before creating the new pending exchange.
-5. A reply with no pending exchange amends the latest committed reply and folds in `cropped` while preserving its `seq`. If the session has no committed history, the reply creates a reply-only pending exchange.
+5. A reply with no pending exchange amends the latest committed reply and folds in `cropped` while preserving its `seq`. If the session has no committed history, or its newest committed exchange closed on a question, the reply creates a reply-only pending exchange instead.
 
 The amendment rule heals write races. Claude's Stop-time reply capture can run
 before the transcript contains the final text. A later idle notification or
 prompt carries that text and updates the outgoing exchange.
+
+A question is exempt from the amendment because its text is final rather than
+provisional: healing over it would delete the very message rule 1 exists to
+keep. The exemption lifts as soon as a new prompt opens, since that prompt is
+the answer.
 
 An unanswered prompt or reply-only exchange remains pending. It does not appear
 in the public history ring until a later prompt commits it or a `done` or

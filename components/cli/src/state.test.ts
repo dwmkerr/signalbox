@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Store } from "../src/state";
-import * as ev from "../src/event";
-import type { Event } from "../src/event";
+import { Store } from "./state";
+import * as ev from "./event";
+import type { Event } from "./event";
 
 function mk(key: string, eventType: string, ts: string, seq = 0): Event {
   return {
@@ -533,7 +533,7 @@ describe("exchange history", () => {
     ]);
   });
 
-  test("attention asks do not create history entries", () => {
+  test("permission asks do not create history entries", () => {
     const s = new Store();
     s.apply(mkReason("a", ev.Busy, "session_start", t(0), 1));
     s.apply({ ...mk("a", ev.Busy, t(1), 2), prompt: "fix the bug" });
@@ -547,6 +547,72 @@ describe("exchange history", () => {
     const history = s.exchanges("a", { limit: 10 });
     expect(history).toHaveLength(1);
     expect(history?.[0].reply).toBe("fixed");
+  });
+
+  // The bug this rule exists for: the agent's question was dropped, so the
+  // answer you typed next was committed under nothing and read as a
+  // non-sequitur when you scrolled back.
+  test("a question closes the pair and keeps the ask as the reply", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "add a search box" });
+    s.apply({
+      ...mkReason("a", ev.Attention, "question", t(1), 2),
+      reply: "should it be case sensitive?",
+    });
+    s.apply({ ...mk("a", ev.Busy, t(2), 3), prompt: "no, case insensitive" });
+    s.apply({ ...mkReason("a", ev.Done, "stop", t(3), 4), reply: "added it" });
+
+    expect(s.exchanges("a", { limit: 10 })?.map((x) => ({ prompt: x.prompt, reply: x.reply })))
+      .toEqual([
+        { prompt: "add a search box", reply: "should it be case sensitive?" },
+        { prompt: "no, case insensitive", reply: "added it" },
+      ]);
+  });
+
+  test("a permission ask still never enters history, beside a question", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "ship it" });
+    s.apply({
+      ...mkReason("a", ev.Attention, "permission_request", t(1), 2),
+      reply: "Bash: git push",
+    });
+    s.apply({ ...mkReason("a", ev.Attention, "question", t(2), 3), reply: "which remote?" });
+
+    expect(s.exchanges("a", { limit: 10 })?.map((x) => ({ prompt: x.prompt, reply: x.reply })))
+      .toEqual([{ prompt: "ship it", reply: "which remote?" }]);
+  });
+
+  // The bare twin of a rich ask carries the rich reply onto the ROW, but
+  // recordExchange sees the event as sent, so the question cannot double up.
+  test("a bare attention duplicate does not record the question twice", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "p1" });
+    s.apply({ ...mkReason("a", ev.Attention, "question", t(1), 2), reply: "which one?" });
+    s.apply(mkReason("a", ev.Attention, "notification", t(2), 3));
+
+    expect(s.exchanges("a", { limit: 10 })?.map((x) => ({ prompt: x.prompt, reply: x.reply })))
+      .toEqual([{ prompt: "p1", reply: "which one?" }]);
+  });
+
+  // Without the guard the write-race heal would overwrite the question with
+  // the next reply, deleting the message this whole rule exists to keep.
+  test("a later reply-only event does not overwrite a committed question", () => {
+    const s = new Store();
+    s.apply({ ...mk("a", ev.Busy, t(0), 1), prompt: "add a search box" });
+    s.apply({ ...mkReason("a", ev.Attention, "question", t(1), 2), reply: "case sensitive?" });
+    s.apply({ ...mkReason("a", ev.Done, "stop", t(2), 3), reply: "added it" });
+
+    const history = s.exchanges("a", { limit: 10 });
+    expect(history?.[0]).toMatchObject({ prompt: "add a search box", reply: "case sensitive?" });
+    expect(history?.map((x) => x.reply)).not.toContain(undefined);
+  });
+
+  test("a question with no pending prompt does not commit a half exchange", () => {
+    const s = new Store();
+    s.apply(mk("a", ev.Busy, t(0), 1));
+    s.apply({ ...mkReason("a", ev.Attention, "question", t(1), 2), reply: "which one?" });
+
+    expect(s.exchanges("a", { limit: 10 })).toHaveLength(0);
   });
 
   test("an enriched ask with no pending never enters history", () => {
