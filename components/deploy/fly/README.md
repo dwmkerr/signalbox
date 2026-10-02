@@ -20,7 +20,9 @@ What the config pins down, and why:
 - `[[mounts]]` on `/data` with `SIGNALBOX_DATA_DIR = '/data'` - the event log
   lives on the volume and survives deploys. One machine, one volume: the hub
   is the single source of truth, so always deploy with `--ha=false`.
-- `[[vm]]` shared 1 CPU / 1GB - plenty; the hub is a small single process.
+- `[[vm]]` shared 1 CPU / 512MB - plenty; the hub is a small single process.
+  Fly waives personal-org bills under $5/month, and at 512MB a single
+  always-on machine stays under that line; 1GB does not.
 
 The token is a secret (`fly secrets set SIGNALBOX_TOKEN=...`), never a value
 in this file - `fly.toml` is committed.

@@ -263,7 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let doc = try? JSONDecoder().decode(SearchDoc.self, from: data) else {
                 return .unreachable
             }
-            return .available(doc.results)
+            return .available(SearchResponse(totalHits: doc.totalHits, results: doc.results))
         case 409: return .disabled
         case 501: return .notSupported
         default: return .unreachable

@@ -357,6 +357,7 @@ export class Hub {
     return noStoreJSON({
       enabled: true,
       query,
+      totalHits: index.countHits(query),
       results: index.search(query, searchResultLimit, this.sessions()),
     });
   }

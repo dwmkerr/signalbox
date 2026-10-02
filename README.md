@@ -18,6 +18,7 @@
   <a href="https://github.com/dwmkerr/signalbox/actions/workflows/ci.yml"><img src="https://github.com/dwmkerr/signalbox/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
   <a href="https://github.com/dwmkerr/signalbox/releases"><img src="https://img.shields.io/github/v/release/dwmkerr/signalbox?include_prereleases" alt="release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+  <a href="https://github.com/sponsors/dwmkerr/sponsorships?frequency=one-time&amount=5"><img src="https://img.shields.io/badge/thanks-donate-ea4aaa?logo=githubsponsors&logoColor=white" alt="Donate"></a>
 </p>
 
 

@@ -133,9 +133,12 @@ describe("forwarder routes", () => {
     const { forwarder } = newForwarder({ searchEnabled: true });
     const res = (await forwarder.handle(request("/search?q=needle"), fakeServer))!;
     expect(res.status).toBe(200);
-    const body = await res.json() as { enabled: boolean; query: string; results: unknown[] };
+    const body = await res.json() as {
+      enabled: boolean; query: string; totalHits: number; results: unknown[];
+    };
     expect(body.enabled).toBe(true);
     expect(body.query).toBe("needle");
+    expect(body.totalHits).toBe(0);
     expect(Array.isArray(body.results)).toBe(true);
   });
 

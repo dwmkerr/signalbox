@@ -63,6 +63,7 @@ struct SearchResult: Decodable, Equatable {
 struct SearchDoc: Decodable {
     let enabled: Bool
     let query: String
+    let totalHits: Int
     let results: [SearchResult]
 
     init(from decoder: Decoder) throws {
@@ -70,9 +71,20 @@ struct SearchDoc: Decodable {
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? true
         query = (try? c.decodeIfPresent(String.self, forKey: .query)) ?? ""
         results = (try? c.decodeIfPresent([SearchResult].self, forKey: .results)) ?? []
+        // Older hubs predate totalHits. Summing their grouped result counts
+        // preserves the best available indicator during a rolling upgrade.
+        totalHits = (try? c.decodeIfPresent(Int.self, forKey: .totalHits))
+            ?? results.reduce(0) { $0 + $1.hitCount }
     }
 
-    private enum CodingKeys: String, CodingKey { case enabled, query, results }
+    private enum CodingKeys: String, CodingKey { case enabled, query, totalHits, results }
+}
+
+/// A successful contents query: the complete turn count plus the bounded,
+/// session-grouped rows rendered by the jumplist.
+struct SearchResponse: Equatable {
+    let totalHits: Int
+    let results: [SearchResult]
 }
 
 /// Index progress, from `GET /search/status`.
@@ -142,7 +154,7 @@ struct SearchStatusDoc: Decodable {
 /// status, so the app keeps them apart all the way to the surface.
 enum SearchAvailability: Equatable {
     /// Results were returned (possibly an empty list, meaning nothing matched).
-    case available([SearchResult])
+    case available(SearchResponse)
     /// The setting is off on the machine that owns the transcripts (HTTP 409).
     case disabled
     /// This hub is a forwarder and never serves search (HTTP 501).
@@ -154,7 +166,7 @@ enum SearchAvailability: Equatable {
 extension SearchAvailability {
     /// Results when there are some, empty otherwise; for callers that only render rows.
     var results: [SearchResult] {
-        if case .available(let rows) = self { return rows }
+        if case .available(let response) = self { return response.results }
         return []
     }
 }
