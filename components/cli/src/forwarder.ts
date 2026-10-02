@@ -274,6 +274,7 @@ export class Forwarder implements RequestHandler {
     return noStoreJSON({
       enabled: true,
       query,
+      totalHits: index.countHits(query),
       results: index.search(query, searchResultLimit, this.store.list()),
     });
   }

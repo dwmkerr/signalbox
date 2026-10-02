@@ -158,11 +158,13 @@ response is `200` with `Cache-Control: no-store`:
 {
   "enabled": true,
   "query": "edit skill",
+  "totalHits": 84,
   "results": []
 }
 ```
 
-`results` contains at most 50 grouped results with the fields described in
+`totalHits` is the complete number of matching turns, independent of the result
+limit. `results` contains at most 50 grouped results with the fields described in
 Query semantics. A missing or empty `q` is `400` with `{"error":"q is
 required"}`. When search is off, the route returns `409` with
 `{"error":"search_disabled","enabled":false}`. This marker is deliberately

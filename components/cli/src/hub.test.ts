@@ -445,6 +445,7 @@ describe("search", () => {
       const body = await res.json();
       expect(body.enabled).toBe(true);
       expect(body.query).toBe("needle");
+      expect(body.totalHits).toBe(1);
       expect(body.results).toEqual([{
         sessionUuid,
         agent: "codex",
