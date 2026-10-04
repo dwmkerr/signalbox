@@ -127,6 +127,14 @@ describe("ingest and state", () => {
     expect(doc.sessions[0].engaged_ts).toBeTruthy();
   });
 
+  test("/state serves the older horizon", async () => {
+    const { hub } = newHub();
+    track(hub);
+    const req = new Request("http://127.0.0.1:8377/state", { headers: { Host: "127.0.0.1:8377" } });
+    const res = (await hub.handle(req, fakeServer))!;
+    expect((await res.json()).older_horizon_seconds).toBe(86400);
+  });
+
   test("ended removes from state", async () => {
     const { hub } = newHub();
     track(hub);
@@ -1296,25 +1304,71 @@ describe("sweeps", () => {
     expect(readFileSync(join(dir, "events.jsonl"), "utf8")).toContain('"expired"');
   });
 
-  test("liveness ends sessions whose process died", async () => {
+  test("liveness marks dead processes done with exchange history intact", async () => {
     const { hub } = newHub();
     track(hub);
-    // A dead pid on our own host.
-    const dead = wireEvent("dead", ev.Busy, { proc: { pid: 999999 } });
-    dead.host = ev.shortHostname();
+    for (let i = 1; i <= 2; i++) {
+      await post(hub, wireEvent("dead", ev.Busy, { prompt: `prompt ${i}` }));
+      await post(hub, wireEvent("dead", ev.Done, { reply: `reply ${i}` }));
+    }
+    const dead = wireEvent("dead", ev.Busy, {
+      host: ev.shortHostname(), machine: "local-machine", agent: "claude",
+      proc: { pid: 999999 }, prompt: "unfinished prompt", cwd: "/work/project",
+      title: "project", transcript: "/work/transcript.jsonl",
+    });
     await post(hub, dead);
-    // A live pid (ourselves).
-    const alive = wireEvent("alive", ev.Busy, { proc: { pid: process.pid } });
-    alive.host = ev.shortHostname();
-    await post(hub, alive);
-    // A dead pid on another host: never swept from here.
-    const remote = wireEvent("remote", ev.Busy, { proc: { pid: 999999 } });
-    remote.host = "some-other-host";
-    await post(hub, remote);
+    await post(hub, wireEvent("remote", ev.Busy, {
+      host: "some-other-host", proc: { pid: 999999 },
+    }));
+    const before = await getState(hub);
+    const history = await (await getExchanges(hub, "dead")).json();
+    expect(history.exchanges).toHaveLength(2);
 
-    hub.startLiveness(60 * 60 * 1000); // sweeps once immediately
-    const keySet = (await getState(hub)).sessions.map((s) => s.session_key).sort();
-    expect(keySet).toEqual(["alive", "remote"]);
+    hub.startLiveness(60 * 60 * 1000);
+    const doc = await getState(hub);
+    expect(doc.sessions.map((s) => s.session_key).sort()).toEqual(["dead", "remote"]);
+    expect(doc.sessions.find((s) => s.session_key === "dead")).toMatchObject({
+      event: ev.Done, reason: "exited", proc: dead.proc, host: dead.host,
+      machine: dead.machine, agent: dead.agent, cwd: dead.cwd, title: dead.title,
+      transcript: dead.transcript, prompt: dead.prompt,
+    });
+    expect(doc.sessions.find((s) => s.session_key === "remote")).toEqual(
+      before.sessions.find((s) => s.session_key === "remote")
+    );
+    const res = await getExchanges(hub, "dead");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(history);
+  });
+
+  test.each([ev.Done, ev.Attention, ev.Error])("liveness ingests nothing for a %s row with a dead process", async (eventType) => {
+    const { hub, dir } = newHub();
+    track(hub);
+    await post(hub, wireEvent("dead", ev.Busy, {
+      host: ev.shortHostname(), proc: { pid: 999999 },
+    }));
+    await post(hub, wireEvent("dead", eventType, { host: ev.shortHostname() }));
+    const before = await getState(hub);
+    expect(before.sessions[0].proc).toEqual({ pid: 999999 });
+    const log = readFileSync(join(dir, "events.jsonl"), "utf8");
+
+    hub.startLiveness(60 * 60 * 1000);
+    hub.startLiveness(60 * 60 * 1000);
+    expect(await getState(hub)).toEqual(before);
+    expect(readFileSync(join(dir, "events.jsonl"), "utf8")).toBe(log);
+  });
+
+  test("liveness leaves a busy row with a live process untouched", async () => {
+    const { hub, dir } = newHub();
+    track(hub);
+    await post(hub, wireEvent("alive", ev.Busy, {
+      host: ev.shortHostname(), proc: { pid: process.pid },
+    }));
+    const before = await getState(hub);
+    const log = readFileSync(join(dir, "events.jsonl"), "utf8");
+
+    hub.startLiveness(60 * 60 * 1000);
+    expect(await getState(hub)).toEqual(before);
+    expect(readFileSync(join(dir, "events.jsonl"), "utf8")).toBe(log);
   });
 
   test("liveness detects a recycled pid via comm mismatch", async () => {
@@ -1326,7 +1380,11 @@ describe("sweeps", () => {
     recycled.host = ev.shortHostname();
     await post(hub, recycled);
     hub.startLiveness(60 * 60 * 1000);
-    expect((await getState(hub)).sessions.length).toBe(0);
+    const doc = await getState(hub);
+    expect(doc.sessions).toHaveLength(1);
+    expect(doc.sessions[0]).toMatchObject({
+      session_key: "recycled", event: ev.Done, reason: "exited",
+    });
   });
 });
 

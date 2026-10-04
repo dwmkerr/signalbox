@@ -41,6 +41,14 @@ export const ReplyMax = 10240;
 export const TitleMax = 160;
 export const LabelMax = 80;
 
+/**
+ * OlderHorizonSeconds is served by the hub in `/state` so both boards agree
+ * on what "older" means. A row whose `engaged_ts` is further back than this
+ * horizon renders under the board's Older section. The classification is
+ * derived at render time and is never stored on an event or a session.
+ */
+export const OlderHorizonSeconds = 24 * 60 * 60;
+
 export interface TmuxOrigin {
   session: string;
   window: number;

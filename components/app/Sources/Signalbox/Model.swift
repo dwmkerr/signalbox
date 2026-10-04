@@ -120,8 +120,23 @@ struct SessionOrigin: Decodable {
     }
 }
 
+/// The hub snapshot keeps display order and the older horizon consistent across boards.
 struct StateResponse: Decodable {
+    /// Sessions in the hub's authoritative display order.
     let sessions: [SessionEvent]
+    /// An older hub omits this field; the app falls back to 24 hours.
+    let olderHorizonSeconds: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case sessions
+        case olderHorizonSeconds = "older_horizon_seconds"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessions = try container.decode([SessionEvent].self, forKey: .sessions)
+        olderHorizonSeconds = try? container.decodeIfPresent(Double.self, forKey: .olderHorizonSeconds)
+    }
 }
 
 // A loopback hub needs no token; a non-loopback one rejects every request

@@ -26,6 +26,9 @@ struct SessionsView: View {
     // The Hidden section starts collapsed and the user opens it. A search
     // overrides this to auto-reveal matches (see hiddenSectionExpanded).
     @State private var hiddenExpanded = false
+    // Older starts collapsed to keep sessions we have left alone out of the
+    // way. Search overrides this so age cannot conceal a match.
+    @State private var olderExpanded = false
     // The same main-screen scan affordance every surface carries, presenting the
     // shared PairSheet so pairing is never buried in Settings.
     @State private var showPairSheet = false
@@ -68,11 +71,35 @@ struct SessionsView: View {
                                 }
                         }
 
+                        if !olderRows.isEmpty {
+                            olderDivider
+                                .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+
+                            if olderSectionExpanded {
+                                ForEach(olderRows) { session in
+                                    card(session, dimmed: false)
+                                        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                                        .listRowSeparator(.hidden)
+                                        .listRowBackground(Color.clear)
+                                        .contextMenu { pinMenu(session); readMenu(session) }
+                                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                            readToggleButton(session)
+                                        }
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                            Button { Task { await hub.hide(session) } } label: { Label("Hide", systemImage: "eye.slash") }
+                                                .tint(Theme.faint)
+                                        }
+                                }
+                            }
+                        }
+
                         // The Hidden divider, always shown (even at "Hidden (0)")
                         // so it is clear whether a session is set aside - a missing
                         // row is otherwise a mystery. Hidden only when nothing at
                         // all matches (the empty/no-matches case).
-                        if !mainRows.isEmpty || !hiddenRows.isEmpty {
+                        if !mainRows.isEmpty || !olderRows.isEmpty || !hiddenRows.isEmpty {
                             hiddenDivider
                                 .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
                                 .listRowSeparator(.hidden)
@@ -517,14 +544,32 @@ struct SessionsView: View {
         }
     }
 
-    // The pin/unpin context-menu entry. Hiding a pinned session unpins it, so a
-    // hidden row is never pinned and this only ever appears on the main list.
+    // Pinning keeps a session in front of me even after its engagement ages out.
+    // Hiding it unpins it because setting it aside is the stronger intent.
     @ViewBuilder
     private func pinMenu(_ session: Session) -> some View {
         if session.pinned {
             Button { Task { await hub.unpin(session) } } label: { Label("Unpin", systemImage: "pin.slash") }
         } else {
             Button { Task { await hub.pin(session) } } label: { Label("Pin", systemImage: "pin") }
+        }
+    }
+
+    // Older keeps the board focused without treating a quiet session as hidden.
+    private var olderDivider: some View {
+        HStack(spacing: 6) {
+            Image(systemName: olderSectionExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+            Text("Older (\(olderRows.count))")
+                .font(.system(size: 13, weight: .medium))
+            Spacer()
+        }
+        .foregroundStyle(Theme.faint)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeOut(duration: 0.18)) { olderExpanded.toggle() }
         }
     }
 
@@ -584,13 +629,33 @@ struct SessionsView: View {
             || session.agent.lowercased().contains(q)
     }
 
-    // The board is the non-hidden rows, in the hub's order, filtered by any
-    // query. The hub owns the order and puts pinned rows first, so this never
-    // re-sorts.
+    // Engagement is the hub's sort key, so using it for age keeps the sections
+    // from interleaving. A pin means keep this session in front of me.
+    private func isOlder(_ s: Session) -> Bool {
+        if s.pinned { return false }
+        return Date().timeIntervalSince(s.engagedDate) > hub.olderHorizon
+    }
+
+    // Older and hidden sessions stay out of the way. The hub owns the order and
+    // puts pinned rows first, so filtering must preserve that order.
     private var mainRows: [Session] {
         let q = trimmedQuery
-        let visible = hub.sessions.filter { !$0.hidden }
+        let visible = hub.sessions.filter { !$0.hidden && !isOlder($0) }
         return q.isEmpty ? visible : visible.filter { matches($0, q) }
+    }
+
+    // Search must still find sessions we have left alone. Explicitly hiding one
+    // takes precedence over its age, so it belongs only under Hidden.
+    private var olderRows: [Session] {
+        let q = trimmedQuery
+        let older = hub.sessions.filter { isOlder($0) && !$0.hidden }
+        return q.isEmpty ? older : older.filter { matches($0, q) }
+    }
+
+    // A collapsed section must not conceal search matches; without a query the
+    // user's toggle keeps older sessions out of the way.
+    private var olderSectionExpanded: Bool {
+        trimmedQuery.isEmpty ? olderExpanded : true
     }
 
     // Behind the divider. With no query, every hidden row; with a query, only

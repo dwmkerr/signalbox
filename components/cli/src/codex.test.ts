@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mapCodexHook, codexReply, codexSessionName, resolveCodexTranscript } from "../src/codex";
+import { mapCodexHook, codexReply, codexSessionName, resolveCodexTranscript } from "./codex";
 
 function spooledCodexEvent(payload: Record<string, unknown>, home: string): Record<string, unknown> {
   const dir = mkdtempSync(join(tmpdir(), "sb-codex-hook-"));
   const proc = Bun.spawnSync(
-    [process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "hook", "codex"],
+    [process.execPath, join(import.meta.dir, "main.ts"), "hook", "codex"],
     {
       env: {
         ...process.env,
@@ -71,7 +71,7 @@ describe("mapCodexHook", () => {
     ],
     [{ hook_event_name: "Stop", last_assistant_message: "done" }, { eventType: "done", reason: "stop" }],
     [{ hook_event_name: "PermissionRequest" }, { eventType: "attention", reason: "permission_request" }],
-    [{ hook_event_name: "SessionEnd" }, { eventType: "ended", reason: "session_end" }],
+    [{ hook_event_name: "SessionEnd" }, { eventType: "done", reason: "session_end" }],
     [{ hook_event_name: "SessionEnd", reason: "clear" }, { eventType: "ended", reason: "session_end" }],
     // Anything else (a PreToolUse, an empty payload) is ignored - the caller
     // still exits 0.
@@ -141,9 +141,20 @@ describe("mapCodexHook clearEnds", () => {
     expect(got?.eventType).toBe("done");
     expect(got?.reason).toBe("clear");
   });
-  test("clearEnds=false still ends a non-clear SessionEnd", () => {
+  test("clearEnds=false maps a non-clear SessionEnd to done", () => {
     const got = mapCodexHook({ hook_event_name: "SessionEnd", reason: "exit" }, false);
-    expect(got?.eventType).toBe("ended");
+    expect(got?.eventType).toBe("done");
+    expect(got?.reason).toBe("session_end");
+  });
+  test("SessionEnd preserves the conversation while clearEnds=true ends a cleared session", () => {
+    // Quitting preserves the phone's chat history; Claude's /clear opens a fresh
+    // session id, so Codex mirrors its guard to avoid a duplicate old row.
+    expect(mapCodexHook({ hook_event_name: "SessionEnd" })).toEqual({
+      eventType: "done", reason: "session_end", detail: "",
+    });
+    expect(mapCodexHook({ hook_event_name: "SessionEnd", reason: "clear" }, true)).toEqual({
+      eventType: "ended", reason: "session_end", detail: "",
+    });
   });
 });
 

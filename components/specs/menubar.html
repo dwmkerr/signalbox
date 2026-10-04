@@ -73,7 +73,7 @@
 <div class="page">
 <div class="nav">signalbox specifications: <a href="hub-jumplist.html">jumplist</a> | <a href="settings.html">settings</a> | menu bar | <a href="ios.html">ios</a> | <a href="architecture.html">architecture</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/cli.md">cli</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/events.md">data model</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">agent integrations</a> | <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/agent-markdown.md">agent markdown</a></div>
 <h1>Specification: signalbox menu bar</h1>
-<div class="subtitle">The status item: an icon with a status dot, and a dropdown listing every session.</div>
+<div class="subtitle">The status item: an icon with a status dot, and a dropdown for recent and pinned sessions.</div>
 <div class="note-line"><b>Note:</b> the mockups below are the living specification for the signalbox menu bar item (hover a dropdown row to see selection).</div>
 
 <div class="barmock">
@@ -96,7 +96,7 @@
     <div class="mrow"><span class="mk" style="background:#FF453A"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t unread">api-migration</span><span class="mage">16m</span></div>
     <div class="mrow"><span class="mk" style="background:#0A84FF"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">test-harness</span><span class="mage">32m</span></div>
     <div class="mrow"><span class="mk ring"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">weekly-review</span><span class="mage">2h</span></div>
-    <div class="mrow"><span class="mk ring"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">archive-cleanup</span><span class="mage">1d</span></div>
+    <div class="mrow"><span class="mk ring"></span><span class="agent"><span style="font-family:ui-monospace;color:#0A84FF;font-size:14px;line-height:1">π</span></span><span class="t read">archive-cleanup</span><span class="mage">18h</span></div>
     <div class="mrow"><span class="t">Show More (N)</span><span class="mage">›</span></div>
     <div class="msep"></div>
     <div class="mrow"><span class="agent" style="color:#1d1d1f"><svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="6" y="2.3" width="8" height="15.4" rx="2"/><line x1="9" y1="15" x2="11" y2="15" stroke-width="1.3"/></svg></span><span class="t">Connect Phone…</span></div>
@@ -137,8 +137,13 @@
     <li>Bold means unread; a faint ring means read.</li>
     <li>Overflow sessions (see above) sit in the <code>Show More (N)</code> submenu; submenu rows
     behave identically to inline rows (click to jump).</li>
-    <li>Hidden rows drop out, and the <a href="settings.html">additional filters</a> apply here too, so
-    the dropdown matches the jumplist. With nothing to show, a disabled "No sessions" row appears.</li>
+    <li>Hidden and older rows drop out, and the <a href="settings.html">additional filters</a> apply here too.
+    The dropdown is a quick-switch affordance, not an archive; older rows live in the jumplist's
+    <code>Older (N)</code> section. A row becomes older only when time since engagement exceeds the
+    hub's <code>older_horizon_seconds</code>, with a 24-hour default for older hubs. Pinned rows
+    never become older. The status dot is unchanged - it counts every unacked, unhidden
+    row regardless of age, so it can light for work that only the jumplist shows (R9). With nothing
+    to show, a disabled "No sessions" row appears.</li>
     <li>An empty board that is empty because the app cannot read the hub says so instead: the same
     disabled row reads <code>Cannot reach the hub at &lt;url&gt;</code>, or
     <code>Hub rejected this app (401) - set SIGNALBOX_TOKEN for &lt;host&gt;</code> when a non-loopback

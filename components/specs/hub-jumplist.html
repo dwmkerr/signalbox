@@ -45,8 +45,8 @@
         font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#D8D8DC; }
   kbd.sc, b.sc { font-variant:small-caps; letter-spacing:.5px; }
   .body { display:flex; }
-  /* Cap the list so a long board scrolls in place - the Hidden divider then
-     sits at the foot of that scroll, below every visible row. */
+  /* Cap the list so a long board scrolls in place, keeping the Older and Hidden
+     dividers below every visible row. */
   .list { width:430px; border-right:1px solid #ffffff14; padding:10px 0 12px; max-height:360px; overflow-y:auto; }
   .list h3 { color:#6E6E73; font-size:10px; letter-spacing:1.5px; font-weight:600; padding:10px 24px 8px; }
   .empty-search { padding:14px 24px; color:#6E6E73; font-size:12px; }
@@ -86,8 +86,7 @@
      gray, so user-applied state never reads quieter than the age beside it. */
   .pin { display:inline-flex; vertical-align:middle; margin-right:5px; }
   .pin svg { fill:#98989D; }
-  /* Hidden section: a quiet divider at the foot of the list that expands to
-     reveal set-aside sessions, dimmed and eye-slashed so they read as parked. */
+  /* Quiet dividers keep collapsed sections from competing with the active list. */
   .hdiv { display:flex; align-items:center; gap:7px; margin:8px 10px 0; padding:9px 10px;
           border-top:1px solid #ffffff12; color:#6E6E73; font-size:11px; font-weight:600;
           letter-spacing:.3px; cursor:pointer; }
@@ -345,8 +344,23 @@
   <kbd class="sc">esc</kbd> returns without clearing it. Results have their own selection and commands,
   independent of the board rows underneath.</p>
   <p>Rows keep the order you work in (most recently engaged first, like the app switcher), with
-  pinned sessions first; status does not reorder them. The panel opens with the topmost unread row
+  pinned sessions first; status does not reorder them. Older and Hidden are the two trailing
+  sections, in that order, below every visible row. The panel opens with the topmost unread row
   selected, and selection stays topmost-unread within the filtered rows.</p>
+
+  <h2>Older sessions</h2>
+  <p>A collapsed <b>Older (N)</b> divider sits below every visible row and above the Hidden
+  divider. It appears only when the count is greater than zero: ageing is automatic, so an empty
+  Older section adds no information. <b>Hidden (0)</b> stays visible to make it clear whether you
+  have explicitly set a session aside.</p>
+  <p>A row is older when you have not engaged it for more than 24 hours. The hub serves this
+  horizon as <code>older_horizon_seconds</code> so the phone and the Mac agree. Ageing uses the
+  same engagement key as the list's order, so the sections cannot interleave. Pinned rows are never
+  older: a pin means keep this in front of me. A row that is both older and hidden sits under
+  Hidden, because explicit user intent takes precedence over age.</p>
+  <p>Click the divider to expand or collapse it. Older rows remain live, with the same marks and
+  actions as the visible rows. A live search reveals matching rows inside the collapsed section,
+  exactly as it does for Hidden.</p>
 
   <h2>Hidden sessions</h2>
   <p>Hiding a session with <kbd>⌃X</kbd> drops it from the list until it speaks again. To bring one
@@ -436,7 +450,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const SESSIONS = [
-  {key:"claude:7786", agent:"claude", title:"work-project", state:"working", ageSeconds:6, tags:["work"], pinned:true,
+  {key:"claude:7786", agent:"claude", title:"work-project", state:"working", ageSeconds:6, engagedSeconds:6, tags:["work"], pinned:true,
    prompt:"yes please send it. please also mark the old batches as read.", reply:null,
    exchanges:[
      {prompt:"check the newsletter queue before we send anything.", reply:"The queue has **14 drafts** and two scheduled sends.", ts:"2026-08-13T08:40:00Z", cropped:false},
@@ -446,7 +460,7 @@ const SESSIONS = [
    loc:"Jump to iTerm (tmux work-project:1) on localhost"},
   // A question ask (reason "question"): the AskUserQuestion content, question
   // plus option labels, rendered from reply like any other attention text.
-  {key:"claude:1f72", agent:"claude", title:"dwmkerr-toolkit", state:"ask", ageSeconds:16,
+  {key:"claude:1f72", agent:"claude", title:"dwmkerr-toolkit", state:"ask", ageSeconds:16, engagedSeconds:16,
    prompt:"good enough. commit work for now.",
    reply:"Which commit style for this batch? (Squash into one / Keep separate / Interactive rebase)",
    exchanges:[
@@ -457,58 +471,58 @@ const SESSIONS = [
    loc:"Jump to iTerm (tmux work-project:1) on localhost"},
   // A permission ask (reason "permission_request"): the pending tool call
   // itself - tool name and cropped input - never a bare "needs permission".
-  {key:"codex:8e41", agent:"codex", title:"codex-mcp-server", state:"ask", ageSeconds:41,
+  {key:"codex:8e41", agent:"codex", title:"codex-mcp-server", state:"ask", ageSeconds:41, engagedSeconds:41,
    prompt:"wire the streaming endpoint into the MCP layer.",
    reply:"Allow me to run: npm publish --access public?",
    loc:"Jump to iTerm (tmux mcp:2) on localhost"},
-  {key:"claude:5d09", agent:"claude", title:"signalbox-hub", state:"ask", ageSeconds:58,
+  {key:"claude:5d09", agent:"claude", title:"signalbox-hub", state:"ask", ageSeconds:58, engagedSeconds:58,
    prompt:"push the branch and open the PR.",
    reply:"Bash: git push -u origin feat/attention-asks",
    loc:"Jump to Ghostty (tmux signalbox:1) on localhost"},
-  {key:"claude:bbfc", agent:"claude", title:"writing-studio-dashboard", state:"unread", ageSeconds:8,
+  {key:"claude:bbfc", agent:"claude", title:"writing-studio-dashboard", state:"unread", ageSeconds:8, engagedSeconds:8,
    prompt:"add a per-post traffic panel with the substack numbers.",
    reply:"Done - the dashboard now shows per-post traffic with a 30-day sparkline. Build is green, preview at http://localhost:4321.",
    loc:"Jump to iTerm (tmux work:7) on localhost"},
-  {key:"github:run-9182", agent:"github", title:"claude-toolkit-deploy", state:"unread", ageSeconds:1260, infoOnly:true,
+  {key:"github:run-9182", agent:"github", title:"claude-toolkit-deploy", state:"unread", ageSeconds:1260, engagedSeconds:1260, infoOnly:true,
    prompt:"push to main (b41c2f9) triggered deploy",
    reply:"Workflow run #9182 succeeded in 4m 12s - plugin published. 2 artifacts.",
    loc:"Open on GitHub (Actions run #9182)"},
-  {key:"pi:3ace", agent:"pi", title:"terminal-agent-notifier", state:"read", ageSeconds:108,
+  {key:"pi:3ace", agent:"pi", title:"terminal-agent-notifier", state:"read", ageSeconds:108, engagedSeconds:108,
    prompt:"summarise the crash dumps from last night's run.",
    reply:"All set earlier - nothing new since you last looked.",
    loc:"Jump to iTerm (tmux dwmkerr:7) on localhost"},
-  {key:"opencode:9d1", agent:"opencode", title:"release-notes", state:"unread", ageSeconds:340, tags:["work"],
+  {key:"opencode:9d1", agent:"opencode", title:"release-notes", state:"unread", ageSeconds:340, engagedSeconds:340, tags:["work"],
    prompt:"draft the 0.2.0 release notes from the changelog.",
    reply:"Draft ready in RELEASE_NOTES.md - three sections, sixteen entries, and a short highlights paragraph.",
    loc:"Jump to iTerm (tmux dwmkerr:2) on localhost"},
-  {key:"opencode:4b2", agent:"opencode", title:"docs-site-astro", state:"working", ageSeconds:22,
+  {key:"opencode:4b2", agent:"opencode", title:"docs-site-astro", state:"working", ageSeconds:22, engagedSeconds:22,
    prompt:"regenerate the search index after the content refactor.", reply:null,
    loc:"Jump to iTerm (tmux docs:3) on localhost"},
-  {key:"claude:9c05", agent:"claude", title:"payments-webhook", state:"ask", ageSeconds:75,
+  {key:"claude:9c05", agent:"claude", title:"payments-webhook", state:"ask", ageSeconds:75, engagedSeconds:75,
    prompt:"switch the retry backoff to full jitter.",
    reply:"That moves the idempotency window from fixed to variable. Apply full jitter to the live worker config?",
    loc:"Jump to Ghostty (tmux payments:2) on localhost"},
-  {key:"pi:77de", agent:"pi", title:"log-triage", state:"unread", ageSeconds:512,
+  {key:"pi:77de", agent:"pi", title:"log-triage", state:"unread", ageSeconds:512, engagedSeconds:90000,
    prompt:"cluster yesterday's error logs by root cause.",
    reply:"Grouped 1,204 errors into 7 clusters - the top two are the same timeout, 63% of volume.",
    loc:"Jump to iTerm (tmux dwmkerr:4) on localhost"},
   // An originless machine session still offers Jump; Enter explains the
   // current plain-terminal limitation and enables F feedback.
-  {key:"script:backup", agent:"script", title:"nightly-backup", state:"read", ageSeconds:7400, jumpable:false,
+  {key:"script:backup", agent:"script", title:"nightly-backup", state:"read", ageSeconds:7400, engagedSeconds:200000, jumpable:false,
    prompt:"cron: nightly snapshot of the postgres volume",
    reply:"Snapshot complete - 4.2 GB in 38s, retention pruned to 14 dailies.",
    loc:"Jump to session"},
   // Hidden sessions: set aside with the same flag the show/hide events model.
   // They stay out of the main list and surface only under the Hidden divider.
-  {key:"claude:2a11", agent:"claude", title:"flaky-e2e-hunt", state:"read", ageSeconds:9300, hidden:true,
+  {key:"claude:2a11", agent:"claude", title:"flaky-e2e-hunt", state:"read", ageSeconds:9300, engagedSeconds:9300, hidden:true,
    prompt:"find why the checkout e2e flakes on CI.",
    reply:"Narrowed it to a race in cart hydration - patched and green 20 runs straight.",
    loc:"Jump to iTerm (tmux qa:1) on localhost"},
-  {key:"opencode:5f7", agent:"opencode", title:"columnar-store-spike", state:"read", ageSeconds:172000, hidden:true, tags:["work"],
+  {key:"opencode:5f7", agent:"opencode", title:"columnar-store-spike", state:"read", ageSeconds:172000, engagedSeconds:172000, hidden:true, tags:["work"],
    prompt:"prototype the columnar store migration.",
    reply:"Spike done - tradeoffs written up in MIGRATION_NOTES.md, parking it for now.",
    loc:"Jump to iTerm (tmux data:5) on localhost"},
-  {key:"github:run-8890", agent:"github", title:"legacy-site-deploy", state:"unread", ageSeconds:64000, hidden:true, infoOnly:true,
+  {key:"github:run-8890", agent:"github", title:"legacy-site-deploy", state:"unread", ageSeconds:64000, engagedSeconds:64000, hidden:true, infoOnly:true,
    prompt:"manual deploy of the legacy marketing site",
    reply:"Workflow run #8890 succeeded in 2m 3s - nothing else pending on that repo.",
    loc:"Open on GitHub (Actions run #8890)"},
@@ -545,8 +559,7 @@ let query = "";
 let mode = "board";
 let resultSel = 0;
 let resumeOpen = -1;
-// One match predicate shared by the visible list and the Hidden section, so a
-// live search reaches into hidden rows exactly as it does the visible ones.
+// A shared query keeps collapsed sections searchable without expanding them first.
 function matchesQuery(i){
   if (!query) return true;
   const s2 = SESSIONS[i], q = query.toLowerCase();
@@ -558,13 +571,18 @@ function matchesQuery(i){
   }
   return (s2.label||s2.title).toLowerCase().includes(q) || (s2.prompt||"").toLowerCase().includes(q) || (s2.reply||"").toLowerCase().includes(q) || s2.agent.includes(q);
 }
-// Hidden sessions are set aside: never in the main list, only under the divider.
-const visible = () => SESSIONS.map((s,i)=>i).filter(i => !SESSIONS[i].hidden && matchesQuery(i));
+// Partition on the engagement key the list sorts by so the sections cannot interleave.
+const OLDER_HORIZON = 86400;
+const isOlder = s => !s.pinned && (s.engagedSeconds ?? s.ageSeconds) > OLDER_HORIZON;
+const visible = () => SESSIONS.map((s,i)=>i).filter(i => !SESSIONS[i].hidden && !isOlder(SESSIONS[i]) && matchesQuery(i));
+const olderList = () => SESSIONS.map((s,i)=>i).filter(i => !SESSIONS[i].hidden && isOlder(SESSIONS[i]) && matchesQuery(i));
 const hiddenList = () => SESSIONS.map((s,i)=>i).filter(i => SESSIONS[i].hidden && matchesQuery(i));
-function defaultSel(){ const v = visible(); return v.find(i=>needsCheck(SESSIONS[i])) ?? v[0] ?? -1; }
+const selectable = () => visible().concat(olderOpen || query !== "" ? olderList() : []);
+function defaultSel(){ const v = selectable(); return v.find(i=>needsCheck(SESSIONS[i])) ?? v[0] ?? -1; }
 let sel = -1;
 let editing = false;
-// Hidden section starts collapsed, so the quiet divider is what is seen first.
+// Collapsed sections keep older and set-aside work from crowding the active list.
+let olderOpen = false;
 let hiddenOpen = false;
 
 const AG = {
@@ -736,17 +754,17 @@ function subtext(s){
 
 function renderList(){
   const v = visible();
-  if (!v.includes(sel)) sel = defaultSel();
+  if (!selectable().includes(sel)) { sel = defaultSel(); renderPreview(); }
   const rows = v.map(i=>{const s=SESSIONS[i];return `
     <div class="row ${i===sel?"sel":""} ${needsCheck(s)?"unread":""}" onclick="select(${i})" oncontextmenu="event.preventDefault();showCtxMenu(${i},event.clientX,event.clientY)">
       <div class="glyph">${AG[s.agent]||AG.generic}</div>
       <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${previewMd(subtext(s))}</div></div>
       <div class="right">${s.pinned?`<span class="pin">${PIN}</span>`:""}<span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span>${attentionHTML(s.state)}</div>
     </div>`}).join("");
-  const hidden = hiddenHTML();
-  // "No matches" only when nothing matches at all, hidden rows included.
-  const body = rows || (hidden ? "" : emptySearchHTML());
-  document.getElementById("rows").innerHTML = body + hidden;
+  const older = olderHTML(), hidden = hiddenHTML();
+  // Collapsed matches still count, so their sections must suppress the empty state.
+  const body = rows || (older || hidden ? "" : emptySearchHTML());
+  document.getElementById("rows").innerHTML = body + older + hidden;
 }
 function contentsHitTotal(){ return query.toLowerCase() === "authentication" ? 480 : 37; }
 function emptySearchHTML(){
@@ -760,6 +778,20 @@ function emptySearchHTML(){
         <div class="hint-action"><kbd>⌘↩</kbd> Show results</div></div>
     </div></div>`;
 }
+function olderHTML(){
+  const o = olderList();
+  if (!o.length) return "";
+  const open = olderOpen || query !== "";
+  let out = `<div class="hdiv ${open?"open":""}" onclick="toggleOlder()"><span class="chev">▸</span><span>Older (${o.length})</span></div>`;
+  if (open) out += o.map(i=>{const s=SESSIONS[i];return `
+    <div class="row ${i===sel?"sel":""} ${needsCheck(s)?"unread":""}" onclick="select(${i})" oncontextmenu="event.preventDefault();showCtxMenu(${i},event.clientX,event.clientY)">
+      <div class="glyph">${AG[s.agent]||AG.generic}</div>
+      <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${previewMd(subtext(s))}</div></div>
+      <div class="right">${s.pinned?`<span class="pin">${PIN}</span>`:""}<span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span>${attentionHTML(s.state)}</div>
+    </div>`}).join("");
+  return out;
+}
+function toggleOlder(){ olderOpen = !olderOpen; renderList(); }
 // The Hidden divider sits at the foot of the list and is always shown once the
 // board has any session - even at "Hidden (0)" - so it is always clear whether a
 // session is set aside (a missing row is otherwise a mystery). A search
@@ -767,7 +799,7 @@ function emptySearchHTML(){
 // chevron, nothing to expand.
 function hiddenHTML(){
   const h = hiddenList();
-  if (!visible().length && !h.length) return "";  // empty board -> "No matches"
+  if (!visible().length && !olderList().length && !h.length) return "";
   const empty = h.length === 0;
   const open = !empty && (hiddenOpen || query !== "");
   const chev = empty ? "" : '<span class="chev">▸</span>';
@@ -788,7 +820,7 @@ let lastPreviewKey = null, lastPreviewHeight = 0;
 let unsupportedJumpKey = null;
 setInterval(()=>{ gi=(gi+1)%GLYPHS.length; const el=document.querySelector(".spinch"); if(el) el.textContent=GLYPHS[gi];
   SESSIONS.forEach(s=>s.ageSeconds++);
-  // Ages are keyed by session index so visible and expanded hidden rows both stay live.
+  // Session indices keep ages attached to their rows across section dividers.
   document.querySelectorAll(".age[data-i]").forEach(el=>{ el.textContent=ageStr(SESSIONS[+el.dataset.i].ageSeconds); }); }, 1000);
 
 function renderPreview(){
@@ -1021,7 +1053,7 @@ function moveSel(delta){
     resultSel = Math.min(Math.max(resultSel + delta, 0), SEARCH_RESULTS.length - 1);
     resumeOpen = -1; renderContents(); return;
   }
-  const v = visible(); if (!v.length) return;
+  const v = selectable(); if (!v.length) return;
   const pos = Math.max(0, v.indexOf(sel));
   select(v[Math.min(Math.max(pos+delta,0), v.length-1)]);
 }
@@ -1057,9 +1089,9 @@ document.addEventListener("keydown", e => {
   else if (ctrl && (e.key==="k"||e.key==="K")) { e.preventDefault(); moveSel(-1); }
   else if (e.key==="ArrowDown") { e.preventDefault(); moveSel(1); }
   else if (e.key==="ArrowUp") { e.preventDefault(); moveSel(-1); }
-  else if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); const v=visible(); const i=parseInt(e.key)-1; if (i<v.length) select(v[i]); }
+  else if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); const v=selectable(); const i=parseInt(e.key)-1; if (i<v.length) select(v[i]); }
   else if (e.key==="Tab") { e.preventDefault();
-    const un = visible().filter(i=>needsCheck(SESSIONS[i]));
+    const un = selectable().filter(i=>needsCheck(SESSIONS[i]));
     if (un.length) select(un[(un.indexOf(sel)+1) % un.length] ?? un[0]); }
   else if (e.key==="Enter") { jumpSelected(); }
   else if (ctrl && (e.key==="p"||e.key==="P")) { e.preventDefault(); if (sel>=0) togglePin(sel); }

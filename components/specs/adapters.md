@@ -10,6 +10,12 @@ for replies) and sets `cropped`. The out-of-process OpenCode and pi plugins cut
 only at those same caps before building argv, then pass `--cropped` so the event
 builder preserves the marker.
 
+Claude and Codex adapter tests live beside their source in
+`components/cli/src/claude.test.ts` and `components/cli/src/codex.test.ts`.
+The Claude transcript fixture is `components/cli/src/testdata/transcript.jsonl`;
+pending transcript fixtures remain in `components/cli/test/testdata/` for
+`components/cli/test/claude-pending.test.ts`.
+
 ## What each agent surfaces
 
 An adapter can only surface what its agent's hooks emit, so the board shows different depth per agent. This is the user-facing summary; the per-agent sections below have the exact hook mapping. `-` means the agent has no hook for it, not a signalbox gap.
@@ -38,6 +44,13 @@ The optional event `transcript` field links a live board row to the local conver
 | OpenCode | Not supplied. Its conversation store is SQLite and is out of scope for transcript-path events. |
 | pi | Not supplied. |
 | GitHub Actions | Not supplied. |
+
+Claude Code and Codex keep normally ended sessions on the board as done so
+quitting the agent preserves the conversation the phone's chat view reads.
+Expiry and an explicit remove take those rows off the board. `/clear` ends the
+old row by default because Claude opens a fresh session id in its place;
+keeping both would duplicate the session. Turning off the adapter's clear-ends
+setting preserves the old exchange as done instead.
 
 Installing: `signalbox init` converges everything ([cli.md](cli.md); `install` and `setup` are aliases); `signalbox init --agent <name>` (repeatable, `--agent all` for every agent) scopes the run to one or more agents and applies without the picker; `--remove` turns the same components off. `--app` and `--tmux` scope to the other components.
 
@@ -81,7 +94,8 @@ signalbox init --agent claude
 | `PermissionRequest` (any tool) | attention (reason `permission_request`) + `reply` = the actual ask, formatted from `tool_name` and `tool_input` (e.g. `Bash: git push origin main`). Fires when the permission dialog appears, so this is the authoritative blocked-on-you signal with content. Older Claude Code ignores the unknown hook key and degrades to the bare Notification - no fallback machinery needed. |
 | `PreToolUse`, matcher `AskUserQuestion` | attention (reason `question`) + `reply` = the question and its option labels (e.g. `Which auth approach? (JWT / sessions / magic links)`). AskUserQuestion is always interactive, so PreToolUse firing IS the dialog appearing - the question never reaches the transcript or the Notification payload while it waits, so this hook is the only passive source of the question text. The matcher keeps the hook off every other tool call: PreToolUse fires for all tools including auto-approved ones, and an unmatched registration would tax every tool call with a hook spawn to no benefit. |
 | `StopFailure` | error (reason = `error_type`) |
-| `SessionEnd` | ended - except reason `clear` when the `claudeClearEnds` setting is off, which maps to done (reason `clear`) so the old exchange stays on the board ([settings.html](https://dwmkerr.github.io/signalbox/specs/settings.html)) |
+| `SessionEnd` | done (reason `session_end`) - the row and its exchange history stay on the board because quitting the agent is not the same as being finished with the conversation. |
+| `SessionEnd`, reason `clear` | ended (reason `session_end`) by default. When `claudeClearEnds` is off, done (reason `clear`) keeps the old exchange on the board ([settings.html](https://dwmkerr.github.io/signalbox/specs/settings.html)). |
 | anything else | ignore, exit 0 |
 
 - `session_key = claude:<session_id>`.
@@ -123,7 +137,7 @@ signalbox init --agent cursor
 |---|---|
 | `sessionStart` | busy (reason `session_start`) |
 | `stop`, `status: completed` (or missing/unknown) | done (reason `stop`) |
-| `stop`, `status: aborted` | ended (reason `aborted`) |
+| `stop`, `status: aborted` | done (reason `aborted`) - aborting stops the turn; the session remains resumable. |
 | `stop`, `status: error` | error (reason `error`) |
 | `beforeShellExecution` | attention (reason `shell_permission`) - the ask/permission path, Cursor's only blocked-on-you signal |
 | `beforeMCPExecution` | attention (reason `mcp_permission`) |
@@ -161,10 +175,11 @@ OpenAI's Codex CLI, via [Codex hooks](https://github.com/openai/codex) (needs `[
 | `UserPromptSubmit` | busy - you sent a prompt and Codex is working; `detail` is that prompt (harness/bracket-tag filtered like Claude's). |
 | `Stop` | done (reason `stop`). `reply` is the turn's `last_assistant_message`, carried inline on the payload so no transcript read is needed. |
 | `PermissionRequest` | attention - Codex is blocked waiting for you to approve a command or tool call. |
-| `SessionEnd` | ended - removes the row. |
+| `SessionEnd` | done (reason `session_end`) - the row and its exchange history stay on the board because quitting the agent is not the same as being finished with the conversation. |
+| `SessionEnd`, reason `clear` | ended (reason `session_end`) by default; done (reason `clear`) when `codexClearEnds` is off. |
 
 - `session_key = codex:<session_id>`; title = the session's name when Codex has one, else the `cwd` folder name. A Codex `/rename` writes the thread name to `~/.codex/session_index.jsonl` (one JSON line per named session; last entry for the id wins) and the hook adopts it - toggleable via `codexRenameTitle` (Settings; default on), like Claude's. The user's own jumplist rename still overrides either.
-- `codexClearEnds` mirrors `claudeClearEnds`: false keeps a `SessionEnd` with reason `clear` on the board as done. Inert unless Codex sends that reason.
+- `codexClearEnds` mirrors `claudeClearEnds`: true by default to end a `SessionEnd` with reason `clear`; false keeps it on the board as done (reason `clear`). It affects only that reason, so other session ends remain done (reason `session_end`).
 - Host prefix (display only): a Codex session in an editor's integrated terminal shows under the editor's mark badged with Codex's glyph (`vscode/codex`), the same `TERM_PROGRAM` check as Claude; the key stays `codex:<id>`.
 - `proc` and `SIGNALBOX_RAW` behave as for Claude (shell-wrapper walk to the agent process; raw-payload diagnostic).
 - Codex also has a legacy `notify` program (fires `agent-turn-complete` as the final argv). The hooks path is preferred: it carries busy and attention too, not just turn-complete.

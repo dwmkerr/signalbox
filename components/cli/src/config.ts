@@ -72,6 +72,41 @@ const defaults: Settings = {
   },
 };
 
+/**
+ * Keep sessions available between infrequent agent events. An unset or invalid
+ * SIGNALBOX_EXPIRE falls back to 30 days so configuration mistakes cannot end
+ * sessions immediately.
+ */
+export function expireAgeMs(): number {
+  const def = 30 * 24 * 60 * 60 * 1000;
+  const v = process.env.SIGNALBOX_EXPIRE;
+  if (!v) return def;
+  const m = v.match(/^(?:(\d+(?:\.\d+)?)d)?(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$/);
+  if (!m || (!m[1] && !m[2] && !m[3] && !m[4])) {
+    console.error(`signalbox: invalid SIGNALBOX_EXPIRE ${JSON.stringify(v)}, using 30d`);
+    return def;
+  }
+  const ms =
+    (parseFloat(m[1] ?? "0") * 86400 + parseFloat(m[2] ?? "0") * 3600 +
+      parseFloat(m[3] ?? "0") * 60 + parseFloat(m[4] ?? "0")) * 1000;
+  if (ms <= 0) {
+    console.error(`signalbox: invalid SIGNALBOX_EXPIRE ${JSON.stringify(v)}, using 30d`);
+    return def;
+  }
+  return ms;
+}
+
+/**
+ * Keep the hub's startup line readable at the 30-day default without rounding
+ * away shorter configured durations.
+ */
+export function expireLabel(ms: number): string {
+  if (ms % 86400000 === 0) return `${ms / 86400000}d`;
+  if (ms % 3600000 === 0) return `${ms / 3600000}h`;
+  if (ms % 60000 === 0) return `${ms / 60000}m`;
+  return `${ms / 1000}s`;
+}
+
 // Resolution order mirrors kubectl/gh style: explicit file (--config sets
 // SIGNALBOX_CONFIG) > XDG base dir > ~/.config. SIGNALBOX_CONFIG names the
 // settings FILE, not a directory, so a test or a second profile can point at

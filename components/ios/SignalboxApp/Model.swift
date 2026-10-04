@@ -102,8 +102,23 @@ struct CursorTarget: Decodable {
     let bundle: String?
 }
 
+/// The hub snapshot keeps display order and the older horizon consistent across boards.
 struct StateDoc: Decodable {
+    /// Sessions in the hub's authoritative display order.
     let sessions: [SessionEvent]
+    /// An older hub omits this field; the app falls back to 24 hours.
+    let olderHorizonSeconds: Double?
+
+    private enum CodingKeys: String, CodingKey {
+        case sessions
+        case olderHorizonSeconds = "older_horizon_seconds"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessions = try container.decode([SessionEvent].self, forKey: .sessions)
+        olderHorizonSeconds = try? container.decodeIfPresent(Double.self, forKey: .olderHorizonSeconds)
+    }
 }
 
 // One turn from GET /exchanges?session=K (specs/events.md).
@@ -167,6 +182,10 @@ struct Session: Identifiable, Hashable {
     let reply: String?
     let tags: [String]
     let date: Date
+    /// The hub's engagement-MRU key, adopted rather than re-derived, is also the
+    /// board's Older partition key. Partitioning on date while the hub sorts on
+    /// engagement would interleave the sections.
+    let engagedDate: Date
     let acked: Bool
     let hidden: Bool
     // Pinned to the top of the board by the user. The hub owns the partition, so

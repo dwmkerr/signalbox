@@ -9,7 +9,7 @@ JSON on stdin and maps it per [specs/adapters.md](../../../specs/adapters.md):
 | `UserPromptSubmit` | busy + `prompt` = cropped prompt text |
 | `Stop` | done (reason `stop`), `reply` = `last_assistant_message` |
 | `PermissionRequest` | attention (blocked on approval) |
-| `SessionEnd` | ended |
+| `SessionEnd` | done |
 
 `session_key = codex:<session_id>`; the title is the `cwd` folder name.
 

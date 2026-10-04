@@ -305,7 +305,7 @@ build. A forwarder instead reports `{"ok": true, "version": "0.1.5", "build":
 "https://my-hub.fly.dev", "connected": true, "lastSeq": 118, "spooled": 0}}`.
 
 ```text
-signalbox hub 0.1.0 listening on http://127.0.0.1:8377 (state: /Users/you/.local/state/signalbox, expire: 24h)
+signalbox hub 0.1.0 listening on http://127.0.0.1:8377 (state: /Users/you/.local/state/signalbox, expire: 30d)
 ```
 
 The hub writes its lifecycle lines to stderr, each prefixed
@@ -326,10 +326,31 @@ signalbox hub 0.1.0 (forwarder) listening on http://127.0.0.1:8377 -> upstream h
 `signalbox hub --remote` is one switch with four inseparable effects: the default bind is `0.0.0.0`; `SIGNALBOX_TOKEN` is mandatory and is read from the environment only, never from the persisted `hub.token`; no self-signed TLS listener is created because the platform terminates TLS; and there is no loopback auth exemption at all because, behind a proxy, the peer address is the proxy's and proves nothing about the client. The hub refuses to start when the environment token is missing or empty and never generates one: an ephemeral container filesystem would lose it on redeploy and strand every paired phone. `SIGNALBOX_REMOTE=1` or `SIGNALBOX_REMOTE=true` is equivalent to `--remote`. `GET /healthz` and `POST /pair` remain the only unauthenticated routes.
 
 ```text
-signalbox hub 0.1.0 (remote mode) listening on http://0.0.0.0:8377 - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: /Users/you/.local/state/signalbox, expire: 24h)
+signalbox hub 0.1.0 (remote mode) listening on http://0.0.0.0:8377 - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: /Users/you/.local/state/signalbox, expire: 30d)
 ```
 
-The hub keeps the state of every session, streams changes to the surfaces, and runs two sweeps: expiry (no agent event for `SIGNALBOX_EXPIRE`, default 24h, ends the session) and liveness (an agent process that died without an exit event is ended within about 30 seconds). Endpoints and rules are in the [data model](events.md).
+The hub keeps the state of every session, streams changes to the surfaces, and
+runs two sweeps. Expiry ends sessions with no agent event for `SIGNALBOX_EXPIRE`
+(default 30d). Liveness checks only `busy` rows with a captured process on the
+hub's own host: a dead process marks the row `done` reason `exited` within about
+30 seconds, preserving the row and its exchange history. Every other row is
+untouched. A crashed or cleanly quit process is a process status, not a verdict
+on the conversation; the session may still be resumable. Expiry and an explicit
+`signalbox session remove` are the only removals. Endpoints and rules are in the
+[data model](events.md).
+
+The busy-only rule makes liveness self-terminating. `proc` carries forward
+across events, so a `done` row still has a dead proc. Matching on proc alone
+would re-fire every 30 seconds forever, flooding `events.jsonl` and bumping the
+row's `ts` so it could never expire. Once the row is `done` it no longer matches.
+
+`SIGNALBOX_EXPIRE` accepts Go-style durations with day support: `30d`, `12h`,
+`1h30m`, `90m`, `45s`, or combinations such as `1d12h`. Components can be decimal
+and must appear in day, hour, minute, second order. Unset or empty uses `30d`;
+invalid or non-positive durations log `signalbox: invalid SIGNALBOX_EXPIRE <JSON value>, using 30d`
+and use that default. The startup line uses whole days when possible, then whole
+hours, then whole minutes, otherwise seconds, so `30d` and `90m` stay readable
+without rounding.
 
 ## pair
 
@@ -434,7 +455,7 @@ answer everywhere.
 | `SIGNALBOX_DATA_DIR` | `~/.local/state/signalbox` | spool, logs, events.jsonl, and the local search index |
 | `SIGNALBOX_CONFIG` | `$XDG_CONFIG_HOME/signalbox/settings.json`, else `~/.config/signalbox/settings.json` | path to the settings FILE (not a directory); the global `--config <path>` flag wins over it |
 | `SIGNALBOX_PROFILE` | `full` | `redacted` drops cwd, title, prompt and reply, and hashes the session id |
-| `SIGNALBOX_EXPIRE` | `24h` | hub: end sessions with no agent event for this long |
+| `SIGNALBOX_EXPIRE` | `30d` | hub: end sessions with no agent event for this long; accepts Go-style `d`/`h`/`m`/`s` suffixes (e.g. `30d`, `12h`, `1h30m`) |
 | `SIGNALBOX_BIND` | `127.0.0.1` | hub: bind address (`signalbox hub --bind` wins over it) |
 | `SIGNALBOX_UPSTREAM` | unset | hub: forward to this remote hub instead of owning state (`signalbox hub --upstream` wins) |
 | `SIGNALBOX_REMOTE` | unset | hub: `1` or `true` runs the hub in remote mode (same as `--remote`) |

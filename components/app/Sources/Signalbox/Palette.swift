@@ -3,8 +3,8 @@ import AgentMarkdown
 
 // One display row, precomputed by the AppDelegate from its session model so
 // the palette never duplicates ordering, status, or naming logic. Rows arrive
-// already filtered (hidden rows dropped; acked rows present with a neutral
-// icon and needsCheck false) and in /state order (engagement MRU).
+// already filtered (hidden and older rows flagged; acked rows present with a
+// neutral icon and needsCheck false) and in /state order (engagement MRU).
 struct PaletteRow {
     let sessionKey: String
     let mark: StatusMark
@@ -46,10 +46,16 @@ struct PaletteRow {
     // selectable, not reachable by keys). It resurfaces when the agent speaks
     // again, or on a click that fires `show`.
     var isHidden = false
-    // The "Hidden (N)" divider row itself. Not a session; carries the count and
-    // toggles the section open on click.
+    /// A live session not engaged inside the hub's horizon, drawn under Older.
+    /// Derived from `engaged_ts` at render time, never a stored flag.
+    var isOlder = false
+    // Dividers are not sessions, so session actions must skip both sections.
     var isDivider = false
+    /// Distinguishes Older from Hidden so each divider toggles its own section.
+    var isOlderDivider = false
     var hiddenCount = 0
+    /// The matching older count, so the divider reflects the current search.
+    var olderCount = 0
 }
 
 // Mark tints per the amber scheme: amber = needs your input (act), blue =
@@ -749,11 +755,13 @@ final class PaletteController: NSObject {
     // filter - every selection/cycle operation works on the filtered view.
     private var allRows: [PaletteRow] = []
     private var rows: [PaletteRow] = []
-    // Leading count of selectable rows in `rows` - the visible sessions sit at
-    // the front, then the Hidden divider and any hidden rows, which are inert.
     private var visibleCount = 0
+    // Revealed older rows remain selectable across the intervening divider.
+    private var selectableIndices: [Int] = []
     // Whether the Hidden section is expanded. A search reveals it regardless.
     private var hiddenExpanded = false
+    // Whether the Older section is expanded. A search reveals it regardless.
+    private var olderExpanded = false
     private var query = ""
     // Contents search is an explicit second mode entered with Command-Return,
     // so filtering the live board never turns into an archive query by accident.
@@ -873,6 +881,7 @@ final class PaletteController: NSObject {
         hitCountWork?.cancel()
         searchField.stringValue = ""
         query = ""
+        olderExpanded = false
         contentMode = false
         contentResults = []
         contentHitCount = nil
@@ -963,7 +972,7 @@ final class PaletteController: NSObject {
             }
             return
         }
-        if rows.isEmpty {
+        if selectableIndices.isEmpty {
             tableView.deselectAll(nil)
             renderPreview()
             return
@@ -981,10 +990,11 @@ final class PaletteController: NSObject {
             // round-robin next thing to deal with, else hold position.
             if let next = nextToCheckIndex() {
                 select(next)
-            } else if visibleCount > 0 {
-                select(min(max(previousIndex, 0), visibleCount - 1))
+            } else if let index = selectableIndices.first(where: { $0 >= previousIndex })
+                ?? selectableIndices.last {
+                select(index)
             }
-        } else if visibleCount > 0 {
+        } else if !selectableIndices.isEmpty {
             select(defaultSelectionIndex())
         }
         // selectRowIndexes only notifies on change; re-render explicitly so an
@@ -995,7 +1005,7 @@ final class PaletteController: NSObject {
     // Preselect the topmost unread row (oldest-engaged was jarring at the
     // bottom of the list); with nothing needing you, the top row.
     private func defaultSelectionIndex() -> Int {
-        nextToCheckIndex() ?? 0
+        nextToCheckIndex() ?? selectableIndices.first ?? -1
     }
 
     // MARK: - Search
@@ -1019,16 +1029,32 @@ final class PaletteController: NSObject {
             || row.agent.localizedCaseInsensitiveContains(q)
     }
 
-    // The display rows: matching visible sessions first (the selectable span,
-    // recorded in visibleCount), then a "Hidden (N)" divider and, when the
-    // section is open or a search is running, the matching hidden rows. A search
-    // reveals hidden matches so the board never hides what it knows about.
+    // Visible, Older, then Hidden keeps explicit dismissal separate from age.
+    // A search reveals matching rows inside either collapsed section so the
+    // board never hides what it knows about. Older has no zero-state divider:
+    // automatic ageing adds no information when there is nothing older.
     private func composeRows() -> [PaletteRow] {
         let matching = allRows.filter { matchesQuery($0) }
-        let visible = matching.filter { !$0.isHidden }
+        let visible = matching.filter { !$0.isHidden && !$0.isOlder }
+        let older = matching.filter { $0.isOlder && !$0.isHidden }
         let hidden = matching.filter { $0.isHidden }
         visibleCount = visible.count
+        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
         var display = visible
+        if !older.isEmpty {
+            var divider = PaletteRow(
+                sessionKey: "", mark: .working, statusWord: "", isAsking: false,
+                isUnread: false, isRead: false, agent: "", name: "", ageStart: Date(),
+                detail: nil, reply: nil, cropped: false, location: "", jumpable: false, infoOnly: true,
+                needsCheck: false,
+                engagedDate: Date(), tags: [], pinned: false
+            )
+            divider.isDivider = true
+            divider.isOlderDivider = true
+            divider.olderCount = older.count
+            display.append(divider)
+            if olderExpanded || searching { display.append(contentsOf: older) }
+        }
         // Always show the Hidden divider once the board has any session, even at
         // "Hidden (0)", so it is always clear whether a session is set aside (a
         // missing row is otherwise a mystery). A truly empty board shows the empty
@@ -1044,9 +1070,9 @@ final class PaletteController: NSObject {
             divider.isDivider = true
             divider.hiddenCount = hidden.count
             display.append(divider)
-            let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
             if !hidden.isEmpty && (hiddenExpanded || searching) { display.append(contentsOf: hidden) }
         }
+        selectableIndices = display.indices.filter { !display[$0].isDivider && !display[$0].isHidden }
         return display
     }
 
@@ -1061,7 +1087,7 @@ final class PaletteController: NSObject {
         rows = composeRows()
         tableView.reloadData()
         updateEmptyState()
-        if visibleCount > 0 {
+        if !selectableIndices.isEmpty {
             select(defaultSelectionIndex())
         } else {
             tableView.deselectAll(nil)
@@ -1275,7 +1301,11 @@ final class PaletteController: NSObject {
         rows = composeRows()
         tableView.reloadData()
         updateEmptyState()
-        if visibleCount > 0 { select(defaultSelectionIndex()) }
+        if !selectableIndices.isEmpty {
+            select(defaultSelectionIndex())
+        } else {
+            tableView.deselectAll(nil)
+        }
         renderPreview()
     }
 
@@ -1315,7 +1345,7 @@ final class PaletteController: NSObject {
     }
 
     private func select(_ index: Int) {
-        let valid = contentMode ? contentResults.indices.contains(index) : (index >= 0 && index < visibleCount)
+        let valid = contentMode ? contentResults.indices.contains(index) : selectableIndices.contains(index)
         guard valid else { return }
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         tableView.scrollRowToVisible(index)
@@ -1439,10 +1469,10 @@ final class PaletteController: NSObject {
         case "p" where !contentMode: togglePinSelected()
         default:
             if contentMode { return nil }
-            guard let digit = Int(chars), (1...9).contains(digit), digit <= visibleCount else {
+            guard let digit = Int(chars), (1...9).contains(digit), digit <= selectableIndices.count else {
                 return event
             }
-            jumpRow(digit - 1)
+            jumpRow(selectableIndices[digit - 1])
         }
         return nil
     }
@@ -1459,11 +1489,10 @@ final class PaletteController: NSObject {
     }
 
     private func moveSelection(_ delta: Int) {
-        let count = contentMode ? contentResults.count : visibleCount
-        guard count > 0 else { return }
-        let current = tableView.selectedRow
-        let base = (current >= 0 && current < count) ? current : 0
-        select(min(max(base + delta, 0), count - 1))
+        let indices = contentMode ? Array(contentResults.indices) : selectableIndices
+        guard !indices.isEmpty else { return }
+        let position = indices.firstIndex(of: tableView.selectedRow) ?? 0
+        select(indices[min(max(position + delta, 0), indices.count - 1)])
     }
 
     // Tab cycles unread rows in list order, top to bottom - same reading
@@ -1483,7 +1512,7 @@ final class PaletteController: NSObject {
     }
 
     private func jumpRow(_ index: Int) {
-        guard rows.indices.contains(index), !rows[index].isDivider, !rows[index].isHidden else { return }
+        guard selectableIndices.contains(index) else { return }
         let row = rows[index]
         guard !row.infoOnly else { return }
         guard row.jumpable else {
@@ -1524,7 +1553,7 @@ final class PaletteController: NSObject {
     private func contextMenu(forRow row: Int) -> NSMenu? {
         guard !contentMode else { return nil }
         guard rows.indices.contains(row) else { return nil }
-        // The Hidden divider has no menu; a hidden row offers only Unhide.
+        // Dividers have no session actions; a hidden row offers only Unhide.
         if rows[row].isDivider { return nil }
         if rows[row].isHidden {
             let menu = NSMenu()
@@ -1569,7 +1598,7 @@ final class PaletteController: NSObject {
             return
         }
         let index = tableView.selectedRow
-        let candidates = rows.indices.filter { rows[$0].sessionKey != key }
+        let candidates = selectableIndices.filter { rows[$0].sessionKey != key }
         if let next = candidates.first(where: { $0 > index }) ?? candidates.last {
             select(next)
         }
@@ -1624,15 +1653,18 @@ final class PaletteController: NSObject {
         jumpRow(tableView.clickedRow)
     }
 
-    // Single click: the Hidden divider toggles the section open/closed; a hidden
-    // row unhides (fires `show`). Clicks on visible rows fall through to normal
-    // selection.
+    // Dividers toggle their sections; a hidden row unhides (fires `show`). An
+    // older row selects like any live row: it is not hidden, so must not fire `show`.
     @objc private func rowClicked(_ sender: Any?) {
         guard !contentMode else { return }
         let index = tableView.clickedRow
         guard rows.indices.contains(index) else { return }
         let row = rows[index]
-        if row.isDivider {
+        if row.isOlderDivider {
+            guard row.olderCount > 0 else { return }
+            olderExpanded.toggle()
+            reload(preservingSelection: true)
+        } else if row.isDivider {
             // "Hidden (0)" has nothing to expand.
             guard row.hiddenCount > 0 else { return }
             hiddenExpanded.toggle()
@@ -2739,10 +2771,12 @@ private func shortDate(_ iso: String) -> String? {
     return out.string(from: date)
 }
 
-private final class HiddenDividerView: NSView {
-    init(count: Int, expanded: Bool) {
+// MARK: - Section divider
+
+private final class SectionDividerView: NSView {
+    init(title: String, count: Int, expanded: Bool) {
         super.init(frame: .zero)
-        let label = NSTextField(labelWithString: "Hidden (\(count))")
+        let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: s(12), weight: .medium)
         label.textColor = Theme.textDim
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -2760,7 +2794,7 @@ private final class HiddenDividerView: NSView {
         let chevron = NSImageView()
         chevron.image = NSImage(
             systemSymbolName: expanded ? "chevron.down" : "chevron.right",
-            accessibilityDescription: expanded ? "Collapse hidden" : "Expand hidden"
+            accessibilityDescription: expanded ? "Collapse \(title)" : "Expand \(title)"
         )
         chevron.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: s(10), weight: .semibold)
         chevron.contentTintColor = Theme.textDim
@@ -2803,7 +2837,9 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
         guard rows.indices.contains(index) else { return nil }
         let row = rows[index]
         if row.isDivider {
-            return HiddenDividerView(count: row.hiddenCount, expanded: hiddenExpanded)
+            return row.isOlderDivider
+                ? SectionDividerView(title: "Older (\(row.olderCount))", count: row.olderCount, expanded: olderExpanded)
+                : SectionDividerView(title: "Hidden (\(row.hiddenCount))", count: row.hiddenCount, expanded: hiddenExpanded)
         }
         let cell = SessionCellView(row: row)
         // Hidden rows read as dismissed: dimmed, and inert (see shouldSelectRow).
@@ -2818,11 +2854,11 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
         return s(expanded ? 116 : 84)
     }
 
-    // Only visible session rows select. The Hidden divider and hidden rows are
+    // Revealed older rows are live sessions too. Dividers and hidden rows are
     // inert to selection and the keyboard; a click on them is handled separately.
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
         if contentMode { return contentResults.indices.contains(row) }
-        return row < visibleCount
+        return selectableIndices.contains(row)
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {

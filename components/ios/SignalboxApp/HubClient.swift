@@ -120,6 +120,9 @@ struct HubConfig: Equatable {
 @MainActor
 final class HubClient: ObservableObject {
     @Published private(set) var sessions: [Session] = []
+    /// The hub owns the horizon so the phone and the Mac cannot disagree. The
+    /// default covers an older hub and the window before the first resync.
+    @Published private(set) var olderHorizon: TimeInterval = 24 * 60 * 60
     @Published private(set) var connection: Connection = .connecting
     @Published private(set) var lastSeq = 0
     @Published private(set) var hosts: [String] = []
@@ -377,6 +380,9 @@ final class HubClient: ObservableObject {
         }
         guard http.statusCode == 200 else { throw URLError(.badServerResponse) }
         let doc = try JSONDecoder().decode(StateDoc.self, from: data)
+        if let olderHorizonSeconds = doc.olderHorizonSeconds {
+            olderHorizon = olderHorizonSeconds
+        }
         adopt(doc.sessions)
         lastSeen = Date()
     }
@@ -466,6 +472,7 @@ final class HubClient: ObservableObject {
                 reply: event.reply,
                 tags: event.tags ?? [],
                 date: EventDate.parse(event.ts) ?? Date(),
+                engagedDate: EventDate.parse(event.engagedTs) ?? EventDate.parse(event.ts) ?? Date(),
                 acked: event.acked ?? false,
                 hidden: event.hidden ?? false,
                 pinned: event.pinned ?? false,
