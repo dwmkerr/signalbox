@@ -16,10 +16,14 @@ STAMP := $(shell date +%Y%m%d%H%M%S)
 DD := build-device
 APP := $(DD)/Build/Products/Debug-iphoneos/Signalbox.app
 
-# First reachable device (unavailable ones filtered out - a stale pairing
-# must not shadow the plugged-in phone); override with DEVICE=<identifier>
-# when more than one phone is attached.
-DEVICE ?= $(shell xcrun devicectl list devices 2>/dev/null | grep -v unavailable | grep -Eo '[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}' | head -1)
+# First reachable PHYSICAL device; override with DEVICE=<identifier> when more
+# than one phone is attached. Simulators are excluded by their "simulated"
+# Reality column rather than by identifier shape: a phone's identifier is
+# 00008120-00125C323E72201E (two groups), not a 8-4-4-4-12 UUID, so matching
+# UUID shape silently selected an iPad simulator and the install then failed
+# with "the capability Install Application is not supported by this device".
+# Unavailable rows stay filtered: a stale pairing must not shadow the phone.
+DEVICE ?= $(shell xcrun devicectl list devices 2>/dev/null | grep -v unavailable | grep -v simulated | grep -Eo '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}' | head -1)
 
 .PHONY: device build-device install-device
 
