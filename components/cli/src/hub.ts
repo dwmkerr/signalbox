@@ -550,6 +550,7 @@ export class Hub {
     const subs = this.subs;
     const cmdSubs = this.cmdSubs;
     const backlog = this.log.filter((e) => (e.seq ?? 0) > since);
+    const snapshotSeq = this.seq;
     let last = since;
     const enc = new TextEncoder();
     let cleanup: (() => void) | null = null;
@@ -577,6 +578,10 @@ export class Hub {
           write(`event: command\ndata: ${JSON.stringify(c)}\n\n`);
         };
         cmdSubs.add(sendCmd);
+        // This frame is the protocol boundary between historical replay and
+        // live delivery. A starting forwarder waits for it before exposing its
+        // own /state and /stream, so clients never render replay as live churn.
+        write(`event: sync\ndata: ${JSON.stringify({ seq: snapshotSeq })}\n\n`);
         const hb = setInterval(() => {
           try {
             write(": heartbeat\n\n");

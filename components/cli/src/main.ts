@@ -27,6 +27,7 @@ import {
 import { runSetup } from "./setup";
 import { openIndex, type IndexStatus, type SearchResult } from "./searchindex";
 import { Store } from "./state";
+import { drainStartupSpool } from "./startup";
 import {
   glyph, coloredGlyph, statusWord, titleOf, age, printSessions, tmuxStatusLine,
   cropRunes, dimOn, dimOff, needsYou, visible, termWidth, visibleWidth,
@@ -617,7 +618,7 @@ function expireAgeMs(): number {
   return ms;
 }
 
-function runHub(args: string[]): void {
+async function runHub(args: string[]): Promise<void> {
   const { flags } = parseFlags(args, ["remote"]);
   const port = parseInt(flags["port"] ?? "8377", 10);
   const settings = loadSettings();
@@ -664,14 +665,21 @@ function runHub(args: string[]): void {
       historyLimit: settings.hub.historyLimit,
       searchEnabled: settings.searchEnabled,
     });
-    listen(fwd, port, "127.0.0.1");
-    fwd.start();
-    fwd.startSearch();
     // PID 1 has no default SIGTERM disposition, so stop the uplink and spool
     // work before the platform stops the container.
     process.on("SIGTERM", () => { fwd.close(); process.exit(0); });
-    hubLog(
-      `signalbox hub ${displayVersion} (forwarder) listening on http://127.0.0.1:${port} -> upstream ${upstream}; local clients need no token (state: ${fwdStateDir})`
+    await drainStartupSpool(
+      fwdStateDir,
+      (event) => fwd.enqueue(event),
+      () => {
+        listen(fwd, port, "127.0.0.1");
+        fwd.startSearch();
+        hubLog(
+          `signalbox hub ${displayVersion} (forwarder) listening on http://127.0.0.1:${port} -> upstream ${upstream}; local clients need no token (state: ${fwdStateDir})`
+        );
+      },
+      (message) => logTo(fwdStateDir, message),
+      () => fwd.synchronize()
     );
     return;
   }
@@ -754,45 +762,54 @@ function runHub(args: string[]): void {
     () => loadSettings().searchEnabled
   );
   const expire = expireAgeMs();
-  hub.startExpiry(10 * 60 * 1000, expire);
-  // Much shorter than expiry: a dead process shows as an eternal spinner
-  // until the sweep catches it.
-  hub.startLiveness(30 * 1000);
-  hub.startSearch();
 
   // PID 1 has no default SIGTERM disposition, so close the append fd before the platform stops the container.
   process.on("SIGTERM", () => { hub.close(); process.exit(0); });
 
-  if (remote) {
-    // One plain-http listener on the wide bind; it covers loopback too, and
-    // even a loopback peer must present the bearer (the proxy may connect
-    // from a loopback-looking sidecar address, so peer address proves nothing).
-    listen(hub, port, bind);
-    hubLog(
-      `signalbox hub ${displayVersion} (remote mode) listening on http://${bind}:${port} - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: ${stateDir()}, expire: ${expire / 3600000}h)`
-    );
-    return;
-  }
+  const hubStateDir = stateDir();
+  await drainStartupSpool(
+    hubStateDir,
+    (event) => { hub.ingest(event); },
+    () => {
+      hub.startExpiry(10 * 60 * 1000, expire);
+      // Much shorter than expiry: a dead process shows as an eternal spinner
+      // until the sweep catches it.
+      hub.startLiveness(30 * 1000);
+      hub.startSearch();
 
-  // Loopback http always: the menu bar app, CLI, and adapters speak to this and
-  // are entirely unchanged by the LAN TLS work.
-  listen(hub, port, "127.0.0.1");
-  hubLog(
-    `signalbox hub ${displayVersion} listening on http://127.0.0.1:${port} (state: ${stateDir()}, expire: ${expire / 3600000}h)`
+      if (remote) {
+        // One plain-http listener on the wide bind; it covers loopback too, and
+        // even a loopback peer must present the bearer (the proxy may connect
+        // from a loopback-looking sidecar address, so peer address proves nothing).
+        listen(hub, port, bind);
+        hubLog(
+          `signalbox hub ${displayVersion} (remote mode) listening on http://${bind}:${port} - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: ${hubStateDir}, expire: ${expire / 3600000}h)`
+        );
+        return;
+      }
+
+      // Loopback http always: the menu bar app, CLI, and adapters speak to this and
+      // are entirely unchanged by the LAN TLS work.
+      listen(hub, port, "127.0.0.1");
+      hubLog(
+        `signalbox hub ${displayVersion} listening on http://127.0.0.1:${port} (state: ${hubStateDir}, expire: ${expire / 3600000}h)`
+      );
+      if (!isLoopbackAddress(bind)) {
+        if (tls) {
+          listen(hub, tlsPort, "0.0.0.0", { cert: tls.cert, key: tls.key });
+          hubLog(
+            `signalbox: LAN listener https://0.0.0.0:${tlsPort} (pinned self-signed, fp ${tls.fingerprint.slice(0, 16)}...); non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN`
+          );
+        } else {
+          listen(hub, port, bind);
+          hubLog(
+            `signalbox: bound to http://${bind}:${port}; non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN (loopback clients need no token)`
+          );
+        }
+      }
+    },
+    (message) => logTo(hubStateDir, message)
   );
-  if (!isLoopbackAddress(bind)) {
-    if (tls) {
-      listen(hub, tlsPort, "0.0.0.0", { cert: tls.cert, key: tls.key });
-      hubLog(
-        `signalbox: LAN listener https://0.0.0.0:${tlsPort} (pinned self-signed, fp ${tls.fingerprint.slice(0, 16)}...); non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN`
-      );
-    } else {
-      listen(hub, port, bind);
-      hubLog(
-        `signalbox: bound to http://${bind}:${port}; non-loopback clients must send Authorization: Bearer $SIGNALBOX_TOKEN (loopback clients need no token)`
-      );
-    }
-  }
 }
 
 // ---- config ----------------------------------------------------------------
@@ -1267,7 +1284,7 @@ switch (cmd) {
     await runHookSafe(() => runCodexHook());
     break;
   case "hub":
-    runHub(args);
+    await runHub(args).catch(fatal);
     break;
   case "pair":
     await runPair(args).catch(fatal);

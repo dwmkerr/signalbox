@@ -79,26 +79,37 @@ export class Client {
     return this.spoolFile.append(line);
   }
 
-  // deliver drains the spool then posts e. A thrown error means the hub did
-  // not receive the event now - it is spooled, so callers only log.
+  // An event enters the durable queue before any POST. That ordering lets a
+  // starting hub consume it on the pre-ready side of its spool boundary, or
+  // lets this invocation deliver it normally once the listener is ready.
   async deliver(e: Event): Promise<void> {
     const line = JSON.stringify(e);
-    let drainErr: unknown = null;
     try {
-      await this.drain();
-    } catch (err) {
-      drainErr = err;
-    }
-    if (drainErr) {
-      // The hub just refused a spooled event; a fresh POST would only burn
-      // another timeout.
       await this.spool(line);
-      throw new Error(`hub unreachable, event spooled: ${drainErr}`);
+    } catch (err) {
+      throw new Error(`event could not be spooled: ${err}`);
     }
+
+    let delivered = false;
+    try {
+      await this.spoolFile.drain(async (candidate) => {
+        await this.post(candidate);
+        if (candidate === line) delivered = true;
+      }, {
+        maxEvents: maxDrainEvents,
+        budgetMs: drainBudgetMs,
+      });
+    } catch (err) {
+      throw new Error(`hub unreachable, event spooled: ${err}`);
+    }
+
+    if (delivered) return;
+    // Another process may own the drain lock, or a bounded pass may have left
+    // this newest line queued. A direct send keeps this event prompt; its id
+    // makes a later at-least-once spool delivery harmless.
     try {
       await this.post(line);
     } catch (err) {
-      await this.spool(line);
       throw new Error(`post failed, event spooled: ${err}`);
     }
   }

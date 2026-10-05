@@ -98,6 +98,20 @@ async function withLock(path: string, operation: () => void): Promise<void> {
   }
 }
 
+async function waitForLock(path: string): Promise<Unlock> {
+  for (;;) {
+    try {
+      const unlock = acquireLock(path);
+      if (unlock) return unlock;
+    } catch (err) {
+      throw new LockAcquisitionError(String(err), { cause: err });
+    }
+    // This delay only yields between condition checks. Acquiring the lock, not
+    // elapsed time, is what permits startup to continue.
+    await Bun.sleep(lockRetryMs);
+  }
+}
+
 // permanentError marks an HTTP 4xx: the hub saw the event and said no, so
 // retrying forever would just wedge the spool.
 export class PermanentError extends Error {}
@@ -216,6 +230,80 @@ export class Spool {
         if (index < snapshot.lines.length) return sent;
       }
       return sent;
+    } finally {
+      unlockDrain?.();
+      this.draining = false;
+    }
+  }
+
+  // Startup has a stronger contract than the latency-bounded hook drain: it
+  // consumes every queued line, then crosses the readiness boundary while the
+  // append lock excludes a writer from appearing between "empty" and ready.
+  async drainBeforeReady(
+    send: (line: string) => Promise<void>,
+    onReady: () => void,
+    beforeReady: () => Promise<void> = async () => {}
+  ): Promise<number> {
+    if (this.draining) throw new Error("spool is already draining");
+    this.draining = true;
+    let unlockDrain: Unlock | null = null;
+
+    try {
+      mkdirSync(this.dir, { recursive: true });
+      unlockDrain = await waitForLock(this.drainLockPath);
+      let sent = 0;
+
+      for (;;) {
+        const snapshot = this.takeSnapshot();
+        if (snapshot && snapshot.lines.length > 0) {
+          let index = 0;
+          let stopErr: unknown = null;
+          for (; index < snapshot.lines.length; index++) {
+            try {
+              await send(snapshot.lines[index]);
+              sent++;
+            } catch (err) {
+              if (err instanceof PermanentError) {
+                this.log(`drain: dropping event rejected by hub: ${err.message}`);
+                continue;
+              }
+              stopErr = err;
+              break;
+            }
+          }
+
+          await this.reconcileSnapshot(snapshot.lines, index);
+          if (stopErr) throw stopErr;
+          continue;
+        }
+
+        // A forwarder uses this phase to finish its upstream replay and flush
+        // the outbound queue. Appends remain available while it waits, then
+        // the locked recheck below decides whether another pass is required.
+        await beforeReady();
+
+        const unlockAppend = await waitForLock(this.lockPath);
+        try {
+          const lines = existsSync(this.spoolPath) ? this.readLines() : [];
+          if (lines.length > 0) {
+            this.lineCount = lines.length;
+            continue;
+          }
+          this.unlinkIfExists(this.spoolPath);
+          this.lineCount = 0;
+          this.resetOverflowLog();
+
+          // A hook that appends before posting waits on the append lock here.
+          // Releasing the drain lock first lets that hook own normal delivery
+          // immediately after the synchronous listener bind in onReady.
+          unlockDrain();
+          unlockDrain = null;
+          onReady();
+          return sent;
+        } finally {
+          unlockAppend();
+        }
+      }
     } finally {
       unlockDrain?.();
       this.draining = false;

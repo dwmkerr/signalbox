@@ -63,7 +63,15 @@ async function openStream(hub: Hub, since: number) {
     headers: { Host: "localhost" },
   });
   const res = (await hub.handle(req, fakeServer))!;
-  return { reader: res.body!.getReader(), dec: new TextDecoder() };
+  const reader = res.body!.getReader();
+  const dec = new TextDecoder();
+  let initial = "";
+  while (!initial.includes("event: sync")) {
+    const chunk = await reader.read();
+    if (chunk.done) throw new Error("stream ended before sync");
+    initial += dec.decode(chunk.value);
+  }
+  return { reader, dec, initial };
 }
 
 async function getState(hub: Hub): Promise<{ sessions: Event[] }> {
@@ -861,6 +869,11 @@ describe("stream", () => {
     expect(text).toContain('"session_key":"b"');
     expect(text).not.toContain('"session_key":"a"');
 
+    // The control frame is an explicit boundary after replay, before live.
+    if (!text.includes("event: sync")) text += dec.decode((await reader.read()).value);
+    expect(text).toContain("event: sync");
+    expect(text).toContain('data: {"seq":2}');
+
     // Live: a new event arrives on the open stream.
     await post(hub, wireEvent("c", ev.Done));
     text = dec.decode((await reader.read()).value);
@@ -928,8 +941,8 @@ describe("commands", () => {
     expect(readFileSync(join(dir, "events.jsonl"), "utf8")).not.toContain("jump");
 
     // A client reconnecting from scratch replays the whole log: no jump in it.
-    const { reader, dec } = await openStream(hub, 0);
-    const text = dec.decode((await reader.read()).value);
+    const { reader, initial } = await openStream(hub, 0);
+    const text = initial;
     expect(text).toContain('"event":"busy"');
     expect(text).not.toContain("jump");
     await reader.cancel();
