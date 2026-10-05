@@ -107,6 +107,15 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   // forks). Exactly one of the payload fields may be set; old events
   // without `kind` get it inferred from whichever field that is. Captured
   // when the event fires, so jumping never depends on the local setup.
+  //
+  // A tmux origin is the pane the AGENT runs in, which is not always the pane
+  // the hook runs in: Codex executes its hooks under one long-lived
+  // `codex app-server` daemon, so every Codex session would otherwise report
+  // whichever pane that daemon started in. The pane is kept while its own
+  // path matches the event's cwd, and otherwise re-resolved to the single
+  // pane at that cwd (preferring one whose running command is the agent). When
+  // no pane can be singled out the origin is omitted entirely rather than
+  // naming a pane already known to be the wrong one.
   "origin": {
     "kind": "tmux",
     "tmux": {

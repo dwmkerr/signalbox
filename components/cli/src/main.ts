@@ -229,7 +229,7 @@ async function buildEvent(opts: {
   // check: a pane is a more precise jump target than an app window.
   if (opts.origin) origin = opts.origin;
   else if (opts.originURL) origin = { kind: "url", url: opts.originURL };
-  else origin = tmux.currentOrigin() ?? editorTerminalOrigin(process.env);
+  else origin = tmux.currentOrigin(cwd, ev.agentFamily(opts.agent)) ?? editorTerminalOrigin(process.env);
   let sessionKey = opts.sessionKey ?? "";
   if (!sessionKey) {
     // Key on the agent family, never the host-prefixed display name: a
