@@ -2696,6 +2696,8 @@ private final class ContentResultCellView: NSView {
         NSLayoutConstraint.activate([
             glyph.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s(24)),
             glyph.topAnchor.constraint(equalTo: topAnchor, constant: s(12)),
+            glyph.widthAnchor.constraint(equalToConstant: s(22)),
+            glyph.heightAnchor.constraint(equalToConstant: s(20)),
             title.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: s(12)),
             title.topAnchor.constraint(equalTo: topAnchor, constant: s(9)),
             agent.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: s(8)),
@@ -2709,7 +2711,7 @@ private final class ContentResultCellView: NSView {
             snippet.topAnchor.constraint(equalTo: path.bottomAnchor, constant: s(4)),
             when.topAnchor.constraint(equalTo: topAnchor, constant: s(9)),
             when.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(24)),
-            when.widthAnchor.constraint(equalToConstant: s(142)),
+            when.widthAnchor.constraint(equalToConstant: s(185)),
             state.topAnchor.constraint(equalTo: when.bottomAnchor, constant: s(5)),
             state.trailingAnchor.constraint(equalTo: when.trailingAnchor),
             action.topAnchor.constraint(equalTo: state.bottomAnchor, constant: s(2)),
@@ -2742,7 +2744,7 @@ private final class ContentResultCellView: NSView {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     private func metaText(_ hit: SearchResult) -> String {
-        let when = hit.ts.flatMap(shortDate) ?? ""
+        let when = hit.ts.flatMap(SearchDate.string) ?? "Date unavailable"
         let count = "×\(hit.hitCount)"
         return [when, count].filter { !$0.isEmpty }.joined(separator: "  ·  ")
     }
@@ -2750,7 +2752,8 @@ private final class ContentResultCellView: NSView {
     // The hub marks matches with <mark>; drawn raw the user would read the tags.
     private func attributedSnippet(_ snippet: String) -> NSAttributedString {
         let out = NSMutableAttributedString()
-        for run in snippetRuns(snippet) {
+        let compact = snippet.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        for run in snippetRuns(compact) {
             out.append(NSAttributedString(string: run.text, attributes: [
                 .font: NSFont.monospacedSystemFont(
                     ofSize: s(11.5), weight: run.isMatch ? .bold : .regular),
@@ -2759,16 +2762,6 @@ private final class ContentResultCellView: NSView {
         }
         return out
     }
-}
-
-// RFC3339 to a short "3 Aug 14:02" for a contents hit's timestamp.
-private func shortDate(_ iso: String) -> String? {
-    let parser = ISO8601DateFormatter()
-    parser.formatOptions = [.withInternetDateTime]
-    guard let date = parser.date(from: iso) else { return nil }
-    let out = DateFormatter()
-    out.dateFormat = "d MMM HH:mm"
-    return out.string(from: date)
 }
 
 // MARK: - Section divider

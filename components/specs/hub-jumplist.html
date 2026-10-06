@@ -145,7 +145,7 @@
                    padding:4px 14px 9px; border-bottom:1px solid #ffffff12; }
   .contents-head h3 { color:#98989D; font-size:10px; letter-spacing:1.5px; font-weight:600; }
   .contents-head .summary { color:#6E6E73; font-size:11px; }
-  .result-row { display:grid; grid-template-columns:24px minmax(0,1fr) 142px; column-gap:12px;
+  .result-row { display:grid; grid-template-columns:24px minmax(0,1fr) 185px; column-gap:12px;
                 margin:2px 0; padding:10px 14px; border-radius:9px; cursor:pointer; }
   .result-row.sel { background:#2C2C31; }
   .result-main { min-width:0; }
@@ -338,11 +338,14 @@
   search icon. This keeps the action legible near the result area without making it a selectable
   session row. The callout can also be clicked to show the contents results.</p>
   <p>Contents results replace the whole split body. There is no terminal pane: each full-width result
-  already carries its project, agent, path, best matching snippet, date, matching-turn count, and
+  already carries its project, agent, path, newest matching snippet, date, matching-turn count, and
   live or ended state. <kbd>↩</kbd> jumps directly to a live session. On an ended session it reveals
   the agent's resume command inline, where it can be copied. Editing the query returns to the board;
   <kbd class="sc">esc</kbd> returns without clearing it. Results have their own selection and commands,
-  independent of the board rows underneath.</p>
+  independent of the board rows underneath. Results sort by the newest matching message, newest
+  first, with undated messages last. Dates include the year and local time, accept fractional
+  seconds, and show “Date unavailable” when absent. The agent icon has a fixed width so every
+  title, path and snippet shares the same left edge. Snippet whitespace is collapsed.</p>
   <p>Rows keep the order you work in (most recently engaged first, like the app switcher), with
   pinned sessions first; status does not reorder them. Older and Hidden are the two trailing
   sections, in that order, below every visible row. The panel opens with the topmost unread row
@@ -531,18 +534,18 @@ const SESSIONS = [
 // intentionally separate from SESSIONS: archive rows have different identity,
 // actions and selection rules from live board rows.
 const SEARCH_RESULTS = [
-  {agent:"claude", project:"signalbox", path:"~/repos/github/dwmkerr/signalbox", date:"Today 09:42", hits:132, live:true,
+  {agent:"claude", project:"signalbox", path:"~/repos/github/dwmkerr/signalbox", date:"6 Oct 2026 09:42", hits:132, live:true,
    snippet:"The authentication search should use the transcript index, but the results surface should not inherit the terminal preview."},
-  {agent:"codex", project:"research-notes", path:"~/repos/personal/research-notes", date:"28 Sep 16:18", hits:96, live:false,
+  {agent:"codex", project:"research-notes", path:"~/repos/personal/research-notes", date:"28 Sep 2026 16:18", hits:96, live:false,
    snippet:"Compare authentication approaches, retain the source metadata, and explain which references disagree with the current approach.",
    resume:"codex resume 7ec81da2-41c7-4e92-a908-9c64694cf153"},
-  {agent:"claude", project:"writing-studio", path:"~/repos/github/dwmkerr/writing-studio", date:"17 Sep 11:06", hits:74, live:false,
+  {agent:"claude", project:"writing-studio", path:"~/repos/github/dwmkerr/writing-studio", date:"17 Sep 2026 11:06", hits:74, live:false,
    snippet:"Draft a short authentication guide from the exported notes, keeping links beside every claim.",
    resume:"claude --resume 51e34caa-f742-466b-879d-fc8607d1130e"},
-  {agent:"cursor", project:"knowledge-map", path:"~/repos/labs/knowledge-map", date:"4 Sep 14:31", hits:51, live:false,
+  {agent:"cursor", project:"knowledge-map", path:"~/repos/labs/knowledge-map", date:"4 Sep 2026 14:31", hits:51, live:false,
    snippet:"The authentication ingestion pass now deduplicates references before generating the topic graph.",
    resume:"cursor: resume is not available"},
-  {agent:"claude", project:"signalbox", path:"~/repos/github/dwmkerr/signalbox", date:"29 Aug 10:27", hits:39, live:false,
+  {agent:"claude", project:"signalbox", path:"~/repos/github/dwmkerr/signalbox", date:"29 Aug 2026 10:27", hits:39, live:false,
    snippet:"Add session contents search and verify that an authentication query returns grouped conversations with highlighted snippets.",
    resume:"claude --resume c79dce36-e306-4287-9558-554193a1740d"},
 ];

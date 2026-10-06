@@ -26,7 +26,7 @@ function tmux(...args: string[]): string {
 
 let paneA = "";
 let paneB = "";
-let sharedOne = "";
+let sharedPanes: string[] = [];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const savedEnv = { TMUX: process.env.TMUX, TMUX_PANE: process.env.TMUX_PANE };
 
@@ -42,7 +42,7 @@ beforeAll(() => {
     .map((l) => l.split("\t"));
   paneA = panes.find((p) => p[1] === dirA)![0]!;
   paneB = panes.find((p) => p[1] === dirB)![0]!;
-  sharedOne = panes.find((p) => p[1] === shared)![0]!;
+  sharedPanes = panes.filter((p) => p[1] === shared).map((p) => p[0]!);
   process.env.TMUX = `${socket},0,0`;
 });
 
@@ -72,12 +72,15 @@ describe("currentOrigin pane resolution", () => {
     expect(currentOrigin(join(root, "nowhere"))).toBeNull();
   });
 
-  // TMUX_PANE is already known wrong here (its path differs from the cwd), and
-  // nothing else can be singled out. Reporting it would jump somewhere
-  // definitely wrong, so the origin is dropped instead.
-  test("drops the origin when the pane is known wrong and the cwd is ambiguous", () => {
+  // Several agents in one directory cannot be told apart, so the least-wrong
+  // answer is a pane in the right directory: right project, possibly the wrong
+  // conversation. Dropping the origin instead would block jump entirely, which
+  // is worse in practice.
+  test("picks a pane at the cwd when several share it, and picks the same one twice", () => {
     process.env.TMUX_PANE = paneA;
-    expect(currentOrigin(shared)).toBeNull();
+    const first = currentOrigin(shared)?.tmux?.pane ?? "";
+    expect(sharedPanes).toContain(first);
+    expect(currentOrigin(shared)?.tmux?.pane).toBe(first);
   });
 
   test("an empty cwd disables correction entirely", () => {

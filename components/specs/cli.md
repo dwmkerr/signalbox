@@ -141,7 +141,8 @@ STATE    AGENT   CWD                          HITS  MATCH
 · ended  codex   dwmkerr-professional         3     I am using the writing-style skill because this is a st…
 ```
 
-`HITS` counts matching turns in that session. `STATE` is `live` when the
+Results use the newest matching turn from each session and sort newest first;
+undated matches come last. `HITS` counts matching turns in that session. `STATE` is `live` when the
 indexed transcript still belongs to a current local board row, otherwise
 `ended`. Matches from FTS5 are stripped of their `<mark>` wrappers before
 printing. `--limit N` accepts 1 to 50 sessions and defaults to 50. `--json`

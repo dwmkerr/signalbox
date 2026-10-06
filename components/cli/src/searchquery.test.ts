@@ -153,22 +153,27 @@ describe("countHits", () => {
 });
 
 describe("search", () => {
-  test("groups by session and selects the best FTS5 snippet", () => withIndex((index) => {
+  test("groups by session and selects the newest matching snippet even when an older turn ranks higher", () => withIndex((index) => {
     const results = index.search("edit", 10);
     expect(results).toHaveLength(3);
-    expect(results[0]).toEqual({
+    expect(results.find((result) => result.sessionUuid === claudeUuid)).toEqual({
       sessionUuid: claudeUuid,
       agent: "claude",
       cwd: "/work/claude",
-      snippet: "<mark>editor</mark> <mark>editor</mark> <mark>editor</mark> integration",
-      ts: "2026-08-19T09:00:00.000Z",
+      snippet: "<mark>editor</mark> integration ready or pending",
+      ts: "2026-08-19T09:01:00.000Z",
       hitCount: 2,
       state: "ended",
       sessionKey: null,
     });
   }));
 
-  test("uses matching-turn recency to break equal relevance", () => withIndex((index) => {
+  test("sorts newest matching turns first, ahead of relevance", () => withIndex((index) => {
+    expect(index.search("edit", 10).map((result) => result.sessionUuid)).toEqual([
+      cursorUuid,
+      codexUuid,
+      claudeUuid,
+    ]);
     expect(index.search("needle", 10).map((result) => result.sessionUuid)).toEqual([
       cursorUuid,
       codexUuid,
@@ -176,7 +181,7 @@ describe("search", () => {
   }));
 
   test("applies the session limit after grouping", () => withIndex((index) => {
-    expect(index.search("edit", 2)).toHaveLength(2);
+    expect(index.search("edit", 2).map((result) => result.sessionUuid)).toEqual([cursorUuid, codexUuid]);
     expect(index.search("edit", 0)).toEqual([]);
   }));
 

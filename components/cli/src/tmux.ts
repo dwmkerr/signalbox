@@ -69,17 +69,29 @@ function resolvePane(pane: string, cwd: string, agent: string): string | null {
   // one of them is the agent. Falling back to "not a shell or editor" is not
   // enough on its own: a running build tool would tie with the agent.
   const byAgent = agent ? atCwd.filter((p) => p[2] === agent) : [];
-  const candidates = byAgent.length === 1
+  // Narrowing must never empty the list: a pane at the right cwd running a
+  // shell still beats no answer, so each filter is only applied while it leaves
+  // something behind.
+  const notShells = atCwd.filter((p) => !notAgentCommands.has(p[2]!));
+  const candidates = byAgent.length > 0
     ? byAgent
-    : atCwd.length > 1
-      ? atCwd.filter((p) => !notAgentCommands.has(p[2]!))
+    : notShells.length > 0
+      ? notShells
       : atCwd;
   if (candidates.length === 1) return candidates[0]![0]!;
-  // Reaching here means TMUX_PANE's path already disagreed with the cwd, so it
-  // is known to be the wrong pane, and nothing else could be singled out - two
-  // agents in one repo, say. Returning it would jump the user somewhere
-  // definitely wrong; null drops the tmux origin so jump reports it has nowhere
-  // to go. No jump beats a confidently wrong one.
+  // Several agents in one directory cannot be told apart: Codex exposes no link
+  // from a session id to a pane - not in its process arguments, its environment,
+  // or its open files - and its hooks run under a shared daemon, so the session
+  // that fired this event is unknowable from here. The least-wrong answer is a
+  // pane running the right agent in the right directory, which lands the user in
+  // the right project even when it picks the wrong conversation. Sorted so
+  // repeated events for one session keep choosing the same pane rather than
+  // wandering between them.
+  if (candidates.length > 1) {
+    return candidates.map((p) => p[0]!).sort()[0]!;
+  }
+  // Nothing at that cwd at all: the pane is gone or the agent has moved on, and
+  // TMUX_PANE is known wrong. Drop the origin so jump says it has nowhere to go.
   return null;
 }
 

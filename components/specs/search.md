@@ -135,12 +135,12 @@ expressions use the `prefix='2 3'` indexes so the jumplist can refresh the count
 while the user types.
 
 `search(q, limit)` groups matching turns by `session_uuid`. Each result carries
-the session UUID, agent, cwd, best matching turn's timestamp, an FTS5
+the session UUID, agent, cwd, newest matching turn's timestamp, an FTS5
 `snippet()` with matches enclosed in `<mark>` and `</mark>`, and the number of
-matching turns in that session. The best turn is the one with the lowest FTS5
-`bm25()` score. Sessions are ordered by that score, then by the best turn's
-timestamp from newest to oldest, with the session UUID as a stable final tie
-breaker.
+matching turns in that session. Each session uses its newest matching turn.
+Sessions are ordered by that timestamp from newest to oldest, with relevance
+and the session UUID breaking ties. Dates are compared as instants, including
+fractional seconds and timezone offsets; missing or invalid dates sort last.
 
 A result is marked `live` only when an indexed file path for its session exactly
 matches the `transcript` path of a current board row. A live result also carries

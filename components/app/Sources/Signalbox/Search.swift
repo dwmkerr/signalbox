@@ -3,14 +3,14 @@ import Foundation
 /// One session that contains matching turns, as returned by `GET /search`.
 ///
 /// Results are grouped by session rather than by turn: a session that mentions
-/// the term forty times is one row carrying its best snippet and that count,
+/// the term forty times is one row carrying its newest matching snippet and that count,
 /// because the user is looking for the conversation, not each occurrence.
 struct SearchResult: Decodable, Equatable {
     /// The transcript's own session id, stable across the session's lifetime.
     let sessionUuid: String
-    /// Agent that owns the best matching turn ("claude", "codex", "cursor").
+    /// Agent that owns the newest matching turn ("claude", "codex", "cursor").
     let agent: String
-    /// Working directory recorded for the best matching turn, when known.
+    /// Working directory recorded for the newest matching turn, when known.
     let cwd: String?
     /// FTS5 excerpt with each match wrapped in a `<mark>` element.
     let snippet: String
@@ -56,6 +56,28 @@ struct SearchResult: Decodable, Equatable {
         self.hitCount = hitCount
         self.state = state
         self.sessionKey = sessionKey
+    }
+}
+
+/// Formats transcript dates, including the fractional seconds written by agents.
+@MainActor
+enum SearchDate {
+    private static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let whole = ISO8601DateFormatter()
+    private static let display: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMM yyyy HH:mm"
+        return formatter
+    }()
+
+    /// Returns a date and local time, or nil for a missing or malformed timestamp.
+    static func string(_ iso: String) -> String? {
+        guard let date = fractional.date(from: iso) ?? whole.date(from: iso) else { return nil }
+        return display.string(from: date)
     }
 }
 
