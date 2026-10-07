@@ -123,6 +123,27 @@ Evidence: the seeded board showing every status colour (busy / attention /
 done / error). Screenshot `$SB state` output. Also capture `$SB state --json`
 head into `output.txt` as machine-readable evidence.
 
+Then screenshot the **jumplist** showing the same seeded board, so the run has
+a picture of the surface people actually look at rather than only the CLI
+table. The app's hub is a different hub on 8377, so point the app at the test
+hub first, or seed the app's hub to match - note in `meta.json` which you did,
+because a jumplist of the real board is not evidence of this seed:
+
+```bash
+osascript -e 'tell application "System Events" to key code 38 using {control down, option down}'
+sleep 1
+screencapture -x "$EVIDENCE/03-seed/02-jumplist.png"
+```
+
+Do the same wherever a step changes what the board looks like - the session
+verbs in step 04 especially, where pin order, a rename and a hidden row are far
+clearer in the jumplist than in the CLI table. If the hotkey needs Accessibility
+permission and it is missing, record a `warn` and carry on.
+
+Screen captures are full-screen and will include whatever else is open. Say so
+in the step note, and never paste the report anywhere shared without checking
+it.
+
 ## Step 04 - session operations
 
 In the client shell, exercise the session verbs against a seeded session key
@@ -333,11 +354,11 @@ for session_number in 01 02 03 04 05 06 07; do
     --session-key "itest:overflow-$session_number" --title "overflow-$session_number" || true
 done
 
-osascript -e 'tell application "System Events" to tell process "Signalbox" to click menu bar item 1 of menu bar 2' || true
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click menu bar item 1 of menu bar 1' || true
 sleep 1
 screencapture -x "$EVIDENCE/10c-dropdown-overflow/dropdown.png" || true
 
-osascript -e 'tell application "System Events" to tell process "Signalbox" to perform action "AXShowMenu" of first menu item of menu 1 of first menu bar item of menu bar 2 whose name starts with "Show More"' || true
+osascript -e 'tell application "System Events" to tell process "Signalbox" to perform action "AXShowMenu" of first menu item of menu 1 of first menu bar item of menu bar 1 whose name starts with "Show More"' || true
 sleep 1
 screencapture -x "$EVIDENCE/10c-dropdown-overflow/show-more.png" || true
 ```
@@ -356,11 +377,13 @@ Logs manually and record that in the step note:
 
 ```bash
 mkdir -p "$EVIDENCE/10d-logs-pane" || true
-# The keystroke goes to the frontmost app, so bring Signalbox forward first.
-osascript -e 'tell application "Signalbox" to activate' || true
+# Cmd-comma does NOT work here: a menu bar app has no window for the keystroke
+# to reach, and System Events then errors with "Can't get window 1". Open
+# Settings from the status menu instead.
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click menu bar item 1 of menu bar 1' || true
 sleep 1
-osascript -e 'tell application "System Events" to key code 43 using {command down}' || true
-sleep 1
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click (first menu item of menu 1 of menu bar item 1 of menu bar 1 whose name starts with "Settings")' || true
+sleep 2
 osascript -e 'tell application "System Events" to tell process "Signalbox" to click button "Logs" of toolbar 1 of window 1' || true
 sleep 1
 screencapture -x "$EVIDENCE/10d-logs-pane/logs-current.png" || true
@@ -398,11 +421,13 @@ mkdir -p "$EVIDENCE/10e-shortcut-recorder" || true
 # round-trip - export/import round-trips every type.
 defaults export com.dwmkerr.signalbox "$EVIDENCE/10e-shortcut-recorder/signalbox-defaults-backup.plist" || true
 
-# The keystroke goes to the frontmost app, so bring Signalbox forward first.
-osascript -e 'tell application "Signalbox" to activate' || true
+# Cmd-comma does NOT work here: a menu bar app has no window for the keystroke
+# to reach, and System Events then errors with "Can't get window 1". Open
+# Settings from the status menu instead.
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click menu bar item 1 of menu bar 1' || true
 sleep 1
-osascript -e 'tell application "System Events" to key code 43 using {command down}' || true
-sleep 1
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click (first menu item of menu 1 of menu bar item 1 of menu bar 1 whose name starts with "Settings")' || true
+sleep 2
 osascript -e 'tell application "System Events" to tell process "Signalbox" to click button "General" of toolbar 1 of window 1' || true
 sleep 1
 screencapture -x "$EVIDENCE/10e-shortcut-recorder/recorder-idle.png" || true
@@ -428,10 +453,10 @@ defaults read com.dwmkerr.signalbox KeyboardShortcuts_openJumplist 2>/dev/null \
   | tr -d ' <>\n' | xxd -r -p \
   | tee "$EVIDENCE/10e-shortcut-recorder/migration-readback.txt" || true
 
-osascript -e 'tell application "Signalbox" to activate' || true
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click menu bar item 1 of menu bar 1' || true
 sleep 1
-osascript -e 'tell application "System Events" to key code 43 using {command down}' || true
-sleep 1
+osascript -e 'tell application "System Events" to tell process "Signalbox" to click (first menu item of menu 1 of menu bar item 1 of menu bar 1 whose name starts with "Settings")' || true
+sleep 2
 osascript -e 'tell application "System Events" to tell process "Signalbox" to click button "General" of toolbar 1 of window 1' || true
 sleep 1
 screencapture -x "$EVIDENCE/10e-shortcut-recorder/migration-recorder.png" || true
@@ -449,6 +474,11 @@ which decode to ⌘⇧Space, and the migration screenshot shows the same. If the
 key, permissions, or any recorder operation fails, record a `warn` with a
 note and continue to the `defaults import` restoration. Note that the user's
 defaults domain was restored from the snapshot.
+
+Close the Settings window with Cmd-W, never by clicking "button 1 of window 1".
+The toolbar buttons come first in the accessibility order, so button 1 is a
+pane button - on the Search pane that is "Rebuild Index...", which would kick
+off a full reindex of the user's real corpus.
 
 ## Step 11 - teardown
 
