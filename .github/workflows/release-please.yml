@@ -208,41 +208,6 @@ jobs:
           gh release upload "$TAG" \
             "Signalbox-${version}.zip" "Signalbox-${version}.zip.sha256" --clobber
 
-  # Regenerate the cask in dwmkerr/homebrew-tools from the notarized app zip.
-  brew:
-    needs: [release-please, app]
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
-
-      - name: Update cask
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          version="${TAG#v}"
-          export VERSION="$version"
-          export SHA_APP="$(gh release download "$TAG" \
-            --pattern "Signalbox-${version}.zip.sha256" -O - | cut -d' ' -f1)"
-          envsubst < packaging/signalbox-cask.rb.tmpl > signalbox.rb
-
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/dwmkerr/homebrew-tools.git" tap
-          mkdir -p tap/Casks
-          cp signalbox.rb tap/Casks/signalbox.rb
-          cd tap
-          # A pre-cask formula, if one was ever pushed, must go: a tap with
-          # both makes `brew install dwmkerr/tools/signalbox` ambiguous.
-          git rm -f Formula/signalbox.rb 2>/dev/null || true
-          git config user.name "dwmkerr"
-          git config user.email "dwmkerr@gmail.com"
-          git add Casks/signalbox.rb
-          git commit -m "chore: update signalbox cask to ${TAG}"
-          git push
-
   npm:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
@@ -269,12 +234,16 @@ jobs:
         working-directory: components/cli
         run: npm publish --access public
 
-  # Image publishing lives in deploy.yml (workflow_call + workflow_dispatch)
-  # so it can also be run on demand and carries no release-please coupling.
-  # A direct call, not a tag trigger, so GITHUB_TOKEN's no-cascade rule for
-  # tag-push workflows does not apply.
-  docker:
-    needs: release-please
+  # Every publishing channel lives in deploy.yml (workflow_call +
+  # workflow_dispatch) so any one of them can be re-run on demand for a version
+  # whose release run is long gone - a channel that fails must not mean cutting
+  # another release to retry it. A direct call, not a tag trigger, so
+  # GITHUB_TOKEN's no-cascade rule for tag-push workflows does not apply.
+  #
+  # Needs `app`: the cask embeds the notarized zip's checksum, so the asset has
+  # to be on the release before brew reads it.
+  deploy:
+    needs: [release-please, app]
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     permissions:
       contents: read
