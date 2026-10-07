@@ -1,4 +1,4 @@
-// Routes the user to a session's origin: a tmux pane or a URL. Portability
+// Routes the user to a session's origin: tmux, native iTerm, editor, or URL. Portability
 // rule: everything jump needs is data captured at fire time - never assume
 // the local topology (socket paths, terminal app, client count).
 
@@ -67,19 +67,20 @@ async function fireSeen(hubURL: string, key: string): Promise<void> {
   }
 }
 
-// Locates the iTerm2 session on the target tty and raises exactly that window,
+// Locates an iTerm2 session by tty or id and raises exactly that window,
 // activating iTerm only on a hit. A miss returns WITHOUT activating, so this
 // doubles as a probe for "is the switched client hosted in iTerm?": were it to
 // `activate` on a miss, it would flash iTerm to the front before we raise the
-// terminal that actually holds the session - the jolt. The tty arrives as argv
+// terminal that actually holds the session - the jolt. Values arrive as argv
 // so no data is ever interpolated into the script body.
 const iTermRaiseScript = `on run argv
-	set targetTty to item 1 of argv
+	set matchBy to item 1 of argv
+	set targetValue to item 2 of argv
 	tell application "iTerm2"
 		repeat with w in windows
 			repeat with t in tabs of w
 				repeat with s in sessions of t
-					if tty of s is targetTty then
+					if (matchBy is "tty" and tty of s is targetValue) or (matchBy is "id" and id of s is targetValue) then
 						select t
 						select s
 						set index of w to 1
@@ -93,11 +94,11 @@ const iTermRaiseScript = `on run argv
 	return "not-found"
 end run`;
 
-// True only when an iTerm window actually owning this tty was raised - not when
+// True only when an iTerm window actually owning the target was raised - not when
 // the script merely ran. The old `status === 0` check read a bare app-activate
 // as a raise and so masked tty misses.
-function raiseITermWindow(tty: string): boolean {
-  const out = command("osascript", ["-", tty], { input: iTermRaiseScript });
+function raiseITerm(matchBy: "tty" | "id", target: string): boolean {
+  const out = command("osascript", ["-", matchBy, target], { input: iTermRaiseScript });
   return out.status === 0 && out.stdout.toString().trim() === "raised";
 }
 
@@ -162,7 +163,7 @@ function activateTerminal(bundle: string | undefined, clientTTY: string): void {
   // iTerm can find any window by tty, so probe it first regardless of the
   // recorded terminal - but only when it is already running, since the probe's
   // `tell application "iTerm2"` would otherwise launch it and open a window.
-  if (clientTTY && isRunning(iterm2Bundle) && raiseITermWindow(clientTTY)) return;
+  if (clientTTY && isRunning(iterm2Bundle) && raiseITerm("tty", clientTTY)) return;
   // The client is not in iTerm (or its tty is unknown): raise the recorded
   // terminal, but never launch one - a fresh window would not hold the session.
   if (bundle && bundle !== iterm2Bundle) {
@@ -226,6 +227,13 @@ export async function jumpTo(hubURL: string, e: Event): Promise<void> {
     // for old events that predate it.
     const bundle = e.origin.cursor.bundle || cursorBundle;
     if (!raiseEditor(bundle, e.cwd ?? "")) throw new Error(`could not raise editor (${bundle})`);
+    await fireSeen(hubURL, e.session_key);
+    return;
+  }
+  if (e.origin.iterm) {
+    if (!isRunning(iterm2Bundle) || !raiseITerm("id", e.origin.iterm.session)) {
+      throw new Error("could not raise iTerm session");
+    }
     await fireSeen(hubURL, e.session_key);
     return;
   }

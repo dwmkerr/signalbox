@@ -69,22 +69,25 @@ struct SessionEvent: Decodable {
     }
 }
 
-// Origin union per contract: {"tmux": {...}} or {"url": "..."}. Decoding never
-// throws: origin is display-hint data only, and a type mismatch from a skewed
-// hub would otherwise fail the whole /state decode and blind the app (or
-// silently drop stream events, including `ended`).
+// Origin union per contract: {"tmux": {...}}, {"url": "..."},
+// {"cursor": {...}}, or {"iterm": {...}}. Decoding never throws: origin is
+// display-hint data only, and a type mismatch from a skewed hub would otherwise
+// fail the whole /state decode and blind the app (or silently drop stream
+// events, including `ended`).
 struct SessionOrigin: Decodable {
     let tmux: TmuxTarget?
     let url: String?
     let cursor: CursorTarget?
+    let iterm: ITermTarget?
 
-    private enum CodingKeys: String, CodingKey { case tmux, url, cursor }
+    private enum CodingKeys: String, CodingKey { case tmux, url, cursor, iterm }
 
     init(from decoder: Decoder) throws {
         let container = try? decoder.container(keyedBy: CodingKeys.self)
         tmux = try? container?.decodeIfPresent(TmuxTarget.self, forKey: .tmux)
         url = try? container?.decodeIfPresent(String.self, forKey: .url)
         cursor = try? container?.decodeIfPresent(CursorTarget.self, forKey: .cursor)
+        iterm = try? container?.decodeIfPresent(ITermTarget.self, forKey: .iterm)
     }
 
     // Cursor's own agent: the origin carries only the app bundle id - the CLI
@@ -97,6 +100,19 @@ struct SessionOrigin: Decodable {
         init(from decoder: Decoder) throws {
             let container = try? decoder.container(keyedBy: CodingKeys.self)
             bundle = try? container?.decodeIfPresent(String.self, forKey: .bundle)
+        }
+    }
+
+    // Native iTerm sessions carry the stable GUID captured from
+    // ITERM_SESSION_ID; the CLI uses it to select the exact tab or split pane.
+    struct ITermTarget: Decodable {
+        let session: String?
+
+        private enum CodingKeys: String, CodingKey { case session }
+
+        init(from decoder: Decoder) throws {
+            let container = try? decoder.container(keyedBy: CodingKeys.self)
+            session = try? container?.decodeIfPresent(String.self, forKey: .session)
         }
     }
 
