@@ -11,8 +11,19 @@ on:
       push_latest:
         type: boolean
         default: false
+      docker:
+        type: boolean
+        default: true
+      fly:
+        type: boolean
+        default: true
+      brew:
+        type: boolean
+        default: true
     secrets:
       FLY_API_TOKEN:
+        required: true
+      HOMEBREW_TAP_GITHUB_TOKEN:
         required: true
   workflow_dispatch:
     inputs:
@@ -22,9 +33,19 @@ on:
       push_latest:
         type: boolean
         default: false
+      docker:
+        type: boolean
+        default: true
+      fly:
+        type: boolean
+        default: true
+      brew:
+        type: boolean
+        default: true
 
 jobs:
   deploy:
+    if: ${{ inputs.docker }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,6 +82,9 @@ jobs:
   # is better to fail the release loudly than to leave the hub behind again.
   fly:
     needs: deploy
+    # always() so a deliberately skipped docker does not skip fly with it. The
+    # result check still stops fly deploying on top of a failed image push.
+    if: ${{ always() && inputs.fly && needs.deploy.result != 'failure' && needs.deploy.result != 'cancelled' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -95,3 +119,46 @@ jobs:
           done
           echo "signalbox-hub did not answer /healthz after the deploy" >&2
           exit 1
+
+  # The cask carries the notarized zip's checksum, so this reads the release
+  # rather than building anything. That is also why it can republish the cask
+  # for an older version on demand, long after its release run has gone.
+  brew:
+    if: ${{ inputs.brew }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Update cask
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          TAG: ${{ inputs.version }}
+        run: |
+          version="${TAG#v}"
+          export VERSION="$version"
+          export SHA_APP="$(gh release download "$TAG" \
+            --pattern "Signalbox-${version}.zip.sha256" -O - | cut -d' ' -f1)"
+          envsubst < packaging/signalbox-cask.rb.tmpl > signalbox.rb
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/dwmkerr/homebrew-tools.git" tap
+          mkdir -p tap/Casks
+          cp signalbox.rb tap/Casks/signalbox.rb
+          cd tap
+          # A pre-cask formula, if one was ever pushed, must go: a tap with
+          # both makes `brew install dwmkerr/tools/signalbox` ambiguous.
+          git rm -f Formula/signalbox.rb 2>/dev/null || true
+          git config user.name "dwmkerr"
+          git config user.email "dwmkerr@gmail.com"
+          git add Casks/signalbox.rb
+          # Re-publishing a version already in the tap is a no-op, not a
+          # failure: the point of dispatching one channel is to be able to
+          # retry it safely.
+          if git diff --cached --quiet; then
+            echo "cask already at ${TAG}" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git commit -m "chore: update signalbox cask to ${TAG}"
+          git push
