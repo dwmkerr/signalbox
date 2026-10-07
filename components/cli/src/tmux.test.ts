@@ -5,6 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { currentOrigin } from "./tmux";
 
+// These drive a real tmux server, so they only run where tmux exists. The
+// macOS CI image ships without it, and a suite that throws in beforeAll fails
+// as one unnamed test with no clue why.
+const hasTmux = spawnSync("tmux", ["-V"]).status === 0;
+
 // Driven against a REAL tmux server on a private socket. The bug these cover
 // was invisible to a mocked tmux: the pane the hook runs in was perfectly
 // valid, it just belonged to a different session's agent.
@@ -31,6 +36,7 @@ let sharedPanes: string[] = [];
 const savedEnv = { TMUX: process.env.TMUX, TMUX_PANE: process.env.TMUX_PANE };
 
 beforeAll(() => {
+  if (!hasTmux) return;
   for (const d of [dirA, dirB, shared]) mkdirSync(d, { recursive: true });
   tmux("new-session", "-d", "-s", "t", "-c", dirA);
   paneA = tmux("list-panes", "-t", "t:", "-F", "#{pane_id}");
@@ -47,13 +53,14 @@ beforeAll(() => {
 });
 
 afterAll(() => {
+  if (!hasTmux) return;
   tmux("kill-server");
   rmSync(root, { recursive: true, force: true });
   process.env.TMUX = savedEnv.TMUX;
   process.env.TMUX_PANE = savedEnv.TMUX_PANE;
 });
 
-describe("currentOrigin pane resolution", () => {
+describe.skipIf(!hasTmux)("currentOrigin pane resolution", () => {
   test("keeps TMUX_PANE when it already matches the agent's cwd", () => {
     process.env.TMUX_PANE = paneA;
     expect(currentOrigin(dirA)?.tmux?.pane).toBe(paneA);
