@@ -137,7 +137,8 @@ export class Forwarder implements RequestHandler {
     if (req.method === "POST" && url.pathname === "/events") return this.handleEvents(req);
     if (req.method === "POST" && url.pathname === "/command") return this.handleCommand(req);
     if (req.method === "GET" && url.pathname === "/state") {
-      return Response.json({ sessions: this.store.list() });
+      // Forwarder clients need the same horizon as hub clients; the uplink has nothing to add.
+      return Response.json({ sessions: this.store.list(), older_horizon_seconds: ev.OlderHorizonSeconds });
     }
     if (req.method === "GET" && url.pathname === "/exchanges") {
       return this.handleExchanges(url);
@@ -274,6 +275,7 @@ export class Forwarder implements RequestHandler {
     return noStoreJSON({
       enabled: true,
       query,
+      totalHits: index.countHits(query),
       results: index.search(query, searchResultLimit, this.store.list()),
     });
   }

@@ -23,6 +23,7 @@ import { mapCodexHook, codexReply, codexSessionName, resolveCodexTranscript, typ
 import {
   loadSettings, saveSettings, settingsPath, normalizeBindInput, lanHint,
   normalizeIntInput, normalizeUpstreamInput, shouldGenerateToken, generateToken,
+  expireAgeMs, expireLabel,
 } from "./config";
 import { runSetup } from "./setup";
 import { openIndex, type IndexStatus, type SearchResult } from "./searchindex";
@@ -135,7 +136,7 @@ env: SIGNALBOX_URL (default ${DefaultURL})
      SIGNALBOX_CONFIG (settings file; default $XDG_CONFIG_HOME/signalbox/settings.json,
                        falling back to ~/.config/signalbox/settings.json; --config wins)
      SIGNALBOX_PROFILE=full|redacted
-     SIGNALBOX_EXPIRE (hub: end sessions with no agent event for this long, default 24h)
+     SIGNALBOX_EXPIRE (hub: end sessions with no agent event for this long, default 30d)
      SIGNALBOX_BIND (hub: bind address, default 127.0.0.1; --bind wins)
      SIGNALBOX_TOKEN (bearer token; required to bind non-loopback, sent by clients)
      SIGNALBOX_UPSTREAM (hub: forward to this remote hub instead of owning state; --upstream wins)
@@ -228,7 +229,7 @@ async function buildEvent(opts: {
   // check: a pane is a more precise jump target than an app window.
   if (opts.origin) origin = opts.origin;
   else if (opts.originURL) origin = { kind: "url", url: opts.originURL };
-  else origin = tmux.currentOrigin() ?? editorTerminalOrigin(process.env);
+  else origin = tmux.currentOrigin(cwd, ev.agentFamily(opts.agent)) ?? editorTerminalOrigin(process.env);
   let sessionKey = opts.sessionKey ?? "";
   if (!sessionKey) {
     // Key on the agent family, never the host-prefixed display name: a
@@ -598,25 +599,6 @@ async function runCodexHook(): Promise<void> {
 
 // ---- hub -----------------------------------------------------------------------
 
-function expireAgeMs(): number {
-  const def = 24 * 60 * 60 * 1000;
-  const v = process.env.SIGNALBOX_EXPIRE;
-  if (!v) return def;
-  // Go-style duration strings ("24h", "90m", "1h30m").
-  const m = v.match(/^(?:(\d+(?:\.\d+)?)h)?(?:(\d+(?:\.\d+)?)m)?(?:(\d+(?:\.\d+)?)s)?$/);
-  if (!m || (!m[1] && !m[2] && !m[3])) {
-    console.error(`signalbox: invalid SIGNALBOX_EXPIRE ${JSON.stringify(v)}, using 24h`);
-    return def;
-  }
-  const ms =
-    (parseFloat(m[1] ?? "0") * 3600 + parseFloat(m[2] ?? "0") * 60 + parseFloat(m[3] ?? "0")) * 1000;
-  if (ms <= 0) {
-    console.error(`signalbox: invalid SIGNALBOX_EXPIRE ${JSON.stringify(v)}, using 24h`);
-    return def;
-  }
-  return ms;
-}
-
 function runHub(args: string[]): void {
   const { flags } = parseFlags(args, ["remote"]);
   const port = parseInt(flags["port"] ?? "8377", 10);
@@ -769,7 +751,7 @@ function runHub(args: string[]): void {
     // from a loopback-looking sidecar address, so peer address proves nothing).
     listen(hub, port, bind);
     hubLog(
-      `signalbox hub ${displayVersion} (remote mode) listening on http://${bind}:${port} - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: ${stateDir()}, expire: ${expire / 3600000}h)`
+      `signalbox hub ${displayVersion} (remote mode) listening on http://${bind}:${port} - platform TLS assumed in front; EVERY request needs Authorization: Bearer (except /healthz and POST /pair) (state: ${stateDir()}, expire: ${expireLabel(expire)})`
     );
     return;
   }
@@ -778,7 +760,7 @@ function runHub(args: string[]): void {
   // are entirely unchanged by the LAN TLS work.
   listen(hub, port, "127.0.0.1");
   hubLog(
-    `signalbox hub ${displayVersion} listening on http://127.0.0.1:${port} (state: ${stateDir()}, expire: ${expire / 3600000}h)`
+    `signalbox hub ${displayVersion} listening on http://127.0.0.1:${port} (state: ${stateDir()}, expire: ${expireLabel(expire)})`
   );
   if (!isLoopbackAddress(bind)) {
     if (tls) {

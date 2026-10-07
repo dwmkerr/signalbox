@@ -71,7 +71,7 @@
   /* Cards. The one list surface, and the layout a day of real use settled on:
      a tap expands the preview, the arrow or a right-swipe asks the owning
      machine to jump, a left-swipe acks or hides. */
-  .cards { flex:1; overflow:hidden; padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+  .cards { flex:1; overflow-y:auto; padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
   .card { display:flex; align-items:center; gap:11px; background:#141416; border:1px solid #ffffff1a;
           border-radius:12px; padding:12px 14px; position:relative; }
   .card .mk { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
@@ -96,6 +96,11 @@
      including a plain-terminal row; URL-only information rows do not. */
   .card .arrow { width:34px; height:34px; border-radius:50%; background:#0A84FF1f; color:#0A84FF;
                  display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:17px; }
+  /* Age keeps quiet sessions out of the way without giving them Hidden's dimming. */
+  .session-section summary { color:#6E6E73; font-size:13px; font-weight:500; padding:6px 4px;
+                             cursor:pointer; }
+  .session-section .card { margin-top:8px; }
+  .card.dimmed { opacity:.55; }
 
   /* Swipe reveal, shown mid-gesture so the spec pins the actions and colours:
      the trailing edge acks (Seen) then hides. */
@@ -239,25 +244,37 @@
           </span>
           <span class="arrow">&#8631;</span>
         </div>
-        <div class="card">
-          <span class="mk ring"></span>
-          <span class="glyph"><svg viewBox="0 0 20 20" width="16" height="16"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#6e6e73" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#34C759" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#6e6e73" stroke-width="1.6" stroke-linecap="round"/></svg></span>
-          <span class="body">
-            <span class="top"><span class="nm" style="color:#8e8e93;font-weight:400">release-notes</span><span class="host">studio</span></span>
-            <span class="sub">Drafted the 0.2.0 notes from the merged PRs.</span>
-          </span>
-          <span class="arrow">&#8631;</span>
-        </div>
+        <details class="session-section">
+          <summary>Older (1)</summary>
+          <div class="card">
+            <span class="mk ring"></span>
+            <span class="glyph"><svg viewBox="0 0 20 20" width="16" height="16"><rect x="1.5" y="3" width="17" height="14" rx="3" fill="none" stroke="#6e6e73" stroke-width="1.6"/><path d="M 6 8 l 3 2.4 L 6 12.8" fill="none" stroke="#34C759" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="11" y1="13" x2="14.5" y2="13" stroke="#6e6e73" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+            <span class="body">
+              <span class="top"><span class="nm" style="color:#8e8e93;font-weight:400">release-notes</span><span class="host">studio</span></span>
+              <span class="sub">Drafted the 0.2.0 notes from the merged PRs.</span>
+            </span>
+            <span class="arrow">&#8631;</span>
+          </div>
+        </details>
+        <details class="session-section">
+          <summary>Hidden (1)</summary>
+          <div class="card dimmed">
+            <span class="body">
+              <span class="top"><span class="nm">build-cache</span></span>
+              <span class="sub">Cache cleanup finished.</span>
+            </span>
+          </div>
+        </details>
       </div>
       <div class="tabbar">
         <div class="tab on"><span>&#9776;</span>Sessions</div>
         <div class="tab"><span>&#9881;</span>Settings</div>
       </div>
     </div></div>
-    <div class="phonecap">Sessions. Tap a card to expand, the arrow or a right-swipe to jump,
-      left-swipe for Seen and Hide. Every machine row carries the arrow, including the
-      plain-terminal <b>release-notes</b> row. The URL-only <b>ci: release</b> row is information and
-      carries no arrow.</div>
+    <div class="phonecap">Sessions. Tap a card to open its chat, the arrow to jump,
+      right-swipe to toggle read state, left-swipe to Hide. Older and Hidden start collapsed;
+      tap either divider to expand. The older <b>release-notes</b> card keeps its arrow and actions.
+      The URL-only <b>ci: release</b> row carries no arrow.</div>
   </div>
 
   <div class="phonewrap">
@@ -383,8 +400,8 @@ the reducer, and a surface that re-derives them will drift.</p>
 <p>The search field lives in the navigation bar's drawer: it is hidden until you pull the list down,
 which keeps the board itself uncluttered. Search filters live over name, prompt, reply and agent. A
 query starting with <code>#</code> switches to tag mode (<code>#ops</code> shows only sessions carrying
-that tag, case-insensitive, exact match), matching the jumplist. Hidden rows drop out of the main
-list (see below); acked rows stay, drawn quiet.</p>
+that tag, case-insensitive, exact match), matching the jumplist. Older and hidden rows leave the main
+list for their sections (see below); acked rows stay, drawn quiet.</p>
 
 <h3>Pinned <span class="chip built">built</span></h3>
 <p>Long-press a card and choose <b>Pin</b> (the Messages / Telegram gesture). The session stays at the
@@ -395,15 +412,32 @@ user events like <code>seen</code> and <code>hide</code>: the reducer serializes
 and every surface (this app, the jumplist, the menu bar) shows the same partition.</p>
 <p><b>Hiding a pinned session unpins it.</b> Hide is the stronger, more recent intent.</p>
 
+<h3>Older <span class="chip built">built</span></h3>
+<p>Sessions you have left alone collapse behind <b>Older (N)</b>, below the main cards and above
+Hidden, so the board stays focused. A session is older when time since its last engagement is
+strictly greater than the hub's horizon (24 hours by default). Engagement is also the hub's sort
+key, so the sections cannot interleave. Agent activity alone does not keep a session in front of you.</p>
+<ul>
+  <li>The divider appears only when there are older matches. It starts collapsed; tap its chevron
+  and count row to expand or collapse it.</li>
+  <li>Older cards remain live and undimmed: tap opens chat, the arrow jumps, long-press offers pin
+  and read actions, a leading swipe toggles read state (including a full swipe), and a trailing
+  swipe offers <b>Hide</b> (no full swipe).</li>
+  <li>Search includes older sessions and automatically expands the section to reveal its matches,
+  even when the main list has no matches. Clearing search restores the manual expansion state.</li>
+  <li>Pinned sessions never become older; they stay at the top. A session that is both older and
+  hidden appears only under Hidden, because explicit user intent takes precedence over age.</li>
+</ul>
+
 <h3>Hidden <span class="chip built">built</span></h3>
 <p>Hidden sessions collapse into a quiet divider at the bottom of the list - the Reminders "Show
 Completed" pattern. The section holds only sessions that are <i>currently silent and deliberately
 hidden</i>: a hidden session that speaks again returns to the main list on its own, so the section
 stays small.</p>
 <ul>
-  <li>The divider is <b>always shown</b> once the board has a session, "Hidden (0)" included, faint and
-  small, so it is always clear whether a session is set aside. "Hidden (0)" is inert: no chevron,
-  nothing to expand.</li>
+  <li>The divider is <b>always shown</b> when any section has a match, even if all matches are older.
+  "Hidden (0)" stays visible, faint and small, so it is always clear whether a session is set aside.
+  It is inert: no chevron, nothing to expand. With no matches anywhere, neither divider appears.</li>
   <li>Tap to expand: hidden rows appear dimmed with an eye-slash mark. Swipe offers <b>Unhide</b>
   (the wire's <code>show</code> user event - clears <code>hidden</code> without waiting for the
   agent). Tap to collapse again.</li>

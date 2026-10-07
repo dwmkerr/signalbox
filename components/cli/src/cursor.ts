@@ -4,7 +4,7 @@
 // format in particular is unverified - flagged inline so it can be checked
 // empirically. Unknown fields are ignored so payload growth is harmless.
 
-import { Busy, Done, Attention, Error as ErrorType, Ended, type Origin } from "./event";
+import { Busy, Done, Attention, Error as ErrorType, type Origin } from "./event";
 import { stripHarness, lastAssistantText, lastUserText, type Mapped } from "./claude";
 
 // Cursor's stable macOS bundle id (Cursor ships as a ToDesktop build). Captured
@@ -76,12 +76,12 @@ export function mapCursorHook(h: CursorHook): Mapped | null {
     case "sessionStart":
       return { eventType: Busy, reason: "session_start", detail: "" };
     case "stop": {
-      // Cursor carries the outcome on `status`; map each to the matching
-      // lifecycle state, defaulting a missing/unknown status to a plain finish
-      // so a payload change can never strand a session as "busy".
+      // Aborting stops only the turn, so the session must remain resumable.
+      // Missing/unknown status also finishes the turn so a payload change
+      // cannot strand a session as "busy".
       switch (h.status) {
         case "aborted":
-          return { eventType: Ended, reason: "aborted", detail: "" };
+          return { eventType: Done, reason: "aborted", detail: "" };
         case "error":
           return { eventType: ErrorType, reason: "error", detail: "" };
         default:

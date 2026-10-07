@@ -62,6 +62,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuRebuildDeferred = false
     private let menu = NSMenu()
     private var sessions: [String: Session] = [:]
+    // The hub owns the horizon so the two boards cannot disagree; the default
+    // is the same value and covers an older hub.
+    private var olderHorizon: TimeInterval = 24 * 60 * 60
     // Hub-authoritative display order: /state order is adopted verbatim, and
     // SSE updates reposition single keys instead of re-sorting the whole list,
     // so the app can never disagree with the hub's engagement-MRU ordering.
@@ -217,6 +220,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         guard http.statusCode == 200 else { throw HubError.status(http.statusCode) }
         let decoded = try JSONDecoder().decode(StateResponse.self, from: data)
+        if let olderHorizonSeconds = decoded.olderHorizonSeconds {
+            olderHorizon = olderHorizonSeconds
+        }
         applyFullState(decoded.sessions)
     }
 
@@ -263,7 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let doc = try? JSONDecoder().decode(SearchDoc.self, from: data) else {
                 return .unreachable
             }
-            return .available(doc.results)
+            return .available(SearchResponse(totalHits: doc.totalHits, results: doc.results))
         case 409: return .disabled
         case 501: return .notSupported
         default: return .unreachable
@@ -716,6 +722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func paletteRows() -> [PaletteRow] {
         let tokens = activeFilters()
+        let now = Date()
         // Hidden rows are included and flagged; the palette groups them under a
         // collapsed "Hidden (N)" divider rather than dropping them, mirroring the
         // mobile board and hub-jumplist.html.
@@ -750,7 +757,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 engagedDate: session.engagedDate,
                 tags: session.tags ?? [],
                 pinned: session.pinned,
-                isHidden: session.hidden
+                isHidden: session.hidden,
+                isOlder: isOlder(session, now: now)
             )
         }
     }
@@ -760,6 +768,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func sessionAgeStart(_ session: Session) -> Date {
         guard session.event.event == "busy" else { return session.date }
         return session.busySince ?? session.date
+    }
+
+    // Engagement is also the board's sort key, so the age partitions cannot interleave.
+    private func isOlder(_ session: Session, now: Date) -> Bool {
+        guard !session.pinned else { return false }
+        return now.timeIntervalSince(session.engagedDate) > olderHorizon
     }
 
     // MARK: - Action-line location (contract v4)
@@ -929,14 +943,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Contract: one row per session in /state order. The Slack grammar
         // (marks + weight), not filtering, says what needs you - the working
-        // set stays spatially stable; hidden rows drop out, as do sessions
-        // outside the additional filters (Settings) so the menu matches the
-        // jumplist. A dropdown taller than the screen scrolls under the mouse
-        // and loses the spatial contract; the overflow keeps board order in a
-        // submenu.
+        // set stays spatially stable. Hidden and older rows drop out: the
+        // dropdown is a quick-switch affordance, not an archive. Additional
+        // filters (Settings) also apply. A dropdown taller than the screen
+        // scrolls under the mouse and loses the spatial contract; the overflow
+        // keeps board order in a submenu.
         let tokens = activeFilters()
+        let now = Date()
         let visible = orderedSessions().filter {
-            !$0.hidden && passesFilters($0, tokens)
+            !$0.hidden && passesFilters($0, tokens) && !isOlder($0, now: now)
         }
         if visible.isEmpty {
             let item = NSMenuItem(
@@ -945,7 +960,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.isEnabled = false
             menu.addItem(item)
         }
-        let now = Date()
         for session in visible.prefix(Self.maxInlineMenuRows) {
             menu.addItem(sessionMenuItem(session, now: now))
         }

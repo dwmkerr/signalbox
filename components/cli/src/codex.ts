@@ -34,12 +34,11 @@ export interface Mapped {
 }
 
 // mapCodexHook translates a hook payload per the adapter table. null means the
-// hook is deliberately ignored - the caller must still exit 0. The events
-// mirror Claude's: a submitted prompt or a fresh session is busy, a completed
-// turn is done, a permission request is the blocked "needs you" state, and a
-// session end removes the row. clearEnds=false keeps a cleared session on the
-// board (mapped to done), the same guard as Claude's - inert unless Codex sends
-// a SessionEnd with reason "clear".
+// hook is deliberately ignored - the caller must still exit 0.
+// Quitting must preserve the conversation read by the phone's chat view until
+// expiry or an explicit remove. clearEnds=true mirrors Claude's /clear rule:
+// a fresh session id replaces the old row instead of leaving a duplicate.
+// clearEnds=false keeps the old exchange if Codex sends reason "clear".
 export function mapCodexHook(h: CodexHook, clearEnds = true): Mapped | null {
   switch (h.hook_event_name) {
     case "SessionStart":
@@ -55,7 +54,10 @@ export function mapCodexHook(h: CodexHook, clearEnds = true): Mapped | null {
       if (!clearEnds && h.reason === "clear") {
         return { eventType: Done, reason: "clear", detail: "" };
       }
-      return { eventType: Ended, reason: "session_end", detail: "" };
+      if (h.reason === "clear") {
+        return { eventType: Ended, reason: "session_end", detail: "" };
+      }
+      return { eventType: Done, reason: "session_end", detail: "" };
   }
   return null;
 }

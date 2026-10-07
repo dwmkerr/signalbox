@@ -133,9 +133,12 @@ describe("forwarder routes", () => {
     const { forwarder } = newForwarder({ searchEnabled: true });
     const res = (await forwarder.handle(request("/search?q=needle"), fakeServer))!;
     expect(res.status).toBe(200);
-    const body = await res.json() as { enabled: boolean; query: string; results: unknown[] };
+    const body = await res.json() as {
+      enabled: boolean; query: string; totalHits: number; results: unknown[];
+    };
     expect(body.enabled).toBe(true);
     expect(body.query).toBe("needle");
+    expect(body.totalHits).toBe(0);
     expect(Array.isArray(body.results)).toBe(true);
   });
 
@@ -161,7 +164,7 @@ describe("forwarder routes", () => {
     await postJSON(forwarder, "/events", wireEvent("script:echo"));
     const state = (await forwarder.handle(request("/state"), fakeServer))!;
     // State is fed exclusively by the downlink, so the upstream echo applies once.
-    expect(await state.json()).toEqual({ sessions: [] });
+    expect(await state.json()).toEqual({ sessions: [], older_horizon_seconds: 86400 });
   });
 
   test("POST /events validates content type, JSON, and event shape", async () => {

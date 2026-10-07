@@ -3,14 +3,14 @@ import Foundation
 /// One session that contains matching turns, as returned by `GET /search`.
 ///
 /// Results are grouped by session rather than by turn: a session that mentions
-/// the term forty times is one row carrying its best snippet and that count,
+/// the term forty times is one row carrying its newest matching snippet and that count,
 /// because the user is looking for the conversation, not each occurrence.
 struct SearchResult: Decodable, Equatable {
     /// The transcript's own session id, stable across the session's lifetime.
     let sessionUuid: String
-    /// Agent that owns the best matching turn ("claude", "codex", "cursor").
+    /// Agent that owns the newest matching turn ("claude", "codex", "cursor").
     let agent: String
-    /// Working directory recorded for the best matching turn, when known.
+    /// Working directory recorded for the newest matching turn, when known.
     let cwd: String?
     /// FTS5 excerpt with each match wrapped in a `<mark>` element.
     let snippet: String
@@ -59,10 +59,33 @@ struct SearchResult: Decodable, Equatable {
     }
 }
 
+/// Formats transcript dates, including the fractional seconds written by agents.
+@MainActor
+enum SearchDate {
+    private static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let whole = ISO8601DateFormatter()
+    private static let display: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMM yyyy HH:mm"
+        return formatter
+    }()
+
+    /// Returns a date and local time, or nil for a missing or malformed timestamp.
+    static func string(_ iso: String) -> String? {
+        guard let date = fractional.date(from: iso) ?? whole.date(from: iso) else { return nil }
+        return display.string(from: date)
+    }
+}
+
 /// The body of a successful `GET /search`.
 struct SearchDoc: Decodable {
     let enabled: Bool
     let query: String
+    let totalHits: Int
     let results: [SearchResult]
 
     init(from decoder: Decoder) throws {
@@ -70,9 +93,20 @@ struct SearchDoc: Decodable {
         enabled = (try? c.decodeIfPresent(Bool.self, forKey: .enabled)) ?? true
         query = (try? c.decodeIfPresent(String.self, forKey: .query)) ?? ""
         results = (try? c.decodeIfPresent([SearchResult].self, forKey: .results)) ?? []
+        // Older hubs predate totalHits. Summing their grouped result counts
+        // preserves the best available indicator during a rolling upgrade.
+        totalHits = (try? c.decodeIfPresent(Int.self, forKey: .totalHits))
+            ?? results.reduce(0) { $0 + $1.hitCount }
     }
 
-    private enum CodingKeys: String, CodingKey { case enabled, query, results }
+    private enum CodingKeys: String, CodingKey { case enabled, query, totalHits, results }
+}
+
+/// A successful contents query: the complete turn count plus the bounded,
+/// session-grouped rows rendered by the jumplist.
+struct SearchResponse: Equatable {
+    let totalHits: Int
+    let results: [SearchResult]
 }
 
 /// Index progress, from `GET /search/status`.
@@ -142,7 +176,7 @@ struct SearchStatusDoc: Decodable {
 /// status, so the app keeps them apart all the way to the surface.
 enum SearchAvailability: Equatable {
     /// Results were returned (possibly an empty list, meaning nothing matched).
-    case available([SearchResult])
+    case available(SearchResponse)
     /// The setting is off on the machine that owns the transcripts (HTTP 409).
     case disabled
     /// This hub is a forwarder and never serves search (HTTP 501).
@@ -154,7 +188,7 @@ enum SearchAvailability: Equatable {
 extension SearchAvailability {
     /// Results when there are some, empty otherwise; for callers that only render rows.
     var results: [SearchResult] {
-        if case .available(let rows) = self { return rows }
+        if case .available(let response) = self { return response.results }
         return []
     }
 }

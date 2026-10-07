@@ -40,14 +40,22 @@
                    color:#EDEDED; font-size:13px; font-family:inherit; }
   header .search::placeholder { color:#6E6E73; }
   header .verbs { display:flex; align-items:center; gap:10px; color:#B5B5BA; font-size:12px; }
+  header .verbs .search-count { color:#98989D; white-space:nowrap; }
   kbd { background:#3a3a3f; border:1px solid #ffffff1a; border-radius:4px; padding:1px 6px;
         font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11px; color:#D8D8DC; }
   kbd.sc, b.sc { font-variant:small-caps; letter-spacing:.5px; }
   .body { display:flex; }
-  /* Cap the list so a long board scrolls in place - the Hidden divider then
-     sits at the foot of that scroll, below every visible row. */
+  /* Cap the list so a long board scrolls in place, keeping the Older and Hidden
+     dividers below every visible row. */
   .list { width:430px; border-right:1px solid #ffffff14; padding:10px 0 12px; max-height:360px; overflow-y:auto; }
   .list h3 { color:#6E6E73; font-size:10px; letter-spacing:1.5px; font-weight:600; padding:10px 24px 8px; }
+  .empty-search { padding:14px 24px; color:#6E6E73; font-size:12px; }
+  .contents-hint { display:flex; align-items:flex-start; gap:9px; margin-top:14px; padding-top:13px;
+                   border-top:1px solid #ffffff12; cursor:pointer; }
+  .contents-hint svg { flex-shrink:0; margin-top:1px; stroke:#0A84FF; }
+  .contents-hint .hint-count { color:#B5B5BA; line-height:1.35; }
+  .contents-hint .hint-action { margin-top:4px; color:#6E6E73; font-size:10.5px; }
+  .contents-hint:hover .hint-count, .contents-hint:hover .hint-action { color:#D8D8DC; }
   .row { display:flex; align-items:center; gap:10px; margin:0 10px; padding:8px 10px; border-radius:9px; cursor:pointer; }
   .row.sel { background:#2C2C31; }
   .mark { width:14px; display:flex; justify-content:center; flex-shrink:0; }
@@ -78,8 +86,7 @@
      gray, so user-applied state never reads quieter than the age beside it. */
   .pin { display:inline-flex; vertical-align:middle; margin-right:5px; }
   .pin svg { fill:#98989D; }
-  /* Hidden section: a quiet divider at the foot of the list that expands to
-     reveal set-aside sessions, dimmed and eye-slashed so they read as parked. */
+  /* Quiet dividers keep collapsed sections from competing with the active list. */
   .hdiv { display:flex; align-items:center; gap:7px; margin:8px 10px 0; padding:9px 10px;
           border-top:1px solid #ffffff12; color:#6E6E73; font-size:11px; font-weight:600;
           letter-spacing:.3px; cursor:pointer; }
@@ -114,6 +121,8 @@
   .term .resp .body-t { white-space:pre-wrap; color:#D8D8DC; }
   .term .working { color:#E8B339; }
   .term .working .spinch { display:inline-block; width:14px; color:#E8B339; }
+  .term mark.search-match { background:rgba(10,132,255,.22); color:#EDEDED; border-radius:2px;
+                            box-shadow:0 0 0 1px rgba(10,132,255,.15); }
   .term b { font-weight:700; }
   .term i { font-style:italic; }
   .term code { color:#E5C07B; font-family:inherit; } /* warm, so code never reads as a link */
@@ -126,6 +135,37 @@
   .actline { flex-shrink:0; margin-top:16px; font-size:11px; color:#6E6E73;
              font-family:-apple-system,sans-serif; display:flex; align-items:center; gap:6px; }
   .actline kbd { font-size:10.5px; }
+  /* Promoted transcript results are a search surface, not a terminal. They use
+     the full body width and carry their context and actions inline. */
+  .contents { display:none; width:100%; min-height:360px; max-height:360px; overflow-y:auto;
+              padding:13px 10px 12px; background:#1e1e21; }
+  .body.contents-mode .list, .body.contents-mode .preview { display:none; }
+  .body.contents-mode .contents { display:block; }
+  .contents-head { display:flex; justify-content:space-between; align-items:baseline;
+                   padding:4px 14px 9px; border-bottom:1px solid #ffffff12; }
+  .contents-head h3 { color:#98989D; font-size:10px; letter-spacing:1.5px; font-weight:600; }
+  .contents-head .summary { color:#6E6E73; font-size:11px; }
+  .result-row { display:grid; grid-template-columns:24px minmax(0,1fr) 185px; column-gap:12px;
+                margin:2px 0; padding:10px 14px; border-radius:9px; cursor:pointer; }
+  .result-row.sel { background:#2C2C31; }
+  .result-main { min-width:0; }
+  .result-title { display:flex; align-items:baseline; gap:8px; min-width:0; }
+  .result-title .project { color:#EDEDED; font-size:13px; font-weight:650; white-space:nowrap;
+                           overflow:hidden; text-overflow:ellipsis; }
+  .result-title .agent { color:#6E6E73; font-size:10.5px; flex-shrink:0; }
+  .result-path { margin-top:2px; color:#5F5F64; font:10.5px 'SF Mono',ui-monospace,Menlo,monospace;
+                 white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .result-snippet { margin-top:6px; color:#ADADB2; font:11.5px/1.45 'SF Mono',ui-monospace,Menlo,monospace;
+                    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .result-snippet mark { background:none; color:#0A84FF; font-weight:700; }
+  .result-meta { text-align:right; color:#6E6E73; font-size:10.5px; line-height:1.5; }
+  .result-meta .when { color:#98989D; }
+  .result-meta .state { margin-top:7px; }
+  .result-meta .live { color:#32D74B; }
+  .result-meta .action { color:#0A84FF; margin-top:2px; }
+  .resume-line { grid-column:2 / 4; margin-top:9px; padding:7px 9px; border-radius:6px;
+                 background:#000; color:#B5B5BA; font:11px 'SF Mono',ui-monospace,Menlo,monospace; }
+  .resume-line .copy { float:right; color:#0A84FF; font-family:-apple-system,sans-serif; }
   footer { border-top:1px solid #ffffff14; height:34px; display:flex; align-items:center; justify-content:center;
            color:#6E6E73; font-size:10.5px; gap:4px; position:relative; }
   footer .keys { white-space:pre; }
@@ -155,7 +195,7 @@
   .pop .plinks { border-top:1px solid #ffffff14; margin-top:8px; padding-top:7px; display:flex; gap:14px; }
   .pop .plinks a { color:#0A84FF; font-size:11.5px; cursor:pointer; text-decoration:none; }
 
-  /* Spec-only chrome: the app footer does not contain health-state controls. */
+  /* Spec-only chrome: the app footer does not contain health or view controls. */
   .specstates { margin:0 0 10px; font-size:12px; color:#6E6E73; }
   .specstates button { background:#28282c; border:1px solid #ffffff22; border-radius:6px; color:#B5B5BA;
                        font-size:11px; padding:3px 9px; margin-left:5px; cursor:pointer; font-family:inherit; }
@@ -178,7 +218,9 @@
 <div class="subtitle">Open with <kbd>⌃</kbd><kbd>⌥</kbd><kbd>J</kbd> (change this in <a href="settings.html">settings</a>).</div>
 <div class="interactive-note"><b>Note:</b> the mockup below is interactive and operates as the living specification for the signalbox jumplist.</div>
 
-<div class="specstates">Hub health (spec control, not part of the jumplist):
+<div class="specstates">View (spec control, not part of the jumplist):
+  <button data-v="board" class="cur">Board</button><button data-v="contents">Contents results</button>
+  &nbsp; Hub health:
   <button data-h="healthy" class="cur">Healthy</button><button data-h="degraded">Degraded</button><button data-h="starting">Starting</button>
 </div>
 
@@ -186,18 +228,19 @@
   <header>
     <span class="brand"><svg width="16" height="16" viewBox="0 0 20 20" stroke="#B5B5BA" fill="none" stroke-linecap="round"><circle cx="10" cy="10" r="2.2" fill="#B5B5BA" stroke="none"/><path d="M6.5 6.5 A 5 5 0 0 1 13.5 6.5" stroke-width="1.5" opacity=".9"/><path d="M6.5 13.5 A 5 5 0 0 0 13.5 13.5" stroke-width="1.5" opacity=".9"/><path d="M4.4 4.4 A 8 8 0 0 1 15.6 4.4" stroke-width="1.5" opacity=".55"/><path d="M4.4 15.6 A 8 8 0 0 0 15.6 15.6" stroke-width="1.5" opacity=".55"/></svg>signalbox</span>
     <input class="search" id="search" placeholder="Search sessions…" autocomplete="off" spellcheck="false">
-    <span class="verbs">Jump <kbd>↩</kbd></span>
+    <span class="verbs" id="verbs">Jump <kbd>↩</kbd></span>
   </header>
-  <div class="body">
+  <div class="body" id="body">
     <div class="list"><h3>SESSIONS</h3><div id="rows"></div></div>
     <div class="preview">
       <div class="term" id="term"></div>
       <div class="actline" id="actline"></div>
     </div>
+    <div class="contents" id="contents"></div>
   </div>
   <footer>
     <span class="jlight" id="jlight" title="Hub status. Click for details."></span>
-    <span class="keys">type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump / F feedback  ·  esc clear/close</span>
+    <span class="keys" id="keys">type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump / F feedback  ·  esc clear/close</span>
     <span class="cog" title="Settings (⌘,)">⚙</span>
     <div class="labelbar" id="labelbar"><span class="p">Rename:</span><input id="labelinput" placeholder="session label - empty clears, ↩ saves, esc cancels"></div>
   </footer>
@@ -286,9 +329,41 @@
   (case-insensitive, exact match); clearing it restores all. Every open starts with an empty
   search. Any <a href="settings.html">additional filters</a> apply underneath the search, to this
   list and the menu bar dropdown alike.</p>
+  <p>For a non-tag query, the right side of the main search bar reports
+  <b>N matches in session contents</b> with <kbd>⌘↩</kbd>. It is a secondary action, not a synthetic
+  session row, and therefore never shows activity, a timer, or a terminal preview. Pressing
+  <kbd>⌘↩</kbd> promotes the query into a dedicated contents search; ordinary <kbd>↩</kbd> keeps its
+  meaning of jumping to the selected live session.</p>
+  <p>When no live session matches, the list's empty state repeats that count and shortcut beside a
+  search icon. This keeps the action legible near the result area without making it a selectable
+  session row. The callout can also be clicked to show the contents results.</p>
+  <p>Contents results replace the whole split body. There is no terminal pane: each full-width result
+  already carries its project, agent, path, newest matching snippet, date, matching-turn count, and
+  live or ended state. <kbd>↩</kbd> jumps directly to a live session. On an ended session it reveals
+  the agent's resume command inline, where it can be copied. Editing the query returns to the board;
+  <kbd class="sc">esc</kbd> returns without clearing it. Results have their own selection and commands,
+  independent of the board rows underneath. Results sort by the newest matching message, newest
+  first, with undated messages last. Dates include the year and local time, accept fractional
+  seconds, and show “Date unavailable” when absent. The agent icon has a fixed width so every
+  title, path and snippet shares the same left edge. Snippet whitespace is collapsed.</p>
   <p>Rows keep the order you work in (most recently engaged first, like the app switcher), with
-  pinned sessions first; status does not reorder them. The panel opens with the topmost unread row
+  pinned sessions first; status does not reorder them. Older and Hidden are the two trailing
+  sections, in that order, below every visible row. The panel opens with the topmost unread row
   selected, and selection stays topmost-unread within the filtered rows.</p>
+
+  <h2>Older sessions</h2>
+  <p>A collapsed <b>Older (N)</b> divider sits below every visible row and above the Hidden
+  divider. It appears only when the count is greater than zero: ageing is automatic, so an empty
+  Older section adds no information. <b>Hidden (0)</b> stays visible to make it clear whether you
+  have explicitly set a session aside.</p>
+  <p>A row is older when you have not engaged it for more than 24 hours. The hub serves this
+  horizon as <code>older_horizon_seconds</code> so the phone and the Mac agree. Ageing uses the
+  same engagement key as the list's order, so the sections cannot interleave. Pinned rows are never
+  older: a pin means keep this in front of me. A row that is both older and hidden sits under
+  Hidden, because explicit user intent takes precedence over age.</p>
+  <p>Click the divider to expand or collapse it. Older rows remain live, with the same marks and
+  actions as the visible rows. A live search reveals matching rows inside the collapsed section,
+  exactly as it does for Hidden.</p>
 
   <h2>Hidden sessions</h2>
   <p>Hiding a session with <kbd>⌃X</kbd> drops it from the list until it speaks again. To bring one
@@ -337,7 +412,9 @@
   style - bold, italic, inline code, lists, headings, fenced blocks and tables all stay mono. The pane's
   text is selectable for copying, and a rendered link opens in the browser when clicked. A cropped
   exchange ends in <code>…</code>. The newest exchange alone keeps the live working line and bullet
-  temperature: amber for asks, blue for finished work, red for failure and dim for read.</p>
+  temperature: amber for asks, blue for finished work, red for failure and dim for read. While the
+  board is filtered, literal occurrences of the active query are highlighted in this preview so the
+  reason a session matched is visible without scanning the whole exchange.</p>
   <p>The action row above the footer is shown on every machine row. For a tmux or cursor origin it says
   exactly where <kbd>↩</kbd> takes you, for example "Jump to iTerm (tmux dwmkerr:1) on localhost". An
   originless machine row initially says "Jump to session". Pressing <kbd>↩</kbd> replaces that text
@@ -351,6 +428,7 @@
   <table>
     <tr><th>Keys</th><th>Action</th></tr>
     <tr><td><kbd>↩</kbd></td><td>Jump to the selected machine session; a successful jump marks it seen. On an originless machine row, show "Jump not supported for this session yet (plain terminal). Press F to send feedback." URL-only rows do nothing.</td></tr>
+    <tr><td><kbd>⌘↩</kbd></td><td>Show full-width session contents results for the current non-tag query</td></tr>
     <tr><td><kbd>F</kbd></td><td>While the unsupported-jump notice is shown, open <a href="https://github.com/dwmkerr/signalbox/issues/67">issue 67</a></td></tr>
     <tr><td><kbd>⌃J</kbd> <kbd>⌃K</kbd> or arrows</td><td>Down / up</td></tr>
     <tr><td><kbd>⌃1</kbd> <kbd>⌃2</kbd> …</td><td>Jump directly to a session</td></tr>
@@ -362,7 +440,7 @@
     <tr><td><kbd>⌘,</kbd></td><td>Open Settings (same as the footer cog)</td></tr>
     <tr><td><b>Hub status light</b></td><td>Open the hub facts popover; Open Settings targets Hub and Open log targets Logs</td></tr>
     <tr><td><kbd>⌘+</kbd> <kbd>⌘−</kbd> <kbd>⌘0</kbd></td><td>Zoom the jumplist in / out / reset (0.8×-1.6×, persists)</td></tr>
-    <tr><td><kbd class="sc">esc</kbd></td><td>Clear the search, then close</td></tr>
+    <tr><td><kbd class="sc">esc</kbd></td><td>Leave contents results, then clear the search, then close</td></tr>
   </table>
   <p>Zoom scales the whole panel, geometry and text together, and text stays crisp for dense screens
   or recordings. The footer keys strip pairs <kbd>F</kbd> feedback with <kbd>↩</kbd> jump;
@@ -375,7 +453,7 @@
 <div class="toast" id="toast"></div>
 <script>
 const SESSIONS = [
-  {key:"claude:7786", agent:"claude", title:"work-project", state:"working", ageSeconds:6, tags:["work"], pinned:true,
+  {key:"claude:7786", agent:"claude", title:"work-project", state:"working", ageSeconds:6, engagedSeconds:6, tags:["work"], pinned:true,
    prompt:"yes please send it. please also mark the old batches as read.", reply:null,
    exchanges:[
      {prompt:"check the newsletter queue before we send anything.", reply:"The queue has **14 drafts** and two scheduled sends.", ts:"2026-08-13T08:40:00Z", cropped:false},
@@ -385,7 +463,7 @@ const SESSIONS = [
    loc:"Jump to iTerm (tmux work-project:1) on localhost"},
   // A question ask (reason "question"): the AskUserQuestion content, question
   // plus option labels, rendered from reply like any other attention text.
-  {key:"claude:1f72", agent:"claude", title:"dwmkerr-toolkit", state:"ask", ageSeconds:16,
+  {key:"claude:1f72", agent:"claude", title:"dwmkerr-toolkit", state:"ask", ageSeconds:16, engagedSeconds:16,
    prompt:"good enough. commit work for now.",
    reply:"Which commit style for this batch? (Squash into one / Keep separate / Interactive rebase)",
    exchanges:[
@@ -396,61 +474,80 @@ const SESSIONS = [
    loc:"Jump to iTerm (tmux work-project:1) on localhost"},
   // A permission ask (reason "permission_request"): the pending tool call
   // itself - tool name and cropped input - never a bare "needs permission".
-  {key:"codex:8e41", agent:"codex", title:"codex-mcp-server", state:"ask", ageSeconds:41,
+  {key:"codex:8e41", agent:"codex", title:"codex-mcp-server", state:"ask", ageSeconds:41, engagedSeconds:41,
    prompt:"wire the streaming endpoint into the MCP layer.",
    reply:"Allow me to run: npm publish --access public?",
    loc:"Jump to iTerm (tmux mcp:2) on localhost"},
-  {key:"claude:5d09", agent:"claude", title:"signalbox-hub", state:"ask", ageSeconds:58,
+  {key:"claude:5d09", agent:"claude", title:"signalbox-hub", state:"ask", ageSeconds:58, engagedSeconds:58,
    prompt:"push the branch and open the PR.",
    reply:"Bash: git push -u origin feat/attention-asks",
    loc:"Jump to Ghostty (tmux signalbox:1) on localhost"},
-  {key:"claude:bbfc", agent:"claude", title:"writing-studio-dashboard", state:"unread", ageSeconds:8,
+  {key:"claude:bbfc", agent:"claude", title:"writing-studio-dashboard", state:"unread", ageSeconds:8, engagedSeconds:8,
    prompt:"add a per-post traffic panel with the substack numbers.",
    reply:"Done - the dashboard now shows per-post traffic with a 30-day sparkline. Build is green, preview at http://localhost:4321.",
    loc:"Jump to iTerm (tmux work:7) on localhost"},
-  {key:"github:run-9182", agent:"github", title:"claude-toolkit-deploy", state:"unread", ageSeconds:1260, infoOnly:true,
+  {key:"github:run-9182", agent:"github", title:"claude-toolkit-deploy", state:"unread", ageSeconds:1260, engagedSeconds:1260, infoOnly:true,
    prompt:"push to main (b41c2f9) triggered deploy",
    reply:"Workflow run #9182 succeeded in 4m 12s - plugin published. 2 artifacts.",
    loc:"Open on GitHub (Actions run #9182)"},
-  {key:"pi:3ace", agent:"pi", title:"terminal-agent-notifier", state:"read", ageSeconds:108,
+  {key:"pi:3ace", agent:"pi", title:"terminal-agent-notifier", state:"read", ageSeconds:108, engagedSeconds:108,
    prompt:"summarise the crash dumps from last night's run.",
    reply:"All set earlier - nothing new since you last looked.",
    loc:"Jump to iTerm (tmux dwmkerr:7) on localhost"},
-  {key:"opencode:9d1", agent:"opencode", title:"release-notes", state:"unread", ageSeconds:340, tags:["work"],
+  {key:"opencode:9d1", agent:"opencode", title:"release-notes", state:"unread", ageSeconds:340, engagedSeconds:340, tags:["work"],
    prompt:"draft the 0.2.0 release notes from the changelog.",
    reply:"Draft ready in RELEASE_NOTES.md - three sections, sixteen entries, and a short highlights paragraph.",
    loc:"Jump to iTerm (tmux dwmkerr:2) on localhost"},
-  {key:"opencode:4b2", agent:"opencode", title:"docs-site-astro", state:"working", ageSeconds:22,
+  {key:"opencode:4b2", agent:"opencode", title:"docs-site-astro", state:"working", ageSeconds:22, engagedSeconds:22,
    prompt:"regenerate the search index after the content refactor.", reply:null,
    loc:"Jump to iTerm (tmux docs:3) on localhost"},
-  {key:"claude:9c05", agent:"claude", title:"payments-webhook", state:"ask", ageSeconds:75,
+  {key:"claude:9c05", agent:"claude", title:"payments-webhook", state:"ask", ageSeconds:75, engagedSeconds:75,
    prompt:"switch the retry backoff to full jitter.",
    reply:"That moves the idempotency window from fixed to variable. Apply full jitter to the live worker config?",
    loc:"Jump to Ghostty (tmux payments:2) on localhost"},
-  {key:"pi:77de", agent:"pi", title:"log-triage", state:"unread", ageSeconds:512,
+  {key:"pi:77de", agent:"pi", title:"log-triage", state:"unread", ageSeconds:512, engagedSeconds:90000,
    prompt:"cluster yesterday's error logs by root cause.",
    reply:"Grouped 1,204 errors into 7 clusters - the top two are the same timeout, 63% of volume.",
    loc:"Jump to iTerm (tmux dwmkerr:4) on localhost"},
   // An originless machine session still offers Jump; Enter explains the
   // current plain-terminal limitation and enables F feedback.
-  {key:"script:backup", agent:"script", title:"nightly-backup", state:"read", ageSeconds:7400, jumpable:false,
+  {key:"script:backup", agent:"script", title:"nightly-backup", state:"read", ageSeconds:7400, engagedSeconds:200000, jumpable:false,
    prompt:"cron: nightly snapshot of the postgres volume",
    reply:"Snapshot complete - 4.2 GB in 38s, retention pruned to 14 dailies.",
    loc:"Jump to session"},
   // Hidden sessions: set aside with the same flag the show/hide events model.
   // They stay out of the main list and surface only under the Hidden divider.
-  {key:"claude:2a11", agent:"claude", title:"flaky-e2e-hunt", state:"read", ageSeconds:9300, hidden:true,
+  {key:"claude:2a11", agent:"claude", title:"flaky-e2e-hunt", state:"read", ageSeconds:9300, engagedSeconds:9300, hidden:true,
    prompt:"find why the checkout e2e flakes on CI.",
    reply:"Narrowed it to a race in cart hydration - patched and green 20 runs straight.",
    loc:"Jump to iTerm (tmux qa:1) on localhost"},
-  {key:"opencode:5f7", agent:"opencode", title:"columnar-store-spike", state:"read", ageSeconds:172000, hidden:true, tags:["work"],
+  {key:"opencode:5f7", agent:"opencode", title:"columnar-store-spike", state:"read", ageSeconds:172000, engagedSeconds:172000, hidden:true, tags:["work"],
    prompt:"prototype the columnar store migration.",
    reply:"Spike done - tradeoffs written up in MIGRATION_NOTES.md, parking it for now.",
    loc:"Jump to iTerm (tmux data:5) on localhost"},
-  {key:"github:run-8890", agent:"github", title:"legacy-site-deploy", state:"unread", ageSeconds:64000, hidden:true, infoOnly:true,
+  {key:"github:run-8890", agent:"github", title:"legacy-site-deploy", state:"unread", ageSeconds:64000, engagedSeconds:64000, hidden:true, infoOnly:true,
    prompt:"manual deploy of the legacy marketing site",
    reply:"Workflow run #8890 succeeded in 2m 3s - nothing else pending on that repo.",
    loc:"Open on GitHub (Actions run #8890)"},
+];
+// Representative grouped transcript results. The full-width result state is
+// intentionally separate from SESSIONS: archive rows have different identity,
+// actions and selection rules from live board rows.
+const SEARCH_RESULTS = [
+  {agent:"claude", project:"signalbox", path:"~/repos/github/dwmkerr/signalbox", date:"6 Oct 2026 09:42", hits:132, live:true,
+   snippet:"The authentication search should use the transcript index, but the results surface should not inherit the terminal preview."},
+  {agent:"codex", project:"research-notes", path:"~/repos/personal/research-notes", date:"28 Sep 2026 16:18", hits:96, live:false,
+   snippet:"Compare authentication approaches, retain the source metadata, and explain which references disagree with the current approach.",
+   resume:"codex resume 7ec81da2-41c7-4e92-a908-9c64694cf153"},
+  {agent:"claude", project:"writing-studio", path:"~/repos/github/dwmkerr/writing-studio", date:"17 Sep 2026 11:06", hits:74, live:false,
+   snippet:"Draft a short authentication guide from the exported notes, keeping links beside every claim.",
+   resume:"claude --resume 51e34caa-f742-466b-879d-fc8607d1130e"},
+  {agent:"cursor", project:"knowledge-map", path:"~/repos/labs/knowledge-map", date:"4 Sep 2026 14:31", hits:51, live:false,
+   snippet:"The authentication ingestion pass now deduplicates references before generating the topic graph.",
+   resume:"cursor: resume is not available"},
+  {agent:"claude", project:"signalbox", path:"~/repos/github/dwmkerr/signalbox", date:"29 Aug 2026 10:27", hits:39, live:false,
+   snippet:"Add session contents search and verify that an authentication query returns grouped conversations with highlighted snippets.",
+   resume:"claude --resume c79dce36-e306-4287-9558-554193a1740d"},
 ];
 // Spec-only hub state. Remote shows the popover's conditional fourth row;
 // the real light never includes this mode name.
@@ -462,8 +559,10 @@ const HUB_NAME = { local:"Local", lan:"LAN", remote:"Remote" };
 // Topmost-unread default selection (fallback: top row).
 const needsCheck = s => s.state==="ask" || s.state==="unread" || s.state==="failed";
 let query = "";
-// One match predicate shared by the visible list and the Hidden section, so a
-// live search reaches into hidden rows exactly as it does the visible ones.
+let mode = "board";
+let resultSel = 0;
+let resumeOpen = -1;
+// A shared query keeps collapsed sections searchable without expanding them first.
 function matchesQuery(i){
   if (!query) return true;
   const s2 = SESSIONS[i], q = query.toLowerCase();
@@ -475,13 +574,18 @@ function matchesQuery(i){
   }
   return (s2.label||s2.title).toLowerCase().includes(q) || (s2.prompt||"").toLowerCase().includes(q) || (s2.reply||"").toLowerCase().includes(q) || s2.agent.includes(q);
 }
-// Hidden sessions are set aside: never in the main list, only under the divider.
-const visible = () => SESSIONS.map((s,i)=>i).filter(i => !SESSIONS[i].hidden && matchesQuery(i));
+// Partition on the engagement key the list sorts by so the sections cannot interleave.
+const OLDER_HORIZON = 86400;
+const isOlder = s => !s.pinned && (s.engagedSeconds ?? s.ageSeconds) > OLDER_HORIZON;
+const visible = () => SESSIONS.map((s,i)=>i).filter(i => !SESSIONS[i].hidden && !isOlder(SESSIONS[i]) && matchesQuery(i));
+const olderList = () => SESSIONS.map((s,i)=>i).filter(i => !SESSIONS[i].hidden && isOlder(SESSIONS[i]) && matchesQuery(i));
 const hiddenList = () => SESSIONS.map((s,i)=>i).filter(i => SESSIONS[i].hidden && matchesQuery(i));
-function defaultSel(){ const v = visible(); return v.find(i=>needsCheck(SESSIONS[i])) ?? v[0] ?? -1; }
+const selectable = () => visible().concat(olderOpen || query !== "" ? olderList() : []);
+function defaultSel(){ const v = selectable(); return v.find(i=>needsCheck(SESSIONS[i])) ?? v[0] ?? -1; }
 let sel = -1;
 let editing = false;
-// Hidden section starts collapsed, so the quiet divider is what is seen first.
+// Collapsed sections keep older and set-aside work from crowding the active list.
+let olderOpen = false;
 let hiddenOpen = false;
 
 const AG = {
@@ -653,18 +757,44 @@ function subtext(s){
 
 function renderList(){
   const v = visible();
-  if (!v.includes(sel)) sel = defaultSel();
+  if (!selectable().includes(sel)) { sel = defaultSel(); renderPreview(); }
   const rows = v.map(i=>{const s=SESSIONS[i];return `
     <div class="row ${i===sel?"sel":""} ${needsCheck(s)?"unread":""}" onclick="select(${i})" oncontextmenu="event.preventDefault();showCtxMenu(${i},event.clientX,event.clientY)">
       <div class="glyph">${AG[s.agent]||AG.generic}</div>
       <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${previewMd(subtext(s))}</div></div>
       <div class="right">${s.pinned?`<span class="pin">${PIN}</span>`:""}<span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span>${attentionHTML(s.state)}</div>
     </div>`}).join("");
-  const hidden = hiddenHTML();
-  // "No matches" only when nothing matches at all, hidden rows included.
-  const body = rows || (hidden ? "" : '<div style="color:#6E6E73;font-size:12px;padding:14px 24px">No matches</div>');
-  document.getElementById("rows").innerHTML = body + hidden;
+  const older = olderHTML(), hidden = hiddenHTML();
+  // Collapsed matches still count, so their sections must suppress the empty state.
+  const body = rows || (older || hidden ? "" : emptySearchHTML());
+  document.getElementById("rows").innerHTML = body + older + hidden;
 }
+function contentsHitTotal(){ return query.toLowerCase() === "authentication" ? 480 : 37; }
+function emptySearchHTML(){
+  if (!query || query.startsWith("#")) return '<div class="empty-search">No matches</div>';
+  return `<div class="empty-search"><div>No live sessions match</div>
+    <div class="contents-hint" onclick="enterContents()">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke-width="1.7" stroke-linecap="round">
+        <circle cx="8.5" cy="8.5" r="5.5"></circle><line x1="12.5" y1="12.5" x2="17" y2="17"></line>
+      </svg>
+      <div><div class="hint-count">${contentsHitTotal()} matches in session contents</div>
+        <div class="hint-action"><kbd>⌘↩</kbd> Show results</div></div>
+    </div></div>`;
+}
+function olderHTML(){
+  const o = olderList();
+  if (!o.length) return "";
+  const open = olderOpen || query !== "";
+  let out = `<div class="hdiv ${open?"open":""}" onclick="toggleOlder()"><span class="chev">▸</span><span>Older (${o.length})</span></div>`;
+  if (open) out += o.map(i=>{const s=SESSIONS[i];return `
+    <div class="row ${i===sel?"sel":""} ${needsCheck(s)?"unread":""}" onclick="select(${i})" oncontextmenu="event.preventDefault();showCtxMenu(${i},event.clientX,event.clientY)">
+      <div class="glyph">${AG[s.agent]||AG.generic}</div>
+      <div class="txt"><div class="t"><span class="name">${esc(s.label||s.title)}</span>${tagPills(s)}</div><div class="d">${previewMd(subtext(s))}</div></div>
+      <div class="right">${s.pinned?`<span class="pin">${PIN}</span>`:""}<span class="age" data-i="${i}">${ageStr(s.ageSeconds)}</span>${attentionHTML(s.state)}</div>
+    </div>`}).join("");
+  return out;
+}
+function toggleOlder(){ olderOpen = !olderOpen; renderList(); }
 // The Hidden divider sits at the foot of the list and is always shown once the
 // board has any session - even at "Hidden (0)" - so it is always clear whether a
 // session is set aside (a missing row is otherwise a mystery). A search
@@ -672,7 +802,7 @@ function renderList(){
 // chevron, nothing to expand.
 function hiddenHTML(){
   const h = hiddenList();
-  if (!visible().length && !h.length) return "";  // empty board -> "No matches"
+  if (!visible().length && !olderList().length && !h.length) return "";
   const empty = h.length === 0;
   const open = !empty && (hiddenOpen || query !== "");
   const chev = empty ? "" : '<span class="chev">▸</span>';
@@ -693,13 +823,13 @@ let lastPreviewKey = null, lastPreviewHeight = 0;
 let unsupportedJumpKey = null;
 setInterval(()=>{ gi=(gi+1)%GLYPHS.length; const el=document.querySelector(".spinch"); if(el) el.textContent=GLYPHS[gi];
   SESSIONS.forEach(s=>s.ageSeconds++);
-  // Ages are keyed by session index so visible and expanded hidden rows both stay live.
+  // Session indices keep ages attached to their rows across section dividers.
   document.querySelectorAll(".age[data-i]").forEach(el=>{ el.textContent=ageStr(SESSIONS[+el.dataset.i].ageSeconds); }); }, 1000);
 
 function renderPreview(){
-  const s = SESSIONS[sel];
   const term = document.getElementById("term");
   const actline = document.getElementById("actline");
+  const s = SESSIONS[sel];
   if (!s) { term.innerHTML = ""; actline.innerHTML = ""; unsupportedJumpKey = null; lastPreviewKey = null; lastPreviewHeight = 0; return; }
   if (unsupportedJumpKey !== s.key || s.jumpable !== false || s.infoOnly) unsupportedJumpKey = null;
   actline.style.display = s.infoOnly ? "none" : "flex";
@@ -731,6 +861,7 @@ function renderPreview(){
   });
   const previousHeight = lastPreviewKey === s.key ? lastPreviewHeight : 0;
   term.innerHTML = h;
+  markPreviewMatches(term);
   actline.innerHTML = act;
   const contentHeight = term.scrollHeight;
   if (lastPreviewKey !== s.key || contentHeight > previousHeight) term.scrollTop = contentHeight;
@@ -738,6 +869,71 @@ function renderPreview(){
   lastPreviewHeight = contentHeight;
 }
 function select(i){ sel = i; renderList(); renderPreview(); }
+function markPreviewMatches(root){
+  const value = query.trim();
+  if (!value || value.startsWith("#")) return;
+  const pattern = value.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const matcher = new RegExp(`(${pattern})`,"ig");
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(node => {
+    const parts = node.nodeValue.split(matcher);
+    if (parts.length === 1) return;
+    const fragment = document.createDocumentFragment();
+    parts.forEach((part,index) => {
+      if (!part) return;
+      if (index % 2 === 1) {
+        const mark = document.createElement("mark"); mark.className = "search-match";
+        mark.textContent = part; fragment.appendChild(mark);
+      } else fragment.appendChild(document.createTextNode(part));
+    });
+    node.replaceWith(fragment);
+  });
+}
+function highlighted(source){
+  const pattern = query.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  if (!pattern) return esc(source);
+  return esc(source).replace(new RegExp(`(${pattern})`,"ig"),"<mark>$1</mark>");
+}
+function renderContents(){
+  document.getElementById("contents").innerHTML = `
+    <div class="contents-head"><h3>SESSION CONTENTS</h3><span class="summary">${contentsHitTotal()} matches in session contents</span></div>` +
+    SEARCH_RESULTS.map((r,i)=>`<div class="result-row ${i===resultSel?"sel":""}" onclick="selectResult(${i})" ondblclick="activateResult(${i})">
+      <div class="glyph">${AG[r.agent]||AG.generic}</div>
+      <div class="result-main"><div class="result-title"><span class="project">${esc(r.project)}</span><span class="agent">${esc(r.agent)}</span></div>
+        <div class="result-path">${esc(r.path)}</div><div class="result-snippet">${highlighted(r.snippet)}</div></div>
+      <div class="result-meta"><div class="when">${esc(r.date)} · ×${r.hits}</div>
+        <div class="state ${r.live?"live":""}">${r.live?"live":"ended"}</div>
+        <div class="action">↩ ${r.live?"Jump":"Show resume"}</div></div>
+      ${resumeOpen===i && !r.live ? `<div class="resume-line">${esc(r.resume)}<span class="copy">copy</span></div>` : ""}
+    </div>`).join("");
+}
+function updateMode(){
+  document.getElementById("body").classList.toggle("contents-mode", mode === "contents");
+  const canSearchContents = !!query && !query.startsWith("#");
+  document.getElementById("verbs").innerHTML = mode === "contents"
+    ? `Open <kbd>↩</kbd>`
+    : canSearchContents
+      ? `<span class="search-count">${contentsHitTotal()} matches in session contents</span><kbd>⌘↩</kbd>`
+      : `Jump <kbd>↩</kbd>`;
+  document.getElementById("keys").textContent = mode === "contents"
+    ? "searching session contents  ·  ⌃j/⌃k move  ·  ↩ jump or show resume  ·  esc back to the board"
+    : "type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump / F feedback  ·  esc clear/close";
+  document.querySelectorAll(".specstates button[data-v]").forEach(button =>
+    button.classList.toggle("cur", button.dataset.v === mode));
+}
+function enterContents(){
+  if (!query || query.startsWith("#")) return;
+  mode = "contents"; resultSel = 0; resumeOpen = -1; updateMode(); renderContents();
+}
+function exitContents(){ mode = "board"; updateMode(); renderList(); renderPreview(); }
+function selectResult(i){ resultSel = i; resumeOpen = -1; renderContents(); }
+function activateResult(i=resultSel){
+  const result = SEARCH_RESULTS[i]; if (!result) return;
+  if (result.live) { toast(`would jump to ${result.project}`); return; }
+  resumeOpen = resumeOpen === i ? -1 : i; renderContents();
+}
 function toast(m){ const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 1300); }
 
 function starting(){ return hub.health === "starting"; }
@@ -781,7 +977,7 @@ function renderPop(){
 function closePop(){ hub.popOpen = false; renderLight(); renderPop(); }
 
 function syncHealthButtons(){
-  document.querySelectorAll(".specstates button").forEach(button =>
+  document.querySelectorAll(".specstates button[data-h]").forEach(button =>
     button.classList.toggle("cur", button.dataset.h === hub.health));
 }
 
@@ -789,8 +985,19 @@ document.getElementById("jlight").onclick = e => {
   e.stopPropagation(); hub.popOpen = !hub.popOpen; renderLight(); renderPop();
 };
 document.getElementById("pop").onclick = e => e.stopPropagation();
-document.querySelectorAll(".specstates button").forEach(button => {
+document.querySelectorAll(".specstates button[data-h]").forEach(button => {
   button.onclick = () => { hub.health = button.dataset.h; syncHealthButtons(); renderLight(); renderPop(); };
+});
+document.querySelectorAll(".specstates button[data-v]").forEach(button => {
+  button.onclick = () => {
+    if (button.dataset.v === "contents") {
+      searchEl.value = "authentication"; query = "authentication"; enterContents();
+    } else {
+      mode = "board"; searchEl.value = ""; query = "";
+      sel = defaultSel(); updateMode(); renderList(); renderPreview();
+    }
+    searchEl.focus();
+  };
 });
 document.addEventListener("click", () => { if (hub.popOpen) closePop(); });
 
@@ -845,7 +1052,11 @@ document.getElementById("labelinput").addEventListener("keydown", e => {
 });
 
 function moveSel(delta){
-  const v = visible(); if (!v.length) return;
+  if (mode === "contents") {
+    resultSel = Math.min(Math.max(resultSel + delta, 0), SEARCH_RESULTS.length - 1);
+    resumeOpen = -1; renderContents(); return;
+  }
+  const v = selectable(); if (!v.length) return;
   const pos = Math.max(0, v.indexOf(sel));
   select(v[Math.min(Math.max(pos+delta,0), v.length-1)]);
 }
@@ -856,22 +1067,34 @@ function jumpSelected(){
   toast("would jump to the session");
 }
 const searchEl = document.getElementById("search");
-searchEl.addEventListener("input", () => { query = searchEl.value.trim(); sel = defaultSel(); renderList(); renderPreview(); });
+searchEl.addEventListener("input", () => {
+  if (mode === "contents") mode = "board";
+  query = searchEl.value.trim(); sel = defaultSel();
+  updateMode(); renderList(); renderPreview();
+});
 
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && hub.popOpen) { e.preventDefault(); closePop(); return; }
   if (editing) return;
   const ctrl = e.ctrlKey;
-  if (unsupportedJumpKey !== null && !ctrl && !e.metaKey && !e.altKey && e.key.toLowerCase()==="f") {
+  if (mode === "contents") {
+    if (e.key === "Escape") { e.preventDefault(); exitContents(); }
+    else if ((ctrl && (e.key==="j"||e.key==="J")) || e.key==="ArrowDown") { e.preventDefault(); moveSel(1); }
+    else if ((ctrl && (e.key==="k"||e.key==="K")) || e.key==="ArrowUp") { e.preventDefault(); moveSel(-1); }
+    else if (e.key === "Enter") { e.preventDefault(); activateResult(); }
+    return;
+  }
+  if (e.metaKey && e.key === "Enter") { e.preventDefault(); enterContents(); }
+  else if (unsupportedJumpKey !== null && !ctrl && !e.metaKey && !e.altKey && e.key.toLowerCase()==="f") {
     e.preventDefault(); window.open("https://github.com/dwmkerr/signalbox/issues/67", "_blank");
   }
   else if (ctrl && (e.key==="j"||e.key==="J")) { e.preventDefault(); moveSel(1); }
   else if (ctrl && (e.key==="k"||e.key==="K")) { e.preventDefault(); moveSel(-1); }
   else if (e.key==="ArrowDown") { e.preventDefault(); moveSel(1); }
   else if (e.key==="ArrowUp") { e.preventDefault(); moveSel(-1); }
-  else if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); const v=visible(); const i=parseInt(e.key)-1; if (i<v.length) select(v[i]); }
+  else if (ctrl && /^[1-9]$/.test(e.key)) { e.preventDefault(); const v=selectable(); const i=parseInt(e.key)-1; if (i<v.length) select(v[i]); }
   else if (e.key==="Tab") { e.preventDefault();
-    const un = visible().filter(i=>needsCheck(SESSIONS[i]));
+    const un = selectable().filter(i=>needsCheck(SESSIONS[i]));
     if (un.length) select(un[(un.indexOf(sel)+1) % un.length] ?? un[0]); }
   else if (e.key==="Enter") { jumpSelected(); }
   else if (ctrl && (e.key==="p"||e.key==="P")) { e.preventDefault(); if (sel>=0) togglePin(sel); }
@@ -879,10 +1102,10 @@ document.addEventListener("keydown", e => {
   else if (ctrl && (e.key==="x"||e.key==="X")) { e.preventDefault(); if (sel>=0) { SESSIONS[sel].state="read"; renderList(); renderPreview(); toast("hidden until it speaks (mock: shown as read)"); } }
   else if (ctrl && e.key==="Backspace") { e.preventDefault(); if (sel>=0) { SESSIONS.splice(sel,1); sel=defaultSel(); renderList(); renderPreview(); toast("removed"); } }
   else if (e.key==="Escape") {
-    if (query) { searchEl.value=""; query=""; sel=defaultSel(); renderList(); renderPreview(); toast("search cleared"); }
+    if (query) { searchEl.value=""; query=""; sel=defaultSel(); updateMode(); renderList(); renderPreview(); toast("search cleared"); }
     else toast("would dismiss the jumplist");
   }
   else if (document.activeElement !== searchEl && e.key.length===1 && !e.metaKey && !ctrl) searchEl.focus();
 });
-sel = defaultSel(); renderList(); renderPreview(); renderLight(); renderPop(); searchEl.focus();
+sel = defaultSel(); updateMode(); renderList(); renderPreview(); renderLight(); renderPop(); searchEl.focus();
 </script></body></html>

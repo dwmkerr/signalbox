@@ -8,13 +8,13 @@ const queryToken = /[\p{L}\p{N}\p{Co}][\p{L}\p{N}\p{M}\p{Co}]*/gu;
 /** Identifies whether a content-search result still has a row on the board. */
 export type SearchResultState = "live" | "ended";
 
-/** A transcript search result grouped around its best matching turn. */
+/** A transcript search result grouped around its newest matching turn. */
 export interface SearchResult {
   /** Stable transcript session identifier shared by every matching turn. */
   sessionUuid: string;
-  /** Agent that owns the best matching turn. */
+  /** Agent that owns the newest matching turn. */
   agent: string;
-  /** Working directory recorded for the best matching turn, when available. */
+  /** Working directory recorded for the newest matching turn, when available. */
   cwd: string | null;
   /** FTS5-generated excerpt with matches enclosed in `<mark>` elements. */
   snippet: string;
@@ -32,7 +32,7 @@ export interface SearchResult {
 export interface SearchQuery {
   /** Counts matching turns using prefix expressions suitable for live feedback. */
   countHits(q: string): number;
-  /** Returns the best matching turn from each session, ordered by relevance and recency. */
+  /** Returns the newest matching turn from each session, newest first, with undated turns last. */
   search(q: string, limit: number, liveSessions?: readonly Event[]): SearchResult[];
 }
 
@@ -97,14 +97,14 @@ class SqliteSearchQuery implements SearchQuery {
           count(*) OVER (PARTITION BY session_uuid) AS hit_count,
           row_number() OVER (
             PARTITION BY session_uuid
-            ORDER BY rank ASC, coalesce(ts, '') DESC, id DESC
+            ORDER BY julianday(ts) DESC, rank ASC, id DESC
           ) AS selected
         FROM matches
       )
       SELECT session_uuid, agent, cwd, snippet, ts, hit_count
       FROM ranked
       WHERE selected = 1
-      ORDER BY rank ASC, coalesce(ts, '') DESC, session_uuid ASC
+      ORDER BY julianday(ts) DESC, rank ASC, session_uuid ASC
       LIMIT ?
     `).all(expression, limit);
 

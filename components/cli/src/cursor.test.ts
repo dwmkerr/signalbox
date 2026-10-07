@@ -2,14 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle, vscodeBundle, editorTerminalOrigin, editorHost, hostPrefixedAgent } from "../src/cursor";
-import { agentFamily } from "../src/event";
+import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle, vscodeBundle, editorTerminalOrigin, editorHost, hostPrefixedAgent } from "./cursor";
+import { agentFamily } from "./event";
 
 function spooledCursorEvent(payload: Record<string, unknown>): Record<string, unknown> {
   const dir = mkdtempSync(join(tmpdir(), "sb-cursor-hook-"));
   const home = mkdtempSync(join(tmpdir(), "sb-cursor-home-"));
   const proc = Bun.spawnSync(
-    [process.execPath, join(import.meta.dir, "..", "src", "main.ts"), "hook", "cursor"],
+    [process.execPath, join(import.meta.dir, "main.ts"), "hook", "cursor"],
     {
       env: {
         ...process.env,
@@ -46,7 +46,7 @@ describe("mapCursorHook", () => {
   const cases: [any, { eventType: string; reason: string } | null][] = [
     [{ hook_event_name: "sessionStart" }, { eventType: "busy", reason: "session_start" }],
     [{ hook_event_name: "stop", status: "completed" }, { eventType: "done", reason: "stop" }],
-    [{ hook_event_name: "stop", status: "aborted" }, { eventType: "ended", reason: "aborted" }],
+    [{ hook_event_name: "stop", status: "aborted" }, { eventType: "done", reason: "aborted" }],
     [{ hook_event_name: "stop", status: "error" }, { eventType: "error", reason: "error" }],
     // Missing/unknown status defaults to a plain finish, never a stuck "busy".
     [{ hook_event_name: "stop" }, { eventType: "done", reason: "stop" }],

@@ -3,8 +3,8 @@ import AgentMarkdown
 
 // One display row, precomputed by the AppDelegate from its session model so
 // the palette never duplicates ordering, status, or naming logic. Rows arrive
-// already filtered (hidden rows dropped; acked rows present with a neutral
-// icon and needsCheck false) and in /state order (engagement MRU).
+// already filtered (hidden and older rows flagged; acked rows present with a
+// neutral icon and needsCheck false) and in /state order (engagement MRU).
 struct PaletteRow {
     let sessionKey: String
     let mark: StatusMark
@@ -24,7 +24,7 @@ struct PaletteRow {
     let detail: String?
     let reply: String?
     // The emitter cut the exchange at its cap; the breadcrumb and the
-    // fallback preview show the crop marker.
+    // inline preview show the crop marker.
     let cropped: Bool
     // The action line's "where": derived from origin + host by the delegate
     // (terminal app name, tmux coords, host) - display data, not jump logic.
@@ -46,19 +46,16 @@ struct PaletteRow {
     // selectable, not reachable by keys). It resurfaces when the agent speaks
     // again, or on a click that fires `show`.
     var isHidden = false
-    // The "Hidden (N)" divider row itself. Not a session; carries the count and
-    // toggles the section open on click.
+    /// A live session not engaged inside the hub's horizon, drawn under Older.
+    /// Derived from `engaged_ts` at render time, never a stored flag.
+    var isOlder = false
+    // Dividers are not sessions, so session actions must skip both sections.
     var isDivider = false
+    /// Distinguishes Older from Hidden so each divider toggles its own section.
+    var isOlderDivider = false
     var hiddenCount = 0
-    // The trailing row that promotes the typed query to a contents search. Not
-    // a session; carries the hit count so the cost of promoting is visible
-    // before committing to it.
-    var isFallback = false
-    var fallbackHits: Int?
-    // Percent complete while the index is still building. A search run against
-    // a half-built index quietly misses things, so the row says so where the
-    // search is actually happening.
-    var indexPercent: Int?
+    /// The matching older count, so the divider reflects the current search.
+    var olderCount = 0
 }
 
 // Mark tints per the amber scheme: amber = needs your input (act), blue =
@@ -758,27 +755,25 @@ final class PaletteController: NSObject {
     // filter - every selection/cycle operation works on the filtered view.
     private var allRows: [PaletteRow] = []
     private var rows: [PaletteRow] = []
-    // Leading count of selectable rows in `rows` - the visible sessions sit at
-    // the front, then the Hidden divider and any hidden rows, which are inert.
     private var visibleCount = 0
+    // Revealed older rows remain selectable across the intervening divider.
+    private var selectableIndices: [Int] = []
     // Whether the Hidden section is expanded. A search reveals it regardless.
     private var hiddenExpanded = false
+    // Whether the Older section is expanded. A search reveals it regardless.
+    private var olderExpanded = false
     private var query = ""
-    // Contents search. The panel has two modes: filtering the board (the
-    // default), and showing what the typed query found inside session
-    // transcripts. Promotion is deliberate - the fallback row - so the quiet
-    // board filter never turns into a transcript query by accident.
+    // Contents search is an explicit second mode entered with Command-Return,
+    // so filtering the live board never turns into an archive query by accident.
     private var contentMode = false
     private var contentResults: [SearchResult] = []
-    private var contentAvailability: SearchAvailability = .available([])
-    // Hit count for the fallback row; nil until a count comes back, so the row
-    // can say nothing rather than claim zero while the answer is in flight.
-    private var fallbackHits: Int?
+    // Complete matching-turn count. This is independent of the 50 grouped
+    // session rows returned for display.
+    private var contentHitCount: Int?
     // Typing must not issue one request per keystroke: each count is an HTTP
     // round trip, cheap but not free.
     private var hitCountWork: DispatchWorkItem?
-    // Whether the hub behind this panel serves search at all. A forwarder and a
-    // disabled setting both mean no promotion row, for different reasons.
+    // Whether the hub behind this panel serves search at all.
     private var searchServed = false
     // Percent complete while the index builds, nil once it is current.
     private var indexPercent: Int?
@@ -786,9 +781,16 @@ final class PaletteController: NSObject {
     // instructions rather than being resumed for them.
     private var resumeHintUuid: String?
     private var keysLabel: NSTextField!
+    private var headerVerbs: NSStackView!
     private var panel: PalettePanel!
     private var tableView: NSTableView!
     private var emptyLabel: NSTextField!
+    private var emptyContentsButton: NSButton!
+    private var listHeading: NSTextField!
+    private var contentsSummaryLabel: NSTextField!
+    private var listBorder: NSView!
+    private var previewView: NSView!
+    private var listWidthConstraint: NSLayoutConstraint!
     private var termLabel: NSTextField!
     private var termScrollView: NSScrollView!
     // Working sessions redraw once a second, so tailing depends on a changed
@@ -876,8 +878,19 @@ final class PaletteController: NSObject {
 
     func show() {
         // Every open starts with an empty search (Raycast/Spotlight model).
+        hitCountWork?.cancel()
         searchField.stringValue = ""
         query = ""
+        olderExpanded = false
+        contentMode = false
+        contentResults = []
+        contentHitCount = nil
+        searchServed = false
+        indexPercent = nil
+        resumeHintUuid = nil
+        updateContentLayout()
+        updateSearchChrome()
+        updateFooterHint()
         reload(preservingSelection: false)
         restorePosition()
         startTicking()
@@ -949,27 +962,25 @@ final class PaletteController: NSObject {
         exchangeRequest.removeAll()
         let previousKey = selectedKey()
         let previousIndex = tableView.selectedRow
-        // The promotion row has no session key, so it has to be remembered as
-        // itself. Without this a reload drops the cursor back into the session
-        // list, and a working session reloads often enough that the row cannot
-        // be pressed at all.
-        let wasFallbackSelected = rows.indices.contains(previousIndex)
-            && rows[previousIndex].isFallback
         allRows = rowsProvider()
         rows = composeRows()
         tableView.reloadData()
-        emptyLabel.stringValue = allRows.isEmpty ? "No sessions" : "No matches"
-        emptyLabel.isHidden = !rows.isEmpty
-        if rows.isEmpty {
+        updateEmptyState()
+        if contentMode {
+            if !contentResults.isEmpty {
+                select(min(max(previousIndex, 0), contentResults.count - 1))
+            }
+            return
+        }
+        if selectableIndices.isEmpty {
+            tableView.deselectAll(nil)
             renderPreview()
             return
         }
-        if preservingSelection, wasFallbackSelected, let index = fallbackIndex {
-            select(index)
-        } else if preservingSelection,
+        if preservingSelection,
            let previousKey,
            let index = rows.firstIndex(where: {
-               $0.sessionKey == previousKey && !$0.isHidden && !$0.isDivider && !$0.isFallback
+               $0.sessionKey == previousKey && !$0.isHidden && !$0.isDivider
            }) {
             // Never move the cursor under the user: follow the session_key
             // across reorders.
@@ -979,10 +990,11 @@ final class PaletteController: NSObject {
             // round-robin next thing to deal with, else hold position.
             if let next = nextToCheckIndex() {
                 select(next)
-            } else if visibleCount > 0 {
-                select(min(max(previousIndex, 0), visibleCount - 1))
+            } else if let index = selectableIndices.first(where: { $0 >= previousIndex })
+                ?? selectableIndices.last {
+                select(index)
             }
-        } else if visibleCount > 0 {
+        } else if !selectableIndices.isEmpty {
             select(defaultSelectionIndex())
         }
         // selectRowIndexes only notifies on change; re-render explicitly so an
@@ -993,7 +1005,7 @@ final class PaletteController: NSObject {
     // Preselect the topmost unread row (oldest-engaged was jarring at the
     // bottom of the list); with nothing needing you, the top row.
     private func defaultSelectionIndex() -> Int {
-        nextToCheckIndex() ?? 0
+        nextToCheckIndex() ?? selectableIndices.first ?? -1
     }
 
     // MARK: - Search
@@ -1017,16 +1029,32 @@ final class PaletteController: NSObject {
             || row.agent.localizedCaseInsensitiveContains(q)
     }
 
-    // The display rows: matching visible sessions first (the selectable span,
-    // recorded in visibleCount), then a "Hidden (N)" divider and, when the
-    // section is open or a search is running, the matching hidden rows. A search
-    // reveals hidden matches so the board never hides what it knows about.
+    // Visible, Older, then Hidden keeps explicit dismissal separate from age.
+    // A search reveals matching rows inside either collapsed section so the
+    // board never hides what it knows about. Older has no zero-state divider:
+    // automatic ageing adds no information when there is nothing older.
     private func composeRows() -> [PaletteRow] {
         let matching = allRows.filter { matchesQuery($0) }
-        let visible = matching.filter { !$0.isHidden }
+        let visible = matching.filter { !$0.isHidden && !$0.isOlder }
+        let older = matching.filter { $0.isOlder && !$0.isHidden }
         let hidden = matching.filter { $0.isHidden }
         visibleCount = visible.count
+        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
         var display = visible
+        if !older.isEmpty {
+            var divider = PaletteRow(
+                sessionKey: "", mark: .working, statusWord: "", isAsking: false,
+                isUnread: false, isRead: false, agent: "", name: "", ageStart: Date(),
+                detail: nil, reply: nil, cropped: false, location: "", jumpable: false, infoOnly: true,
+                needsCheck: false,
+                engagedDate: Date(), tags: [], pinned: false
+            )
+            divider.isDivider = true
+            divider.isOlderDivider = true
+            divider.olderCount = older.count
+            display.append(divider)
+            if olderExpanded || searching { display.append(contentsOf: older) }
+        }
         // Always show the Hidden divider once the board has any session, even at
         // "Hidden (0)", so it is always clear whether a session is set aside (a
         // missing row is otherwise a mystery). A truly empty board shows the empty
@@ -1042,31 +1070,10 @@ final class PaletteController: NSObject {
             divider.isDivider = true
             divider.hiddenCount = hidden.count
             display.append(divider)
-            let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
             if !hidden.isEmpty && (hiddenExpanded || searching) { display.append(contentsOf: hidden) }
         }
-        // The promotion row trails everything, including the Hidden section: it
-        // is an offer to look somewhere else, which only makes sense once the
-        // board has had its say.
-        if searchServed, !query.trimmingCharacters(in: .whitespaces).isEmpty {
-            var fallback = PaletteRow(
-                sessionKey: "", mark: .working, statusWord: "", isAsking: false,
-                isUnread: false, isRead: false, agent: "", name: "", ageStart: Date(),
-                detail: nil, reply: nil, cropped: false, location: "", jumpable: false,
-                infoOnly: true, needsCheck: false,
-                engagedDate: Date(), tags: [], pinned: false
-            )
-            fallback.isFallback = true
-            fallback.fallbackHits = fallbackHits
-            fallback.indexPercent = indexPercent
-            display.append(fallback)
-        }
+        selectableIndices = display.indices.filter { !display[$0].isDivider && !display[$0].isHidden }
         return display
-    }
-
-    // Index of the promotion row within the displayed rows, when it is shown.
-    private var fallbackIndex: Int? {
-        rows.firstIndex { $0.isFallback }
     }
 
     // Query changes reset the cursor to the topmost unread within the
@@ -1079,23 +1086,30 @@ final class PaletteController: NSObject {
         if contentMode { exitContentMode(reload: false) }
         rows = composeRows()
         tableView.reloadData()
-        emptyLabel.stringValue = allRows.isEmpty ? "No sessions" : "No matches"
-        emptyLabel.isHidden = !rows.isEmpty
-        if visibleCount > 0 { select(defaultSelectionIndex()) }
+        updateEmptyState()
+        if !selectableIndices.isEmpty {
+            select(defaultSelectionIndex())
+        } else {
+            tableView.deselectAll(nil)
+        }
         renderPreview()
         scheduleHitCount()
     }
 
     // MARK: - Contents search
 
-    // The hit count is a live number on a row the user has not chosen yet, so
-    // it trails typing rather than racing it.
+    // The header count trails typing rather than racing it: every update is an
+    // HTTP round trip even though the indexed query itself is cheap.
     private func scheduleHitCount() {
         hitCountWork?.cancel()
-        fallbackHits = nil
+        contentHitCount = nil
+        contentResults = []
+        searchServed = false
+        indexPercent = nil
+        updateSearchChrome()
+        updateEmptyState()
         let term = query.trimmingCharacters(in: .whitespaces)
         guard !term.isEmpty, !term.hasPrefix("#") else {
-            searchServed = false
             return
         }
         let work = DispatchWorkItem { [weak self] in
@@ -1126,108 +1140,133 @@ final class PaletteController: NSObject {
         // The field may have moved on while the request was in flight.
         guard term == query.trimmingCharacters(in: .whitespaces) else { return }
         switch outcome {
-        case .available(let results):
+        case .available(let response):
             searchServed = true
-            fallbackHits = results.reduce(0) { $0 + $1.hitCount }
-            contentResults = results
-            contentAvailability = outcome
+            contentHitCount = response.totalHits
+            contentResults = response.results
         case .disabled, .notSupported, .unreachable:
-            // No promotion row at all: there is nothing to promote to, and an
-            // affordance that always fails is worse than no affordance.
+            // An affordance that always fails is worse than no affordance.
             searchServed = false
-            fallbackHits = nil
-            contentAvailability = outcome
+            contentHitCount = nil
+            contentResults = []
         }
-        if !contentMode { refreshFallbackRow() }
-    }
-
-    // Only the promotion row changed, so rebuild the rows and put the cursor
-    // back where it was. A bare reloadData here clears the selection, which
-    // lands about 200ms after typing stops - exactly when the user is reaching
-    // for return.
-    private func refreshFallbackRow() {
-        let previousIndex = tableView.selectedRow
-        let wasFallbackSelected = rows.indices.contains(previousIndex)
-            && rows[previousIndex].isFallback
-        let previousKey = selectedKey()
-        rows = composeRows()
-        tableView.reloadData()
-        if wasFallbackSelected, let index = fallbackIndex {
-            select(index)
-        } else if let previousKey,
-                  let index = rows.firstIndex(where: {
-                      $0.sessionKey == previousKey && !$0.isHidden && !$0.isDivider && !$0.isFallback
-                  }) {
-            select(index)
-        } else if visibleCount > 0 {
-            select(min(max(previousIndex, 0), visibleCount - 1))
-        }
+        updateSearchChrome()
+        updateEmptyState()
     }
 
     // The hub caps a search response at 50 sessions; asking for more would be
     // discarded there.
     private static let contentResultLimit = 50
 
-    // The preview for a contents hit: the matching text, then what acting on it
-    // will do. An ended session cannot be jumped to, so its preview carries the
-    // command that reopens it rather than an action the panel cannot perform.
-    private func renderContentPreview(_ index: Int) {
-        guard contentResults.indices.contains(index) else {
-            termLabel.attributedStringValue = NSAttributedString()
-            actionRow.isHidden = true
-            previewSessionKey = nil
-            previewContentHeight = 0
-            return
-        }
-        let hit = contentResults[index]
-        let body = NSMutableAttributedString()
-        if let cwd = hit.cwd {
-            body.append(NSAttributedString(string: cwd + "\n\n", attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: s(11), weight: .regular),
-                .foregroundColor: Theme.textDim,
-            ]))
-        }
-        for run in snippetRuns(hit.snippet) {
-            body.append(NSAttributedString(string: run.text, attributes: [
-                .font: NSFont.monospacedSystemFont(
-                    ofSize: s(12), weight: run.isMatch ? .bold : .regular),
-                .foregroundColor: run.isMatch ? Theme.accent : Theme.titleUnread,
-            ]))
-        }
-        if resumeHintUuid == hit.sessionUuid, !hit.isLive {
-            let command = resumeCommand(for: hit)
-            let hint = command.isEmpty
-                ? "\n\nThis session has ended. \(hit.agent) has no resume command signalbox knows about."
-                : "\n\nThis session has ended. Reopen it with:\n\(command)"
-            body.append(NSAttributedString(string: hint, attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: s(12), weight: .regular),
-                .foregroundColor: Theme.attention,
-            ]))
-        }
-        termLabel.attributedStringValue = body
-        previewSessionKey = nil
-        previewContentHeight = 0
-        actionRow.isHidden = false
-        actionLabel.stringValue = hit.isLive
-            ? "↩ Jump to this session"
-            : "↩ Show how to reopen this session"
-    }
-
     private static let boardKeys =
         "type to search  ·  ⌃j/⌃k move  ·  ⌃1-9 direct  ·  tab next unread  ·  ⌃p pin  ·  ⌃r rename  ·  ⌃x hide  ·  ⌃⌫ remove  ·  ↩ jump / F feedback  ·  esc clear/close"
     private static let contentKeys =
-        "searching session contents  ·  ⌃j/⌃k move  ·  ↩ jump to a live session  ·  esc back to the board"
+        "searching session contents  ·  ⌃j/⌃k move  ·  ↩ jump or show resume  ·  esc back to the board"
 
     private func updateFooterHint() {
         keysLabel?.stringValue = contentMode ? Self.contentKeys : Self.boardKeys
     }
 
+    private func matchSummary(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "match" : "matches") in session contents"
+    }
+
+    // The main bar owns the transcript-search affordance. Keeping it out of
+    // the table means Return can always retain its simple "jump" meaning.
+    private func updateSearchChrome() {
+        guard headerVerbs != nil else { return }
+        headerVerbs.arrangedSubviews.forEach {
+            headerVerbs.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+
+        func label(_ text: String, color: NSColor = Theme.textMid) -> NSTextField {
+            let field = NSTextField(labelWithString: text)
+            field.font = .systemFont(ofSize: s(12))
+            field.textColor = color
+            field.setContentCompressionResistancePriority(.required, for: .horizontal)
+            return field
+        }
+
+        if contentMode {
+            headerVerbs.addArrangedSubview(label("Open"))
+            headerVerbs.addArrangedSubview(Self.keycap("↩"))
+            return
+        }
+
+        let term = query.trimmingCharacters(in: .whitespaces)
+        if searchServed, !term.isEmpty, !term.hasPrefix("#") {
+            let summary = contentHitCount.map(matchSummary)
+                ?? indexPercent.map { "indexing \($0)%" }
+                ?? "search session contents"
+            headerVerbs.addArrangedSubview(label(summary, color: Theme.age))
+            headerVerbs.addArrangedSubview(Self.keycap("⌘↩"))
+        } else {
+            headerVerbs.addArrangedSubview(label("Jump"))
+            headerVerbs.addArrangedSubview(Self.keycap("↩"))
+        }
+    }
+
+    private func updateEmptyState() {
+        guard emptyLabel != nil, emptyContentsButton != nil else { return }
+        let isEmpty = contentMode ? contentResults.isEmpty : rows.isEmpty
+        emptyLabel.isHidden = !isEmpty
+        emptyContentsButton.isHidden = true
+
+        if contentMode {
+            emptyLabel.stringValue = "No sessions contain that"
+            return
+        }
+
+        let term = query.trimmingCharacters(in: .whitespaces)
+        emptyLabel.stringValue = term.isEmpty ? "No sessions" : "No live sessions match"
+        guard isEmpty, searchServed, !term.isEmpty, !term.hasPrefix("#"),
+              let count = contentHitCount, count > 0 else { return }
+
+        let title = NSMutableAttributedString(string: matchSummary(count), attributes: [
+            .font: NSFont.systemFont(ofSize: s(12)),
+            .foregroundColor: Theme.textMid,
+        ])
+        title.append(NSAttributedString(string: "\n⌘↩  Show results", attributes: [
+            .font: NSFont.systemFont(ofSize: s(10.5)),
+            .foregroundColor: Theme.textDim,
+        ]))
+        emptyContentsButton.attributedTitle = title
+        emptyContentsButton.isHidden = false
+    }
+
+    private func updateContentLayout() {
+        guard listWidthConstraint != nil else { return }
+        listWidthConstraint.constant = contentMode ? Self.panelSize.width : Self.listWidth
+        previewView.isHidden = contentMode
+        listBorder.isHidden = contentMode
+        listHeading.attributedStringValue = NSAttributedString(
+            string: contentMode ? "SESSION CONTENTS" : "SESSIONS",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: s(10), weight: .semibold),
+                .foregroundColor: Theme.textDim,
+                .kern: s(1.5),
+            ]
+        )
+        contentsSummaryLabel.stringValue = contentHitCount.map(matchSummary) ?? ""
+        contentsSummaryLabel.isHidden = !contentMode
+        if let column = tableView.tableColumns.first {
+            column.width = contentMode ? Self.panelSize.width : Self.listWidth
+        }
+        updateSearchChrome()
+    }
+
+    @objc private func emptyContentsClicked() {
+        enterContentMode()
+    }
+
     // An ended session has no window to raise. Rather than resume the agent on
     // the user's behalf, which would start work they did not ask for, the panel
     // shows the command that picks the conversation back up.
-    private func showResumeHint(for hit: SearchResult) {
-        resumeHintUuid = hit.sessionUuid
-        renderPreview()
+    private func showResumeHint(for hit: SearchResult, at index: Int) {
+        resumeHintUuid = resumeHintUuid == hit.sessionUuid ? nil : hit.sessionUuid
+        tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: index))
+        tableView.reloadData(forRowIndexes: IndexSet(integer: index), columnIndexes: IndexSet(integer: 0))
     }
 
     // The command that reopens an ended session, per agent. Empty when the
@@ -1242,25 +1281,31 @@ final class PaletteController: NSObject {
     }
 
     private func enterContentMode() {
-        guard searchServed else { return }
+        let term = query.trimmingCharacters(in: .whitespaces)
+        guard searchServed, !term.isEmpty, !term.hasPrefix("#") else { return }
         contentMode = true
+        resumeHintUuid = nil
+        updateContentLayout()
         tableView.reloadData()
-        emptyLabel.stringValue = "No sessions contain that"
-        emptyLabel.isHidden = !contentResults.isEmpty
+        updateEmptyState()
         if !contentResults.isEmpty { select(0) }
         updateFooterHint()
-        renderPreview()
     }
 
     private func exitContentMode(reload: Bool = true) {
         contentMode = false
+        resumeHintUuid = nil
+        updateContentLayout()
         updateFooterHint()
         guard reload else { return }
         rows = composeRows()
         tableView.reloadData()
-        emptyLabel.stringValue = allRows.isEmpty ? "No sessions" : "No matches"
-        emptyLabel.isHidden = !rows.isEmpty
-        if visibleCount > 0 { select(defaultSelectionIndex()) }
+        updateEmptyState()
+        if !selectableIndices.isEmpty {
+            select(defaultSelectionIndex())
+        } else {
+            tableView.deselectAll(nil)
+        }
         renderPreview()
     }
 
@@ -1275,7 +1320,7 @@ final class PaletteController: NSObject {
             hide()
             return
         }
-        showResumeHint(for: hit)
+        showResumeHint(for: hit, at: index)
     }
 
     private func clearQuery() {
@@ -1293,17 +1338,15 @@ final class PaletteController: NSObject {
     }
 
     private func selectedKey() -> String? {
+        guard !contentMode else { return nil }
         let index = tableView.selectedRow
         guard rows.indices.contains(index), !rows[index].isHidden, !rows[index].isDivider else { return nil }
         return rows[index].sessionKey
     }
 
-    // Selection lands on a visible session row (the leading span) or on the
-    // promotion row, which sits past the Hidden section but is an action rather
-    // than an inert divider. The Hidden divider and hidden rows stay inert.
     private func select(_ index: Int) {
-        guard index >= 0, rows.indices.contains(index) else { return }
-        guard index < visibleCount || rows[index].isFallback else { return }
+        let valid = contentMode ? contentResults.indices.contains(index) : selectableIndices.contains(index)
+        guard valid else { return }
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         tableView.scrollRowToVisible(index)
     }
@@ -1325,6 +1368,7 @@ final class PaletteController: NSObject {
     }
 
     private func tick() {
+        guard !contentMode else { return }
         spinIndex = (spinIndex + 1) % Self.spinGlyphs.count
         let now = Date()
         tableView.enumerateAvailableRowViews { rowView, _ in
@@ -1350,6 +1394,12 @@ final class PaletteController: NSObject {
         guard labelEditingKey == nil else { return event }
         let ctrl = event.modifierFlags.contains(.control)
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let commandReturn = (event.keyCode == 36 || event.keyCode == 76)
+            && flags.contains(.command) && !flags.contains(.control) && !flags.contains(.option)
+        if commandReturn {
+            if !contentMode { enterContentMode() }
+            return nil
+        }
         if unsupportedJumpKey != nil,
            !flags.contains(.control), !flags.contains(.command), !flags.contains(.option),
            event.charactersIgnoringModifiers?.lowercased() == "f" {
@@ -1373,14 +1423,14 @@ final class PaletteController: NSObject {
                 activateContentResult(tableView.selectedRow)
                 return nil
             }
-            if let index = fallbackIndex, tableView.selectedRow == index {
-                enterContentMode()
-                return nil
-            }
             jumpSelected()
             return nil
-        case 48: cycleNeedsCheck(); return nil // tab
-        case 51 where ctrl: removeSelected(); return nil // ⌃⌫ (bare ⌫ edits the search)
+        case 48: // tab
+            if !contentMode { cycleNeedsCheck() }
+            return nil
+        case 51 where ctrl: // ⌃⌫ (bare ⌫ edits the search)
+            if !contentMode { removeSelected() }
+            return nil
         case 125: moveSelection(1); return nil // down arrow
         case 126: moveSelection(-1); return nil // up arrow
         default: break
@@ -1414,14 +1464,15 @@ final class PaletteController: NSObject {
         switch chars {
         case "j": moveSelection(1)
         case "k": moveSelection(-1)
-        case "x": hideSelected()
-        case "r": beginLabelEdit()
-        case "p": togglePinSelected()
+        case "x" where !contentMode: hideSelected()
+        case "r" where !contentMode: beginLabelEdit()
+        case "p" where !contentMode: togglePinSelected()
         default:
-            guard let digit = Int(chars), (1...9).contains(digit), digit <= visibleCount else {
+            if contentMode { return nil }
+            guard let digit = Int(chars), (1...9).contains(digit), digit <= selectableIndices.count else {
                 return event
             }
-            jumpRow(digit - 1)
+            jumpRow(selectableIndices[digit - 1])
         }
         return nil
     }
@@ -1438,10 +1489,10 @@ final class PaletteController: NSObject {
     }
 
     private func moveSelection(_ delta: Int) {
-        guard visibleCount > 0 else { return }
-        let current = tableView.selectedRow
-        let base = (current >= 0 && current < visibleCount) ? current : 0
-        select(min(max(base + delta, 0), visibleCount - 1))
+        let indices = contentMode ? Array(contentResults.indices) : selectableIndices
+        guard !indices.isEmpty else { return }
+        let position = indices.firstIndex(of: tableView.selectedRow) ?? 0
+        select(indices[min(max(position + delta, 0), indices.count - 1)])
     }
 
     // Tab cycles unread rows in list order, top to bottom - same reading
@@ -1461,7 +1512,7 @@ final class PaletteController: NSObject {
     }
 
     private func jumpRow(_ index: Int) {
-        guard rows.indices.contains(index), !rows[index].isDivider, !rows[index].isHidden else { return }
+        guard selectableIndices.contains(index) else { return }
         let row = rows[index]
         guard !row.infoOnly else { return }
         guard row.jumpable else {
@@ -1500,8 +1551,9 @@ final class PaletteController: NSObject {
     // row is selected first so the menu items (which act on the selection) and
     // the keyboard bindings always target the same row.
     private func contextMenu(forRow row: Int) -> NSMenu? {
+        guard !contentMode else { return nil }
         guard rows.indices.contains(row) else { return nil }
-        // The Hidden divider has no menu; a hidden row offers only Unhide.
+        // Dividers have no session actions; a hidden row offers only Unhide.
         if rows[row].isDivider { return nil }
         if rows[row].isHidden {
             let menu = NSMenu()
@@ -1546,7 +1598,7 @@ final class PaletteController: NSObject {
             return
         }
         let index = tableView.selectedRow
-        let candidates = rows.indices.filter { rows[$0].sessionKey != key }
+        let candidates = selectableIndices.filter { rows[$0].sessionKey != key }
         if let next = candidates.first(where: { $0 > index }) ?? candidates.last {
             select(next)
         }
@@ -1594,17 +1646,25 @@ final class PaletteController: NSObject {
     // Mock interaction: single click selects (the preview is the payoff);
     // double click jumps. Enter remains the primary jump.
     @objc private func rowDoubleClicked(_ sender: Any?) {
+        if contentMode {
+            activateContentResult(tableView.clickedRow)
+            return
+        }
         jumpRow(tableView.clickedRow)
     }
 
-    // Single click: the Hidden divider toggles the section open/closed; a hidden
-    // row unhides (fires `show`). Clicks on visible rows fall through to normal
-    // selection.
+    // Dividers toggle their sections; a hidden row unhides (fires `show`). An
+    // older row selects like any live row: it is not hidden, so must not fire `show`.
     @objc private func rowClicked(_ sender: Any?) {
+        guard !contentMode else { return }
         let index = tableView.clickedRow
         guard rows.indices.contains(index) else { return }
         let row = rows[index]
-        if row.isDivider {
+        if row.isOlderDivider {
+            guard row.olderCount > 0 else { return }
+            olderExpanded.toggle()
+            reload(preservingSelection: true)
+        } else if row.isDivider {
             // "Hidden (0)" has nothing to expand.
             guard row.hiddenCount > 0 else { return }
             hiddenExpanded.toggle()
@@ -1681,7 +1741,7 @@ final class PaletteController: NSObject {
         // (scrollers, symbol images) consistent with the fixed theme colors.
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.delegate = self
-        // Fallback only: the local monitor handles keys while the search
+        // Backstop only: the local monitor handles keys while the search
         // field is first responder; this swallows strays so the panel never
         // beeps or type-selects.
         panel.onKeyDown = { _ in true }
@@ -1839,6 +1899,7 @@ final class PaletteController: NSObject {
         ])
 
         self.searchField = search
+        self.headerVerbs = verbs
         return header
     }
 
@@ -2149,23 +2210,46 @@ final class PaletteController: NSObject {
         empty.textColor = Theme.textDim
         empty.isHidden = true
 
+        let emptyContents = NSButton(title: "", target: self, action: #selector(emptyContentsClicked))
+        emptyContents.isBordered = false
+        emptyContents.image = NSImage(
+            systemSymbolName: "magnifyingglass",
+            accessibilityDescription: "Search session contents"
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: s(15), weight: .regular))
+        emptyContents.imagePosition = .imageLeading
+        emptyContents.imageHugsTitle = true
+        emptyContents.contentTintColor = Theme.accent
+        emptyContents.alignment = .left
+        emptyContents.isHidden = true
+
+        let contentsSummary = NSTextField(labelWithString: "")
+        contentsSummary.font = .systemFont(ofSize: s(11))
+        contentsSummary.textColor = Theme.textDim
+        contentsSummary.alignment = .right
+        contentsSummary.isHidden = true
+
         let listBorder = NSView()
         listBorder.wantsLayer = true
         listBorder.layer?.backgroundColor = Theme.hairline.cgColor
 
-        for view in [heading, scroll, empty, listBorder] {
+        for view in [heading, contentsSummary, scroll, empty, emptyContents, listBorder] {
             view.translatesAutoresizingMaskIntoConstraints = false
             list.addSubview(view)
         }
         NSLayoutConstraint.activate([
             heading.topAnchor.constraint(equalTo: list.topAnchor, constant: s(20)),
             heading.leadingAnchor.constraint(equalTo: list.leadingAnchor, constant: s(24)),
+            contentsSummary.centerYAnchor.constraint(equalTo: heading.centerYAnchor),
+            contentsSummary.trailingAnchor.constraint(equalTo: list.trailingAnchor, constant: -s(24)),
+            contentsSummary.leadingAnchor.constraint(greaterThanOrEqualTo: heading.trailingAnchor, constant: s(12)),
             scroll.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: s(8)),
             scroll.leadingAnchor.constraint(equalTo: list.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: list.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: list.bottomAnchor, constant: -s(12)),
             empty.centerXAnchor.constraint(equalTo: list.centerXAnchor),
-            empty.centerYAnchor.constraint(equalTo: list.centerYAnchor),
+            empty.centerYAnchor.constraint(equalTo: list.centerYAnchor, constant: -s(28)),
+            emptyContents.topAnchor.constraint(equalTo: empty.bottomAnchor, constant: s(12)),
+            emptyContents.centerXAnchor.constraint(equalTo: list.centerXAnchor),
             listBorder.trailingAnchor.constraint(equalTo: list.trailingAnchor),
             listBorder.topAnchor.constraint(equalTo: list.topAnchor),
             listBorder.bottomAnchor.constraint(equalTo: list.bottomAnchor),
@@ -2225,11 +2309,12 @@ final class PaletteController: NSObject {
             view.translatesAutoresizingMaskIntoConstraints = false
             body.addSubview(view)
         }
+        let listWidth = list.widthAnchor.constraint(equalToConstant: Self.listWidth)
         NSLayoutConstraint.activate([
             list.leadingAnchor.constraint(equalTo: body.leadingAnchor),
             list.topAnchor.constraint(equalTo: body.topAnchor),
             list.bottomAnchor.constraint(equalTo: body.bottomAnchor),
-            list.widthAnchor.constraint(equalToConstant: Self.listWidth),
+            listWidth,
             preview.leadingAnchor.constraint(equalTo: list.trailingAnchor),
             preview.trailingAnchor.constraint(equalTo: body.trailingAnchor),
             preview.topAnchor.constraint(equalTo: body.topAnchor),
@@ -2238,6 +2323,12 @@ final class PaletteController: NSObject {
 
         self.tableView = table
         self.emptyLabel = empty
+        self.emptyContentsButton = emptyContents
+        self.listHeading = heading
+        self.contentsSummaryLabel = contentsSummary
+        self.listBorder = listBorder
+        self.previewView = preview
+        self.listWidthConstraint = listWidth
         self.termLabel = term
         self.termScrollView = termScroll
         self.actionRow = actionRow
@@ -2281,11 +2372,8 @@ final class PaletteController: NSObject {
     // MARK: - Preview rendering
 
     private func renderPreview(now: Date = Date()) {
+        guard !contentMode else { return }
         let index = tableView.selectedRow
-        if contentMode {
-            renderContentPreview(index)
-            return
-        }
         guard rows.indices.contains(index) else {
             termLabel.attributedStringValue = NSAttributedString()
             actionRow.isHidden = true
@@ -2425,6 +2513,7 @@ final class PaletteController: NSObject {
             ]))
             text.append(render(reply, style: replyStyle, cropped: exchange.cropped))
         }
+        highlightPreviewMatches(in: text)
         termLabel.attributedStringValue = text
         tailPreviewIfNeeded(for: key)
 
@@ -2446,6 +2535,27 @@ final class PaletteController: NSObject {
             ]))
         }
         actionLabel.attributedStringValue = action
+    }
+
+    // Board filtering also makes the reason for a match visible in the normal
+    // transcript preview. This is a literal, case-insensitive highlight and
+    // deliberately leaves all markdown styling intact.
+    private func highlightPreviewMatches(in text: NSMutableAttributedString) {
+        let term = query.trimmingCharacters(in: .whitespaces)
+        guard !term.isEmpty, !term.hasPrefix("#") else { return }
+        let source = text.string as NSString
+        var remaining = NSRange(location: 0, length: source.length)
+        while remaining.length > 0 {
+            let match = source.range(of: term, options: .caseInsensitive, range: remaining)
+            guard match.location != NSNotFound else { break }
+            text.addAttribute(
+                .backgroundColor,
+                value: Theme.accent.withAlphaComponent(0.22),
+                range: match
+            )
+            let next = NSMaxRange(match)
+            remaining = NSRange(location: next, length: source.length - next)
+        }
     }
 
     private func tailPreviewIfNeeded(for key: String) {
@@ -2525,71 +2635,16 @@ private final class PaletteRowView: NSTableRowView {
     }
 }
 
-// MARK: - Hidden divider
-
-// The "Hidden (N)" row: a dim count, always shown so it is clear whether a
-// session is set aside. With a count it carries a disclosure chevron and toggles
-// the section (rowClicked); at "Hidden (0)" it is inert - no chevron, nothing to
-// expand.
-// The promotion row: the same query, offered to a bigger index. It carries the
-// hit count so the user knows whether promoting is worth it before pressing
-// return, and stays quiet about the count until one arrives.
-private final class FallbackRowView: NSView {
-    init(query: String, hits: Int?, indexPercent: Int?) {
-        super.init(frame: .zero)
-        let key = NSTextField(labelWithString: "↩")
-        key.font = .systemFont(ofSize: s(11), weight: .semibold)
-        key.textColor = Theme.accent
-        key.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(key)
-
-        let label = NSTextField(labelWithString: "Search session contents for \"\(query)\"")
-        label.font = .systemFont(ofSize: s(12))
-        label.textColor = Theme.textDim
-        label.lineBreakMode = .byTruncatingTail
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-
-        // While the index builds, the row reports that instead of a count: the
-        // count would be true and misleading, because the answer is still
-        // growing.
-        let trailing = indexPercent.map { "indexing \($0)%" }
-            ?? hits.map { "\($0) hits" }
-            ?? ""
-        let count = NSTextField(labelWithString: trailing)
-        count.font = .systemFont(ofSize: s(11))
-        count.textColor = indexPercent == nil ? Theme.textDim : Theme.attention
-        count.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(count)
-
-        NSLayoutConstraint.activate([
-            key.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s(20)),
-            key.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: key.trailingAnchor, constant: s(10)),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            count.leadingAnchor.constraint(
-                greaterThanOrEqualTo: label.trailingAnchor, constant: s(10)),
-            count.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(20)),
-            count.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("not used") }
-}
-
 // A contents hit: which session, when, how many times, and the matching text
 // with the match itself picked out. Live and ended are marked because only a
 // live session can be jumped to.
 private final class ContentResultCellView: NSView {
-    init(hit: SearchResult) {
+    init(hit: SearchResult, resumeCommand: String?, expanded: Bool) {
         super.init(frame: .zero)
         let glyph = AgentGlyphView(agent: hit.agent)
         glyph.translatesAutoresizingMaskIntoConstraints = false
         addSubview(glyph)
 
-        // The last path component is what identifies a project at a glance; the
-        // full path crowds out the snippet, which is the reason the row exists.
         let name = (hit.cwd?.split(separator: "/").last).map(String.init) ?? hit.agent
         let title = NSTextField(labelWithString: name)
         title.font = .systemFont(ofSize: s(13), weight: .semibold)
@@ -2598,69 +2653,123 @@ private final class ContentResultCellView: NSView {
         title.translatesAutoresizingMaskIntoConstraints = false
         addSubview(title)
 
-        let meta = NSTextField(labelWithString: metaText(hit))
-        meta.font = .systemFont(ofSize: s(11))
-        meta.textColor = Theme.textDim
-        meta.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(meta)
+        let agent = NSTextField(labelWithString: hit.agent)
+        agent.font = .systemFont(ofSize: s(10.5))
+        agent.textColor = Theme.textDim
+        agent.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(agent)
+
+        let path = NSTextField(labelWithString: hit.cwd ?? "")
+        path.font = .monospacedSystemFont(ofSize: s(10.5), weight: .regular)
+        path.textColor = NSColor(hex: 0x5F5F64)
+        path.lineBreakMode = .byTruncatingMiddle
+        path.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(path)
 
         let snippet = NSTextField(labelWithAttributedString: attributedSnippet(hit.snippet))
         snippet.lineBreakMode = .byTruncatingTail
-        snippet.maximumNumberOfLines = 1
+        snippet.maximumNumberOfLines = 2
         snippet.translatesAutoresizingMaskIntoConstraints = false
         addSubview(snippet)
 
+        let when = NSTextField(labelWithString: metaText(hit))
+        when.font = .systemFont(ofSize: s(10.5))
+        when.textColor = Theme.age
+        when.alignment = .right
+        when.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(when)
+
+        let state = NSTextField(labelWithString: hit.isLive ? "live" : "ended")
+        state.font = .systemFont(ofSize: s(10.5))
+        state.textColor = hit.isLive ? Theme.green : Theme.textDim
+        state.alignment = .right
+        state.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(state)
+
+        let action = NSTextField(labelWithString: "↩  \(hit.isLive ? "Jump" : "Show resume")")
+        action.font = .systemFont(ofSize: s(10.5))
+        action.textColor = Theme.accent
+        action.alignment = .right
+        action.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(action)
+
         NSLayoutConstraint.activate([
-            glyph.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s(20)),
-            glyph.topAnchor.constraint(equalTo: topAnchor, constant: s(10)),
-            title.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: s(10)),
-            title.topAnchor.constraint(equalTo: topAnchor, constant: s(8)),
-            meta.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(20)),
-            meta.centerYAnchor.constraint(equalTo: title.centerYAnchor),
-            meta.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: s(10)),
+            glyph.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s(24)),
+            glyph.topAnchor.constraint(equalTo: topAnchor, constant: s(12)),
+            glyph.widthAnchor.constraint(equalToConstant: s(22)),
+            glyph.heightAnchor.constraint(equalToConstant: s(20)),
+            title.leadingAnchor.constraint(equalTo: glyph.trailingAnchor, constant: s(12)),
+            title.topAnchor.constraint(equalTo: topAnchor, constant: s(9)),
+            agent.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: s(8)),
+            agent.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
+            agent.trailingAnchor.constraint(lessThanOrEqualTo: when.leadingAnchor, constant: -s(12)),
+            path.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            path.trailingAnchor.constraint(equalTo: when.leadingAnchor, constant: -s(12)),
+            path.topAnchor.constraint(equalTo: title.bottomAnchor, constant: s(1)),
             snippet.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            snippet.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(20)),
-            snippet.topAnchor.constraint(equalTo: title.bottomAnchor, constant: s(2)),
+            snippet.trailingAnchor.constraint(equalTo: when.leadingAnchor, constant: -s(12)),
+            snippet.topAnchor.constraint(equalTo: path.bottomAnchor, constant: s(4)),
+            when.topAnchor.constraint(equalTo: topAnchor, constant: s(9)),
+            when.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(24)),
+            when.widthAnchor.constraint(equalToConstant: s(185)),
+            state.topAnchor.constraint(equalTo: when.bottomAnchor, constant: s(5)),
+            state.trailingAnchor.constraint(equalTo: when.trailingAnchor),
+            action.topAnchor.constraint(equalTo: state.bottomAnchor, constant: s(2)),
+            action.trailingAnchor.constraint(equalTo: when.trailingAnchor),
         ])
+
+        if expanded {
+            let command = NSTextField(labelWithString:
+                resumeCommand.flatMap { $0.isEmpty ? nil : $0 }
+                    ?? "Resume is not available for this agent"
+            )
+            command.font = .monospacedSystemFont(ofSize: s(11), weight: .regular)
+            command.textColor = Theme.textMid
+            command.isSelectable = true
+            command.wantsLayer = true
+            command.layer?.backgroundColor = NSColor.black.cgColor
+            command.layer?.cornerRadius = s(6)
+            command.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(command)
+            NSLayoutConstraint.activate([
+                command.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+                command.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(24)),
+                command.topAnchor.constraint(equalTo: snippet.bottomAnchor, constant: s(7)),
+                command.heightAnchor.constraint(equalToConstant: s(27)),
+            ])
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
     private func metaText(_ hit: SearchResult) -> String {
-        let when = hit.ts.flatMap(shortDate) ?? ""
-        let count = hit.hitCount > 1 ? "×\(hit.hitCount)" : ""
-        let state = hit.isLive ? "live" : "ended"
-        return [when, count, state].filter { !$0.isEmpty }.joined(separator: "  ·  ")
+        let when = hit.ts.flatMap(SearchDate.string) ?? "Date unavailable"
+        let count = "×\(hit.hitCount)"
+        return [when, count].filter { !$0.isEmpty }.joined(separator: "  ·  ")
     }
 
     // The hub marks matches with <mark>; drawn raw the user would read the tags.
     private func attributedSnippet(_ snippet: String) -> NSAttributedString {
         let out = NSMutableAttributedString()
-        for run in snippetRuns(snippet) {
+        let compact = snippet.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        for run in snippetRuns(compact) {
             out.append(NSAttributedString(string: run.text, attributes: [
-                .font: NSFont.systemFont(ofSize: s(11.5), weight: run.isMatch ? .semibold : .regular),
-                .foregroundColor: run.isMatch ? Theme.accent : Theme.textDim,
+                .font: NSFont.monospacedSystemFont(
+                    ofSize: s(11.5), weight: run.isMatch ? .bold : .regular),
+                .foregroundColor: run.isMatch ? Theme.accent : Theme.title,
             ]))
         }
         return out
     }
 }
 
-// RFC3339 to a short "3 Aug 14:02" for a contents hit's timestamp.
-private func shortDate(_ iso: String) -> String? {
-    let parser = ISO8601DateFormatter()
-    parser.formatOptions = [.withInternetDateTime]
-    guard let date = parser.date(from: iso) else { return nil }
-    let out = DateFormatter()
-    out.dateFormat = "d MMM HH:mm"
-    return out.string(from: date)
-}
+// MARK: - Section divider
 
-private final class HiddenDividerView: NSView {
-    init(count: Int, expanded: Bool) {
+private final class SectionDividerView: NSView {
+    init(title: String, count: Int, expanded: Bool) {
         super.init(frame: .zero)
-        let label = NSTextField(labelWithString: "Hidden (\(count))")
+        let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: s(12), weight: .medium)
         label.textColor = Theme.textDim
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -2678,7 +2787,7 @@ private final class HiddenDividerView: NSView {
         let chevron = NSImageView()
         chevron.image = NSImage(
             systemSymbolName: expanded ? "chevron.down" : "chevron.right",
-            accessibilityDescription: expanded ? "Collapse hidden" : "Expand hidden"
+            accessibilityDescription: expanded ? "Collapse \(title)" : "Expand \(title)"
         )
         chevron.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: s(10), weight: .semibold)
         chevron.contentTintColor = Theme.textDim
@@ -2711,17 +2820,19 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row index: Int) -> NSView? {
         if contentMode {
             guard contentResults.indices.contains(index) else { return nil }
-            return ContentResultCellView(hit: contentResults[index])
+            let hit = contentResults[index]
+            return ContentResultCellView(
+                hit: hit,
+                resumeCommand: resumeCommand(for: hit),
+                expanded: resumeHintUuid == hit.sessionUuid && !hit.isLive
+            )
         }
         guard rows.indices.contains(index) else { return nil }
         let row = rows[index]
         if row.isDivider {
-            return HiddenDividerView(count: row.hiddenCount, expanded: hiddenExpanded)
-        }
-        if row.isFallback {
-            return FallbackRowView(
-                query: query, hits: row.fallbackHits, indexPercent: row.indexPercent
-            )
+            return row.isOlderDivider
+                ? SectionDividerView(title: "Older (\(row.olderCount))", count: row.olderCount, expanded: olderExpanded)
+                : SectionDividerView(title: "Hidden (\(row.hiddenCount))", count: row.hiddenCount, expanded: hiddenExpanded)
         }
         let cell = SessionCellView(row: row)
         // Hidden rows read as dismissed: dimmed, and inert (see shouldSelectRow).
@@ -2729,20 +2840,36 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
         return cell
     }
 
-    // Only visible session rows select. The Hidden divider and hidden rows are
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        guard contentMode, contentResults.indices.contains(row) else { return Self.rowHeight }
+        let expanded = resumeHintUuid == contentResults[row].sessionUuid
+            && !contentResults[row].isLive
+        return s(expanded ? 116 : 84)
+    }
+
+    // Revealed older rows are live sessions too. Dividers and hidden rows are
     // inert to selection and the keyboard; a click on them is handled separately.
-    // The promotion row is the exception: it is an action, so it selects even
-    // though it sits past the session span.
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        if contentMode { return true }
-        if rows.indices.contains(row), rows[row].isFallback { return true }
-        return row < visibleCount
+        if contentMode { return contentResults.indices.contains(row) }
+        return selectableIndices.contains(row)
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
-        // The right pane follows the cursor: every selection move re-renders
-        // the exchange preview.
-        renderPreview()
+        // The terminal preview follows board selection. Contents results carry
+        // their context inline and deliberately have no right-hand preview.
+        guard contentMode else {
+            renderPreview()
+            return
+        }
+        guard let expandedUuid = resumeHintUuid,
+              contentResults.indices.contains(tableView.selectedRow),
+              contentResults[tableView.selectedRow].sessionUuid != expandedUuid,
+              let oldRow = contentResults.firstIndex(where: { $0.sessionUuid == expandedUuid })
+        else { return }
+        resumeHintUuid = nil
+        let changed = IndexSet(integer: oldRow)
+        tableView.noteHeightOfRows(withIndexesChanged: changed)
+        tableView.reloadData(forRowIndexes: changed, columnIndexes: IndexSet(integer: 0))
     }
 }
 

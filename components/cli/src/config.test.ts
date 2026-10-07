@@ -3,6 +3,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  expireAgeMs,
+  expireLabel,
   normalizeBindInput,
   normalizeIntInput,
   normalizeUpstreamInput,
@@ -56,6 +58,54 @@ function inHome(home: string, expr: string, env: Record<string, string> = {}): s
   );
   return proc.stdout.toString();
 }
+
+describe("expireAgeMs", () => {
+  for (const [value, expected] of [
+    [undefined, 2592000000],
+    ["", 2592000000],
+    ["30d", 2592000000],
+    ["12h", 43200000],
+    ["1h30m", 5400000],
+    ["90m", 5400000],
+    ["45s", 45000],
+    ["1d12h", 129600000],
+    ["1d2h3m4s", 93784000],
+    ["1.5d", 129600000],
+    ["soon", 2592000000],
+    ["0h", 2592000000],
+  ] as const) {
+    test(`${value === undefined ? "unset" : JSON.stringify(value)} resolves to ${expected}ms`, () => {
+      const previous = process.env.SIGNALBOX_EXPIRE;
+      try {
+        if (value === undefined) delete process.env.SIGNALBOX_EXPIRE;
+        else process.env.SIGNALBOX_EXPIRE = value;
+        expect(expireAgeMs()).toBe(expected);
+      } finally {
+        if (previous === undefined) delete process.env.SIGNALBOX_EXPIRE;
+        else process.env.SIGNALBOX_EXPIRE = previous;
+      }
+    });
+  }
+});
+
+describe("expireLabel", () => {
+  test("labels whole days", () => {
+    expect(expireLabel(30 * 86400000)).toBe("30d");
+  });
+
+  test("labels whole hours", () => {
+    expect(expireLabel(12 * 3600000)).toBe("12h");
+  });
+
+  test("labels whole minutes", () => {
+    expect(expireLabel(90 * 60000)).toBe("90m");
+  });
+
+  test("labels seconds without rounding", () => {
+    expect(expireLabel(45 * 1000)).toBe("45s");
+    expect(expireLabel(1500)).toBe("1.5s");
+  });
+});
 
 describe("claudeRenameTitle", () => {
   test("defaults to true when the file is missing", () => {

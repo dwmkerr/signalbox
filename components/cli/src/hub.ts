@@ -213,17 +213,35 @@ export class Hub {
     this.timers.push(setInterval(sweep, intervalMs));
   }
 
-  // startLiveness ends sessions whose captured process died without an exit
-  // event. Ended, never done: dying is not finishing. Only sessions on the
-  // hub's own host with a captured proc are checked.
+  // A dead process is a status, not a verdict on the conversation. Expiry and
+  // an explicit remove are the only things that take a row off the board.
   startLiveness(intervalMs: number): void {
     const host = ev.shortHostname();
     const sweep = () => {
       for (const s of this.store.list()) {
-        if (!s.proc || s.host !== host) continue;
+        // proc carries forward across events, so the row still has a dead proc
+        // after the sweep. Matching on proc alone would re-fire every 30 seconds
+        // forever, flooding events.jsonl and bumping ts so the row never expires.
+        // Matching on busy makes it self-terminating: once the row is done it
+        // no longer matches.
+        if (s.event !== ev.Busy || !s.proc || s.host !== host) continue;
         if (procAlive(s.proc)) continue;
         try {
-          this.ingest(ev.newEnded(s.session_key, "exited"));
+          // Re-sending the row's prompt/reply would alter exchange history.
+          this.ingest({
+            v: ev.Version,
+            id: crypto.randomUUID(),
+            ts: ev.nowTS(),
+            host: s.host,
+            machine: s.machine,
+            agent: s.agent,
+            event: ev.Done,
+            reason: "exited",
+            session_key: s.session_key,
+            cwd: s.cwd,
+            title: s.title,
+            transcript: s.transcript,
+          });
         } catch {
           return;
         }
@@ -289,9 +307,10 @@ export class Hub {
     if (req.method === "POST" && url.pathname === "/events") return this.handleEvents(req);
     if (req.method === "POST" && url.pathname === "/command") return this.handleCommand(req);
     if (req.method === "GET" && url.pathname === "/state") {
+      // Serve one horizon so two boards cannot disagree about what "older" means.
       // no-store: /state doubles as the clients' liveness probe, and a
       // cached answer makes a dead hub look alive.
-      return Response.json({ sessions: this.sessions() }, {
+      return Response.json({ sessions: this.sessions(), older_horizon_seconds: ev.OlderHorizonSeconds }, {
         headers: { "Cache-Control": "no-store" },
       });
     }
@@ -357,6 +376,7 @@ export class Hub {
     return noStoreJSON({
       enabled: true,
       query,
+      totalHits: index.countHits(query),
       results: index.search(query, searchResultLimit, this.sessions()),
     });
   }

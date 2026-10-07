@@ -13,7 +13,7 @@ on stdin and maps it per [specs/adapters.md](../../../specs/adapters.md):
 | `PermissionRequest` | attention (reason `permission_request`) + `reply` = the actual ask, e.g. `Bash: git push` |
 | `PreToolUse` (matcher `AskUserQuestion`) | attention (reason `question`) + `reply` = the question and its options |
 | `StopFailure` | error (reason = `error_type`) |
-| `SessionEnd` | ended |
+| `SessionEnd` | done |
 
 ## The exchange breadcrumb
 

@@ -186,9 +186,11 @@ struct ChatView: View {
             guard exchanges.last?.prompt != prompt else { return nil }
             return Exchange(prompt: prompt, reply: nil, ts: "", cropped: false, seq: Int.max)
         case "attention":
-            // The reducer ignores attention events by contract (events.md,
-            // history rule 1), so the one message actually waiting on you is
-            // the one the conversation would otherwise omit.
+            // A question now reaches history (events.md, history rule 1), but
+            // only once it has a pending prompt to close. This still covers the
+            // ask that arrives before that commit, and the ask with no prompt
+            // to pair with, which commits nothing. The guard below drops it the
+            // moment history carries the same text, so the two never double up.
             guard let ask = live.reply, !ask.isEmpty else { return nil }
             guard exchanges.last?.reply != ask else { return nil }
             return Exchange(prompt: nil, reply: ask, ts: "", cropped: false, seq: Int.max)

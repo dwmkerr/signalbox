@@ -107,6 +107,15 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   // forks). Exactly one of the payload fields may be set; old events
   // without `kind` get it inferred from whichever field that is. Captured
   // when the event fires, so jumping never depends on the local setup.
+  //
+  // A tmux origin is the pane the AGENT runs in, which is not always the pane
+  // the hook runs in: Codex executes its hooks under one long-lived
+  // `codex app-server` daemon, so every Codex session would otherwise report
+  // whichever pane that daemon started in. The pane is kept while its own
+  // path matches the event's cwd, and otherwise re-resolved to the single
+  // pane at that cwd (preferring one whose running command is the agent). When
+  // no pane can be singled out the origin is omitted entirely rather than
+  // naming a pane already known to be the wrong one.
   "origin": {
     "kind": "tmux",
     "tmux": {
@@ -120,8 +129,8 @@ Every field explained in place. Optional fields are omitted from the JSON when e
     // so redact has nothing extra to strip.
   },
 
-  // The agent's process, so the hub can end sessions whose process died
-  // without a goodbye (a killed TUI, a crash).
+  // The agent's process, so the hub can clear a stale busy status after an
+  // exit or crash without ending a resumable session.
   "proc": { "pid": 12345, "name": "claude" },
 
   // Diagnostic only: the untouched adapter payload, attached when
@@ -176,15 +185,20 @@ incomplete.
 
 Agent events update history by these rules:
 
-1. Ignore `attention` events. Their replies describe the pending ask and do not belong in exchange history.
+1. An `attention` splits by `reason`. A `question` is a turn ending on the user, so it closes the pending exchange exactly like a `done`, with the ask as the reply - it is the one message in the conversation waiting on a human, and dropping it left the user's next prompt committed under nothing. Every other `attention`, `permission_request` included, is ignored: a tool approval is machinery, not conversation. The reason is read from the event as sent, so the bare twin of an enriched ask (which inherits `reason` and `reply` onto the row) cannot record the same question twice.
 2. For `busy`, apply any reply to the outgoing exchange before opening the new prompt. A `busy` event does not close the new exchange.
 3. For `done` or `error`, apply the prompt and reply in that order. Commit the pending exchange when both values are present.
 4. Opening a new prompt commits an older pending exchange, including an incomplete one, before creating the new pending exchange.
-5. A reply with no pending exchange amends the latest committed reply and folds in `cropped` while preserving its `seq`. If the session has no committed history, the reply creates a reply-only pending exchange.
+5. A reply with no pending exchange amends the latest committed reply and folds in `cropped` while preserving its `seq`. If the session has no committed history, or its newest committed exchange closed on a question, the reply creates a reply-only pending exchange instead.
 
 The amendment rule heals write races. Claude's Stop-time reply capture can run
 before the transcript contains the final text. A later idle notification or
 prompt carries that text and updates the outgoing exchange.
+
+A question is exempt from the amendment because its text is final rather than
+provisional: healing over it would delete the very message rule 1 exists to
+keep. The exemption lifts as soon as a new prompt opens, since that prompt is
+the answer.
 
 An unanswered prompt or reply-only exchange remains pending. It does not appear
 in the public history ring until a later prompt commits it or a `done` or
@@ -211,11 +225,30 @@ Four user actions on a row's visibility, in ascending strength:
 - **show** (`signalbox session show`): the reverse of hide - a hidden row reappears in place, with no ack and no reorder. A no-op on a row that is not hidden.
 - **ended** (`signalbox session remove`, jumplist `⌃⌫`): the row is gone now.
 
-The hub also ends sessions on its own, with an `ended` event like any other (reason `expired` or `exited`; `signalbox session remove` fires reason `removed`): after `SIGNALBOX_EXPIRE` (default 24h) without an agent event - checked every 10 minutes and once at boot - and within about 30 seconds of the agent's process dying without an exit event (only processes on the hub's own host are checked). A dead process gets an `ended` event.
+Process liveness is a status of the agent process, not a session lifecycle state.
+A crashed agent and a cleanly quit agent are both not running, and either may
+still be resumable. `ended` means the session was explicitly ended. Expiry after
+`SIGNALBOX_EXPIRE` (default 30d) without an agent event and an explicit
+`signalbox session remove` are the only removals. Expiry is checked every 10
+minutes and once at boot, ingesting `ended` reason `expired`; remove ingests
+`ended` reason `removed`.
+
+An agent's own `SessionEnd` does not end a session: it leaves the row as `done`,
+so expiry and an explicit remove take it off the board (see the
+[adapter contract](adapters.md) for `/clear` handling).
+
+The liveness sweep checks only `busy` rows with a captured `proc` on the hub's
+own host. Within about 30 seconds of that process dying, it ingests `done`
+reason `exited`, preserving the row and its exchange history. Every other row
+is untouched. `proc` carries forward across events, so the row still has a dead
+proc after the sweep. Matching on proc alone would re-fire every 30 seconds
+forever, flooding `events.jsonl` and bumping `ts` so the row could never expire.
+Matching on `busy` makes the sweep self-terminating: once the row is `done` it
+no longer matches.
 
 ## Pinning
 
-**pin** (`signalbox session pin`) floats a session into a partition at the top of the board and keeps it there; **unpin** (`signalbox session unpin`) releases it. Both are idempotent. A pin outlives agent activity: `pinned` carries across every event until you remove it. Two things end a pin: `unpin`, and `hide`. Hiding a pinned session drops the pin before applying its own rule (busy downgrades to seen, else hidden). An `ended` (remove, expiry, a dead process) takes the whole session off the board; a pin does not resurrect or protect it.
+**pin** (`signalbox session pin`) floats a session into a partition at the top of the board and keeps it there; **unpin** (`signalbox session unpin`) releases it. Both are idempotent. A pin outlives agent activity: `pinned` carries across every event until you remove it. Two things end a pin: `unpin`, and `hide`. Hiding a pinned session drops the pin before applying its own rule (busy downgrades to seen, else hidden). An `ended` (remove or expiry) takes the whole session off the board; a pin does not resurrect or protect it. A dead process leaves the row and its pin intact.
 
 ## Ordering
 
@@ -224,6 +257,32 @@ Rows keep the order you work in, like the app switcher: most recently engaged fi
 `engaged_ts` on each `/state` row is this sort key. Sessions you never engaged hold their arrival position.
 
 **Pinned rows form a top partition.** Every pinned session sorts above every unpinned one; engagement-MRU then orders each partition internally. A pin therefore floats a row above more-recently-engaged unpinned rows without reordering the pinned group among itself. The hub owns this order and every surface adopts it verbatim.
+
+### Older rows
+
+"Older" is **derived** at render time, never stored: no event type, no reducer
+rule, and no field on a session. A row is older when
+`now - engaged_ts > older_horizon_seconds`, with elapsed time measured in seconds.
+It partitions on `engaged_ts`, the same key the board sorts by, so the sections
+cannot interleave.
+
+Pinned rows are never older: a pin means "keep this in front of me". A row that
+is both older and hidden belongs under Hidden - explicit user intent beats age.
+
+The hub serves `older_horizon_seconds` as `86400` (24 hours) in `/state` so both
+surfaces agree. The horizon is deliberately not a setting: per-app values could
+make the boards disagree, a per-hub control has no consumer to justify maintaining
+and documenting it, and any mismatch with a forwarder's own binary is fixed by
+reinstalling. The macOS and iOS apps decode the horizon leniently as an optional
+field and adopt it on resync when present. Their initial 24-hour default covers
+an older hub and the window before the first resync; an absent or invalid field
+leaves the current horizon unchanged. The iOS row carries the hub's `engaged_ts`
+as a date for the Older partition, falling back to `ts` and then the current time
+when a timestamp is missing or invalid.
+
+The macOS jumplist and the iOS board each collapse older rows behind an
+`Older (N)` divider. The menu bar dropdown excludes them outright. The CLI
+`state` listing stays flat.
 
 ## Commands
 
@@ -291,7 +350,7 @@ The default posture is `http://127.0.0.1:8377`, loopback only, with no auth. Wid
 |---|---|
 | `POST /events` | Validate, assign `seq`, append to the log, update state, broadcast. Returns `{"seq": 118}`. Requires `Content-Type: application/json`. |
 | `POST /command` | Fan out a [command](#commands) to every live stream and forget it: no `seq`, no log, no state. Returns `{"ok": true, "delivered": 2}`. |
-| `GET /state` | `{"sessions": [...]}` in display order. |
+| `GET /state` | `{"sessions": [...], "older_horizon_seconds": 86400}` with sessions in display order. The horizon is how long since engagement a row may go before the surfaces draw it as older. |
 | `GET /exchanges?session=K&limit=N&before=S` | `{"session_key": "...", "exchanges": [...], "next_before": 118}` - the newest `N` exchanges for session `K`, **oldest first**. `session` is required and carries the raw `session_key` as an ordinary query value (no path-encoding of keys containing `:`). `limit` defaults to 20 and is clamped to `hub.historyLimit`; `before` pages backwards by returning only exchanges whose `seq` is lower, and `next_before` is the oldest `seq` in the page, so a client pages with it until `exchanges` comes back empty. `400` for a missing `session`; `404` for a session that is not on the board (distinct from a session with no history yet, which is `200` with an empty list). The hub and the [forwarder](#the-forwarder) serve this response contract from their reducer rings rather than from `events.jsonl`. `Cache-Control: no-store`. |
 | `GET /stream?since=N` | Server-sent events: replay everything after seq N, then live. Heartbeat every 15s. Commands are live-only and never appear in the replay. |
 | `GET /healthz` | `{"ok": true, "version": "0.1.5", "build": "d6907e1-dirty", "mode": "local"|"lan"|"remote", "bind": "127.0.0.1", "port": 8377}`. `mode` is the single oracle for which runtime is answering: it is stated and must never be inferred from `bind` or from the presence of other keys. `version` is the bare semver and `build` is empty on an unstamped build. Never authenticated - platform health checks reach it from anywhere. |
@@ -336,7 +395,7 @@ The local listener is always unauthenticated http on `127.0.0.1` (port 8377 by d
 |---|---|
 | `POST /events` | Normalize and validate, remove `transcript`, derived fields and `seq`, append to `${stateDir}/forward-spool.jsonl` under its `.lock`, start an asynchronous drain, and immediately return `202 {"spooled": true}` without waiting for the upstream. `transcript` is removed for every profile because an upstream hub cannot read another machine's local transcript and must not persist its path. This response acknowledges spooling only and carries no `seq`; the upstream assigns one on ingest after the drain delivers the event, and the forwarder receives it later through the downlink. The hook client allows its POST only 200 ms; waiting for a WAN round trip would make the hook spool an event that the forwarder might also have delivered. The drain is the only sender of spooled events, so delivery stays FIFO and there is one spool. |
 | `POST /command` | Validate and synchronously proxy to the upstream. A successful upstream response supplies the same `{"ok": true, "delivered": N}` body; any upstream failure returns `502` with an error body. Commands are never spooled because a stale request has no meaning. |
-| `GET /state` | Return `{"sessions": [...]}` from the in-memory downlink cache. |
+| `GET /state` | Return `{"sessions": [...], "older_horizon_seconds": 86400}` with sessions in display order from the in-memory downlink cache and the horizon from the forwarder's own binary. Forwarder clients need the same horizon as hub clients; the uplink has nothing to add. |
 | `GET /exchanges?session=K&limit=N&before=S` | Return the session's exchanges from the in-memory downlink cache, with the same shape, defaults, clamping and `400`/`404` behaviour as the hub's route. The forwarder writes no `events.jsonl`, so this is served from the reducer's ring like every other read; the ring is grown by the shared reducer as downlink frames arrive, which is why it needs no forwarder-specific code. A locally spooled `POST /events` never appears here until the upstream has assigned it a `seq` and the downlink has returned it. |
 | `GET /stream?since=N` | Replay cached `signal` frames after N, then re-broadcast live `signal` and `command` frames from the downlink. The signal backlog is bounded to the newest 2,000 events; commands remain live-only. The stream sends an immediate `: connected` comment so a same-process fetch receives first bytes before the first event, then the normal 15-second heartbeat comments. |
 | `GET /healthz` | Return `{"ok": true, "version": "0.1.5", "build": "d6907e1-dirty", "mode": "forwarder", "port": 8377, "upstream": {"url": "https://my-hub.fly.dev", "connected": true, "lastSeq": 118, "spooled": 0}}`. `mode` is the single oracle for which runtime is answering: it is stated and must never be inferred from the presence of `upstream` or other keys. `version` is the bare semver and `build` is empty on an unstamped build. Never authenticated. |

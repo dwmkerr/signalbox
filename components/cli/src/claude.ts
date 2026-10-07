@@ -66,9 +66,9 @@ export interface Mapped {
 
 // mapClaudeHook translates a hook payload per the adapter table. null means
 // the hook is deliberately ignored - the caller must still exit 0.
-// clearEnds=false keeps `/clear`ed sessions on the board (mapped to done)
-// instead of removing them - a /clear starts a fresh session id, but the
-// old exchange can still be worth seeing.
+// Quitting must preserve the conversation read by the phone's chat view until
+// expiry or an explicit remove. By default /clear ends the old row because
+// Claude opens a fresh session id; clearEnds=false keeps the old exchange.
 export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
   switch (h.hook_event_name) {
     case "SessionStart":
@@ -125,7 +125,10 @@ export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
       if (!clearEnds && h.reason === "clear") {
         return { eventType: Done, reason: "clear", detail: "" };
       }
-      return { eventType: Ended, reason: "session_end", detail: "" };
+      if (h.reason === "clear") {
+        return { eventType: Ended, reason: "session_end", detail: "" };
+      }
+      return { eventType: Done, reason: "session_end", detail: "" };
   }
   return null;
 }

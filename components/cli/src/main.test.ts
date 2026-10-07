@@ -239,7 +239,7 @@ describe("search command", () => {
     expect(out).toContain("STATE    AGENT   CWD");
     expect(out).toMatch(/● live\s+claude\s+editor-live\s+2\s+/);
     expect(out).toMatch(/· ended\s+claude\s+editor-archive\s+1\s+/);
-    expect(out).toContain("editor editor session");
+    expect(out).toContain("editor changes are ready");
     expect(out).not.toContain("/work/editor");
     expect(out).not.toContain("<mark>");
     expect(out).not.toContain("</mark>");

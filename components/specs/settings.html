@@ -425,7 +425,9 @@ click its light for the status popover.</div>
   <p>Claude Code fires <code>SessionEnd</code> with reason <code>clear</code> on <code>/clear</code>.
   Checked (default), the session ends and leaves the board. Unchecked, the hook maps it to
   <code>done</code> so the old session stays listed until you hide it (<kbd>⌃X</kbd>), remove it
-  (<kbd>⌃⌫</kbd>), or it expires. The Codex pair behaves the same. For scripting,
+  (<kbd>⌃⌫</kbd>), or it expires. The Codex pair behaves the same. These toggles apply only to
+  <code>/clear</code>; any other <code>SessionEnd</code>, including quitting the agent, maps to
+  <code>done</code> and leaves the row on the board. For scripting,
   <code>SIGNALBOX_CLEAR_ENDS=0|1</code> overrides the file. Rename toggles: on, the agent's /rename
   shows on the board as the session name; off keeps the folder name; your own ⌃R rename always
   wins.</p>
@@ -712,7 +714,7 @@ function closePop() { state.popOpen = false; renderLight(); renderPop(); }
 function logLines() {
   var d = "2026-07-30 09:1";
   var head = [
-    [d + "4:02", "signalbox hub " + VERSION + " listening on http://127.0.0.1:8377 (state: /Users/dave/.local/state/signalbox, expire: 24h)"],
+    [d + "4:02", "signalbox hub " + VERSION + " listening on http://127.0.0.1:8377 (state: /Users/dave/.local/state/signalbox, expire: 30d)"],
     [d + "4:02", "replayed 412 events from events.jsonl (seq 412)"]
   ];
   if (state.running === "lan") {
