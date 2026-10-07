@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8](https://github.com/dwmkerr/signalbox/compare/v0.1.7...v0.1.8) (2026-10-07)
+
+
+### Features
+
+* sessions survive until you remove them ([#83](https://github.com/dwmkerr/signalbox/issues/83)) ([d71a535](https://github.com/dwmkerr/signalbox/commit/d71a535fd1f1e9652b504501a8e25c194f27b79f))
+
 ## [0.1.7](https://github.com/dwmkerr/signalbox/compare/v0.1.6...v0.1.7) (2026-09-01)
 
 
