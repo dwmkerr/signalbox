@@ -102,8 +102,10 @@ export interface Event {
   reason?: string;
   session_key: string;
   cwd?: string;
-  // session_key uses <family>:<tmux-pane> or <family>:<shortHash(cwd)>, never
-  // the transcript uuid, so this path links a content-search hit to its live row.
+  // Local-only path to the on-disk conversation, used to index it for content
+  // search. A forwarder strips it before uplinking and redact() drops it on corp
+  // hosts, since a remote hub cannot read another machine's disk. Content search
+  // links a hit to its live row by the session uuid in session_key, not by this.
   transcript?: string;
   title?: string;
   // The human/trigger side of the exchange breadcrumb (your last prompt, a

@@ -132,8 +132,8 @@ function withIndex(run: (index: SearchIndex, corpus: Corpus) => void): void {
   }
 }
 
-function liveSession(sessionKey: string, transcript: string): Event {
-  return {
+function liveSession(sessionKey: string, transcript?: string): Event {
+  const event: Event = {
     v: 1,
     id: crypto.randomUUID(),
     ts: "2026-08-19T12:30:00.000Z",
@@ -141,8 +141,9 @@ function liveSession(sessionKey: string, transcript: string): Event {
     agent: "codex",
     event: "done",
     session_key: sessionKey,
-    transcript,
   };
+  if (transcript) event.transcript = transcript;
+  return event;
 }
 
 describe("countHits", () => {
@@ -185,11 +186,14 @@ describe("search", () => {
     expect(index.search("edit", 0)).toEqual([]);
   }));
 
-  test("resolves live rows by exact indexed transcript path", () => withIndex((index, corpus) => {
-    const results = index.search("edit", 10, [liveSession("codex:live", corpus.codexPath)]);
+  test("resolves a live row from the session-key uuid, without a transcript path", () => withIndex((index) => {
+    // The board keys each agent session as "<agent>:<transcript-uuid>", and a
+    // forwarder strips the transcript path before the event reaches the board it
+    // reads back, so the uuid in the key is the only link to a live row.
+    const results = index.search("edit", 10, [liveSession(`codex:${codexUuid}`)]);
     expect(results.find((result) => result.sessionUuid === codexUuid)).toMatchObject({
       state: "live",
-      sessionKey: "codex:live",
+      sessionKey: `codex:${codexUuid}`,
     });
     expect(results.find((result) => result.sessionUuid === claudeUuid)).toMatchObject({
       state: "ended",
@@ -197,12 +201,17 @@ describe("search", () => {
     });
   }));
 
-  test("does not infer a live row from a session key when its path differs", () => withIndex((index) => {
-    const results = index.search("edit", 10, [liveSession(codexUuid, "/not/the/transcript.jsonl")]);
-    expect(results.find((result) => result.sessionUuid === codexUuid)).toMatchObject({
-      state: "ended",
-      sessionKey: null,
+  test("matches on the key uuid and never consults the transcript path", () => withIndex((index) => {
+    const results = index.search("edit", 10, [liveSession(`claude:${claudeUuid}`, "/not/the/transcript.jsonl")]);
+    expect(results.find((result) => result.sessionUuid === claudeUuid)).toMatchObject({
+      state: "live",
+      sessionKey: `claude:${claudeUuid}`,
     });
+  }));
+
+  test("leaves every row ended when no live session carries its uuid", () => withIndex((index) => {
+    const results = index.search("edit", 10, [liveSession("claude:44444444-4444-4444-8444-444444444444")]);
+    expect(results.every((result) => result.state === "ended" && result.sessionKey === null)).toBe(true);
   }));
 });
 

@@ -142,10 +142,13 @@ Sessions are ordered by that timestamp from newest to oldest, with relevance
 and the session UUID breaking ties. Dates are compared as instants, including
 fractional seconds and timezone offsets; missing or invalid dates sort last.
 
-A result is marked `live` only when an indexed file path for its session exactly
-matches the `transcript` path of a current board row. A live result also carries
-that row's `session_key` as its jump target. Every other result is marked
-`ended` and has no jump target.
+A result is marked `live` only when a current board row keys the same session
+UUID, i.e. a row whose `session_key` is `<agent>:<session-uuid>` for the result's
+session UUID. A live result also carries that row's `session_key` as its jump
+target. Every other result is marked `ended` and has no jump target. The match is
+on the UUID in the key, never on the `transcript` path: a forwarder strips that
+path before the event reaches the board, and `redact()` hashes the key id on corp
+hosts, so a redacted row no longer matches and is correctly left `ended`.
 
 ## Hub API
 

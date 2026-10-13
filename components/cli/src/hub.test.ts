@@ -445,7 +445,7 @@ describe("search", () => {
 
     const hub = searchHub(join(root, "state"));
     try {
-      await post(hub, wireEvent("codex:live", ev.Done, { transcript }));
+      await post(hub, wireEvent(`codex:${sessionUuid}`, ev.Done, { transcript }));
       hub.startSearch();
       const res = await getSearch(hub);
       expect(res.status).toBe(200);
@@ -462,7 +462,7 @@ describe("search", () => {
         ts: "2026-08-19T10:01:00.000Z",
         hitCount: 1,
         state: "live",
-        sessionKey: "codex:live",
+        sessionKey: `codex:${sessionUuid}`,
       }]);
 
       const status = (await hub.handle(
