@@ -42,6 +42,8 @@ struct PaletteRow {
     // User-pinned: draws a quiet pin mark. Order is the hub's (pinned-first);
     // this flag never sorts locally.
     let pinned: Bool
+    /// True when the hub confirmed the agent process exited.
+    var processStopped = false
     // A hidden session: drawn dimmed under the Hidden divider, and inert (not
     // selectable, not reachable by keys). It resurfaces when the agent speaks
     // again, or on a click that fires `show`.
@@ -744,6 +746,7 @@ final class PaletteController: NSObject {
     // Desired pinned state (true = pin, false = unpin) for the given session.
     private let onPin: @MainActor (String, Bool) -> Void
     private let onSettings: @MainActor (SettingsTab?) -> Void
+    private let onOpen: @MainActor () -> Void
     // Runs a contents search against the hub. Returns why there are no results
     // as well as the results themselves, so the panel can tell "off" and "this
     // hub does not serve search" apart from "nothing matched".
@@ -796,6 +799,7 @@ final class PaletteController: NSObject {
     // Working sessions redraw once a second, so tailing depends on a changed
     // session or document height instead of every attributed-string update.
     private var previewSessionKey: String?
+    private var previewQuery = ""
     private var previewContentHeight: CGFloat = 0
     // The preview reads history from the hub, not from the row, so it is
     // fetched per selection and cached until the palette closes. A row with no
@@ -855,7 +859,8 @@ final class PaletteController: NSObject {
         onRemove: @escaping @MainActor (String) -> Void,
         onLabel: @escaping @MainActor (String, String) -> Void,
         onPin: @escaping @MainActor (String, Bool) -> Void,
-        onSettings: @escaping @MainActor (SettingsTab?) -> Void
+        onSettings: @escaping @MainActor (SettingsTab?) -> Void,
+        onOpen: @escaping @MainActor () -> Void
     ) {
         self.monitor = monitor
         self.rowsProvider = rowsProvider
@@ -866,6 +871,7 @@ final class PaletteController: NSObject {
         self.onLabel = onLabel
         self.onPin = onPin
         self.onSettings = onSettings
+        self.onOpen = onOpen
         super.init()
         buildPanel()
     }
@@ -900,6 +906,7 @@ final class PaletteController: NSObject {
         // active - Spotlight's pattern. Never call NSApp.activate here.
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(searchField)
+        onOpen()
         if keyMonitor == nil {
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 // Local monitors always fire on the main thread; NSEvent just
@@ -1532,8 +1539,8 @@ final class PaletteController: NSObject {
 
     private func removeSelected() {
         guard let key = selectedKey() else { return }
+        parkSelectionAfterRemoval(leaving: key)
         onRemove(key)
-        parkSelection(leaving: key)
     }
 
     // ⌃P / context menu: toggle the pin. Fires optimistically; the hub echoes
@@ -1597,6 +1604,17 @@ final class PaletteController: NSObject {
             select(next)
             return
         }
+        let index = tableView.selectedRow
+        let candidates = selectableIndices.filter { rows[$0].sessionKey != key }
+        if let next = candidates.first(where: { $0 > index }) ?? candidates.last {
+            select(next)
+        }
+    }
+
+    // Removal keeps the cursor at the same place in the list: select the next
+    // row there, or the previous row when removing the last one. Hiding still
+    // prefers the next unread row through parkSelection above.
+    private func parkSelectionAfterRemoval(leaving key: String) {
         let index = tableView.selectedRow
         let candidates = selectableIndices.filter { rows[$0].sessionKey != key }
         if let next = candidates.first(where: { $0 > index }) ?? candidates.last {
@@ -2565,12 +2583,20 @@ final class PaletteController: NSObject {
         let contentHeight = termLabel.frame.height
         let sessionChanged = previewSessionKey != key
         let contentGrew = previewSessionKey == key && contentHeight > previewContentHeight + 0.5
+        let queryChanged = previewQuery != query
         previewSessionKey = key
+        previewQuery = query
         previewContentHeight = contentHeight
-        guard sessionChanged || contentGrew, contentHeight > 0 else { return }
+        let shouldScroll = sessionChanged || queryChanged || (contentGrew && query.isEmpty)
+        guard shouldScroll, contentHeight > 0 else { return }
 
-        let bottomY = termLabel.isFlipped ? termLabel.bounds.maxY - 1 : termLabel.bounds.minY
-        termLabel.scrollToVisible(NSRect(x: termLabel.bounds.minX, y: bottomY, width: 1, height: 1))
+        // A filtered search is an inspection task: start at the beginning of
+        // the selected conversation so the first matching context is visible.
+        // Outside search, keep the terminal-style tail-follow for new output.
+        let y = query.isEmpty
+            ? (termLabel.isFlipped ? termLabel.bounds.maxY - 1 : termLabel.bounds.minY)
+            : (termLabel.isFlipped ? termLabel.bounds.minY : termLabel.bounds.maxY - 1)
+        termLabel.scrollToVisible(NSRect(x: termLabel.bounds.minX, y: y, width: 1, height: 1))
     }
 
     // The remembered panel origin (bottom-left, screen coordinates). A dragged
@@ -2877,6 +2903,24 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
 
 // Layout per the mock row: [mark 14][glyph 22][title + breadcrumb][pill/age],
 // 10pt gaps, inside a 10pt row margin + 10pt padding.
+/// Terminal glyph with a drawn slash overlay, matching the disconnected mark
+/// used by VS Code without depending on a terminal.slash SF Symbol variant.
+private final class StoppedProcessIconView: NSImageView {
+    override var intrinsicContentSize: NSSize { NSSize(width: 12, height: 12) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let inset = min(bounds.width, bounds.height) * 0.22
+        let slash = NSBezierPath()
+        slash.lineWidth = 1.35
+        slash.lineCapStyle = .round
+        slash.move(to: NSPoint(x: inset, y: inset))
+        slash.line(to: NSPoint(x: bounds.maxX - inset, y: bounds.maxY - inset))
+        Theme.textDim.setStroke()
+        slash.stroke()
+    }
+}
+
 private final class SessionCellView: NSTableCellView {
     // The activity mark used to occupy the first slot; with it gone the glyph
     // takes the content start, or the row reads as indented by an empty column.
@@ -2965,6 +3009,16 @@ private final class SessionCellView: NSTableCellView {
             // read dimmer than the age text beside it.
             pin.contentTintColor = Theme.age
             right.addArrangedSubview(pin)
+        }
+        if row.processStopped {
+            let stopped = StoppedProcessIconView()
+            let config = NSImage.SymbolConfiguration(pointSize: s(11), weight: .regular)
+            stopped.image = NSImage(
+                systemSymbolName: "terminal",
+                accessibilityDescription: "Agent process not running"
+            )?.withSymbolConfiguration(config)
+            stopped.contentTintColor = Theme.textDim
+            right.addArrangedSubview(stopped)
         }
         right.addArrangedSubview(ageLabel)
         // Whether this row wants you, where a badge belongs. Working has none:

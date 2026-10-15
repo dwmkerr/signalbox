@@ -467,11 +467,36 @@ struct SessionsView: View {
                                     .lineLimit(1)
                             }
                         }
-                    } else if let preview = subtext(session), !preview.isEmpty {
-                        Text(markdownText(preview))
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(Theme.dim)
-                            .lineLimit(1)
+                    } else if session.processStopped || !(subtext(session) ?? "").isEmpty {
+                        HStack(spacing: 5) {
+                            if let preview = subtext(session), !preview.isEmpty {
+                                Text(markdownText(preview))
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(Theme.dim)
+                                    .lineLimit(1)
+                            }
+                            if session.processStopped {
+                                Image(systemName: "terminal")
+                                    .overlay {
+                                        GeometryReader { geometry in
+                                            Path { path in
+                                                path.move(to: CGPoint(
+                                                    x: geometry.size.width * 0.2,
+                                                    y: geometry.size.height * 0.8
+                                                ))
+                                                path.addLine(to: CGPoint(
+                                                    x: geometry.size.width * 0.8,
+                                                    y: geometry.size.height * 0.2
+                                                ))
+                                            }
+                                            .stroke(Theme.faint, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+                                        }
+                                    }
+                                    .frame(width: 12, height: 12)
+                                    .foregroundStyle(Theme.faint)
+                                    .accessibilityLabel("Agent process not running")
+                            }
+                        }
                     }
                 }
                 Spacer(minLength: 4)

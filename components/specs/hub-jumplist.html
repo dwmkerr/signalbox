@@ -349,7 +349,11 @@
   <p>Rows keep the order you work in (most recently engaged first, like the app switcher), with
   pinned sessions first; status does not reorder them. Older and Hidden are the two trailing
   sections, in that order, below every visible row. The panel opens with the topmost unread row
-  selected, and selection stays topmost-unread within the filtered rows.</p>
+  selected, and selection stays topmost-unread within the filtered rows. A live search starts the
+  selected conversation preview at its beginning so matching context is not hidden below the fold.</p>
+  <p>A row whose captured agent process has exited carries a muted terminal icon crossed by a slash,
+  beside its age. It remains visible and its conversation remains available. A clean agent
+  <code>SessionEnd</code> instead moves the row to Hidden.</p>
 
   <h2>Older sessions</h2>
   <p>A collapsed <b>Older (N)</b> divider sits below every visible row and above the Hidden
@@ -436,7 +440,7 @@
     <tr><td><kbd>⌃P</kbd></td><td>Pin / unpin the selected session (pinned sessions sort first)</td></tr>
     <tr><td><kbd>⌃R</kbd></td><td>Rename session (your own name for it; empty clears)</td></tr>
     <tr><td><kbd>⌃X</kbd></td><td>Hide until the session speaks again; on a row in the expanded Hidden section, unhide it</td></tr>
-    <tr><td><kbd>⌃⌫</kbd></td><td>Remove now</td></tr>
+    <tr><td><kbd>⌃⌫</kbd></td><td>Remove now; the row disappears immediately and selection moves to the next row in place (or the previous row when removing the last one)</td></tr>
     <tr><td><kbd>⌘,</kbd></td><td>Open Settings (same as the footer cog)</td></tr>
     <tr><td><b>Hub status light</b></td><td>Open the hub facts popover; Open Settings targets Hub and Open log targets Logs</td></tr>
     <tr><td><kbd>⌘+</kbd> <kbd>⌘−</kbd> <kbd>⌘0</kbd></td><td>Zoom the jumplist in / out / reset (0.8×-1.6×, persists)</td></tr>
@@ -819,7 +823,7 @@ function hiddenHTML(){
 }
 function toggleHidden(){ hiddenOpen = !hiddenOpen; renderList(); }
 const GLYPHS = ["·","✢","✳","∗","✻","✽"]; let gi = 0;
-let lastPreviewKey = null, lastPreviewHeight = 0;
+let lastPreviewKey = null, lastPreviewHeight = 0, lastPreviewQuery = "";
 let unsupportedJumpKey = null;
 setInterval(()=>{ gi=(gi+1)%GLYPHS.length; const el=document.querySelector(".spinch"); if(el) el.textContent=GLYPHS[gi];
   SESSIONS.forEach(s=>s.ageSeconds++);
@@ -830,7 +834,7 @@ function renderPreview(){
   const term = document.getElementById("term");
   const actline = document.getElementById("actline");
   const s = SESSIONS[sel];
-  if (!s) { term.innerHTML = ""; actline.innerHTML = ""; unsupportedJumpKey = null; lastPreviewKey = null; lastPreviewHeight = 0; return; }
+  if (!s) { term.innerHTML = ""; actline.innerHTML = ""; unsupportedJumpKey = null; lastPreviewKey = null; lastPreviewHeight = 0; lastPreviewQuery = query; return; }
   if (unsupportedJumpKey !== s.key || s.jumpable !== false || s.infoOnly) unsupportedJumpKey = null;
   actline.style.display = s.infoOnly ? "none" : "flex";
   const exchanges = (s.exchanges && s.exchanges.length ? s.exchanges : [
@@ -864,9 +868,14 @@ function renderPreview(){
   markPreviewMatches(term);
   actline.innerHTML = act;
   const contentHeight = term.scrollHeight;
-  if (lastPreviewKey !== s.key || contentHeight > previousHeight) term.scrollTop = contentHeight;
+  const sessionChanged = lastPreviewKey !== s.key;
+  const queryChanged = lastPreviewQuery !== query;
+  if (sessionChanged || queryChanged || (contentHeight > previousHeight && !query)) {
+    term.scrollTop = query ? 0 : contentHeight;
+  }
   lastPreviewKey = s.key;
   lastPreviewHeight = contentHeight;
+  lastPreviewQuery = query;
 }
 function select(i){ sel = i; renderList(); renderPreview(); }
 function markPreviewMatches(root){
@@ -1024,7 +1033,7 @@ function ctxAction(i, a){
   if (a==="pin") togglePin(i);
   else if (a==="rename") beginLabel();
   else if (a==="hide") { SESSIONS[i].state="read"; renderList(); renderPreview(); toast("hidden until it speaks (mock: shown as read)"); }
-  else if (a==="remove") { SESSIONS.splice(i,1); sel=defaultSel(); renderList(); renderPreview(); toast("removed"); }
+  else if (a==="remove") { SESSIONS.splice(i,1); sel=Math.min(i,SESSIONS.length-1); renderList(); renderPreview(); toast("removed"); }
 }
 document.addEventListener("click", hideCtx);
 window.addEventListener("blur", hideCtx);
@@ -1100,7 +1109,7 @@ document.addEventListener("keydown", e => {
   else if (ctrl && (e.key==="p"||e.key==="P")) { e.preventDefault(); if (sel>=0) togglePin(sel); }
   else if (ctrl && (e.key==="r"||e.key==="R")) { e.preventDefault(); beginLabel(); }
   else if (ctrl && (e.key==="x"||e.key==="X")) { e.preventDefault(); if (sel>=0) { SESSIONS[sel].state="read"; renderList(); renderPreview(); toast("hidden until it speaks (mock: shown as read)"); } }
-  else if (ctrl && e.key==="Backspace") { e.preventDefault(); if (sel>=0) { SESSIONS.splice(sel,1); sel=defaultSel(); renderList(); renderPreview(); toast("removed"); } }
+  else if (ctrl && e.key==="Backspace") { e.preventDefault(); if (sel>=0) { SESSIONS.splice(sel,1); sel=Math.min(sel,SESSIONS.length-1); renderList(); renderPreview(); toast("removed"); } }
   else if (e.key==="Escape") {
     if (query) { searchEl.value=""; query=""; sel=defaultSel(); updateMode(); renderList(); renderPreview(); toast("search cleared"); }
     else toast("would dismiss the jumplist");

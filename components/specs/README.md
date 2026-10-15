@@ -18,6 +18,7 @@ Conventions:
 | [agent-markdown.md](agent-markdown.md) | How an agent's markdown is parsed and rendered on both apps: the grammar, the one-line preview rule, and the golden examples the package's tests mirror |
 | [search.md](search.md) | Local transcript search: schema, turn extraction, incremental indexing, and privacy boundary (**proposed**, not built) |
 | [hub-jumplist.html](hub-jumplist.html) | The jumplist (⌃⌥J) - interactive UI spec (open in a browser) |
+| [session-tree.html](session-tree.html) | Proposed session tree for native and mixed-agent delegation; interactive comparison with the flat board ([RFC #61](https://github.com/dwmkerr/signalbox/issues/61)) |
 | [menubar.html](menubar.html) | Menu bar: icon (beacon default), status dot, dropdown, notifications |
 | [settings.html](settings.html) | Settings window - icon style, /clear and /rename behaviour, additional filters, the jumplist shortcut, where settings live |
 | [ios.html](ios.html) | The iOS app - the board on your phone: rows, actions, connection state, hubs (**proposed**, not built) |

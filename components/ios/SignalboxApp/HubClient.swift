@@ -476,6 +476,7 @@ final class HubClient: ObservableObject {
                 acked: event.acked ?? false,
                 hidden: event.hidden ?? false,
                 pinned: event.pinned ?? false,
+                processStopped: event.reason == "exited" || event.reason == "session_end",
                 jumpable: jumpable,
                 infoOnly: !jumpable && event.origin?.url != nil
             ))

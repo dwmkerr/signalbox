@@ -480,6 +480,72 @@ The toolbar buttons come first in the accessibility order, so button 1 is a
 pane button - on the Search pane that is "Rebuild Index...", which would kick
 off a full reindex of the user's real corpus.
 
+## Step 10f - lifecycle, search scroll, and removal regression
+
+Run these palette regressions against a **separate local hub and data directory**.
+Do not point the test app at the real board. Use a spare port and give both the
+app and its embedded CLI the same isolated environment:
+
+```bash
+mkdir -p "$EVIDENCE/10f-palette-regressions" "$EVIDENCE/10f-state"
+export SIGNALBOX_URL=http://127.0.0.1:8430
+export SIGNALBOX_DATA_DIR="$EVIDENCE/10f-state"
+export SIGNALBOX_CONFIG="$EVIDENCE/10f-settings.json"
+SB="$PWD/components/cli/bin/signalbox"
+
+# The app gets these environment values and starts its own hub on 8430.
+open -n --env SIGNALBOX_URL="$SIGNALBOX_URL" \
+  --env SIGNALBOX_DATA_DIR="$SIGNALBOX_DATA_DIR" \
+  --env SIGNALBOX_CONFIG="$SIGNALBOX_CONFIG" \
+  components/app/build/Signalbox.app
+```
+
+Wait for `/healthz`, then create three ordered rows, including a transcript
+whose opening lines precede the word `scholar`:
+
+```bash
+"$SB" fire --agent claude --event done --session-key itest:scholar-preview \
+  --title "itest scholar preview" \
+  --prompt $'first transcript line\nsecond transcript line\n\nscholar is later in this conversation'
+for name in after target before; do
+  "$SB" fire --agent claude --event done --session-key "itest:delete-$name" \
+    --title "itest delete $name" --prompt "fixture for keyboard removal: $name"
+done
+```
+
+Open the jumplist for that app instance. Capture a search for `scholar`; the
+selected row should be at the top of the filtered list and the preview should
+show its opening lines, rather than opening at the transcript tail. Clear the
+search, press `⌃J` once to select `itest delete target`, then press `⌃⌫`; the
+adjacent row should remain selected and the removed row should disappear
+immediately. Capture both states.
+
+For the disconnected marker, start a long-lived process, record its PID, fire
+an idle session event, terminate that process, then reopen the jumplist so its
+background process check runs:
+
+```bash
+sleep 600 &
+DEAD_PID=$!
+"$SB" fire --agent claude --event done --session-key itest:dead-process \
+  --title "itest dead process" --pid "$DEAD_PID" --pid-name sleep
+kill "$DEAD_PID"
+```
+
+Capture the row with the crossed-out terminal glyph. Also feed a Claude
+`SessionStart` followed by a non-`clear` `SessionEnd` and capture the separate
+fixture moved into the Hidden section:
+
+```bash
+printf '{"hook_event_name":"SessionStart","session_id":"itest-clean-end","cwd":"%s"}\n' "$PWD" | "$SB" hook claude
+printf '{"hook_event_name":"SessionEnd","session_id":"itest-clean-end","reason":"other","cwd":"%s"}\n' "$PWD" | "$SB" hook claude
+```
+
+Save screenshots and `meta.json` under `10f-palette-regressions/`; if
+Accessibility, Screen Recording, or the isolated app launch fails, record a
+`warn` with the exact limitation and keep the CLI regression tests as the
+machine-checked evidence.
+
 ## Step 11 - teardown
 
 Best effort: restore the original system appearance (10d) and the user's

@@ -191,6 +191,8 @@ struct Session: Identifiable, Hashable {
     // Pinned to the top of the board by the user. The hub owns the partition, so
     // this is adopted, never re-derived, and pinned rows already arrive first.
     let pinned: Bool
+    /// True when either the liveness sweep or a clean SessionEnd confirmed exit.
+    let processStopped: Bool
     // Whether this row can be jumped to at all: a github/CI row has no machine
     // to jump on, so it is information rather than an action.
     let jumpable: Bool

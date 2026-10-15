@@ -30,11 +30,11 @@ An adapter can only surface what its agent's hooks emit, so the board shows diff
 | GitHub Actions | as fired | as fired | - | - | yes (fire) | opens on GitHub |
 
 - **Question ask** is Claude Code's `AskUserQuestion` (the agent asks you to pick an option); no other agent has an equivalent tool, so the column is Claude-only by nature.
-- `*` **Codex has no error hook.** Its hook set is `session_start, user_prompt_submit, stop, permission_request, session_end` - there is no turn-failure event, so a Codex turn that errors just stops emitting and the row ages out via the liveness sweep rather than showing an error. Surfacing it would mean inferring failure from silence, which is worse than an honest gap. Not a bug to fix here - it needs an upstream Codex hook.
+- `*` **Codex has no error hook.** Its hook set is `session_start, user_prompt_submit, stop, permission_request, session_end` - there is no turn-failure event, so a Codex turn that errors just stops emitting and the row is marked exited by the liveness sweep rather than showing an error. Surfacing it as an error would mean inferring failure from silence, which is worse than an honest gap. Not a bug to fix here - it needs an upstream Codex hook.
 
 ### Transcript paths
 
-The optional event `transcript` field links a live board row to the local conversation used by content search. Empty paths are omitted from the event.
+The optional event `transcript` field is a local-only path to the on-disk conversation, used to index it for content search. Empty paths are omitted from the event. It is not the live-row link: content search matches a hit to its live board row by the session UUID in `session_key`, because a forwarder strips this path before uplinking (a remote hub cannot read another machine's disk).
 
 | Adapter | `transcript` source |
 |---|---|
@@ -45,12 +45,12 @@ The optional event `transcript` field links a live board row to the local conver
 | pi | Not supplied. |
 | GitHub Actions | Not supplied. |
 
-Claude Code and Codex keep normally ended sessions on the board as done so
-quitting the agent preserves the conversation the phone's chat view reads.
-Expiry and an explicit remove take those rows off the board. `/clear` ends the
-old row by default because Claude opens a fresh session id in its place;
-keeping both would duplicate the session. Turning off the adapter's clear-ends
-setting preserves the old exchange as done instead.
+Claude Code and Codex hide a session after a clean `SessionEnd`, preserving its
+transcript and exchange history without leaving a stopped process among current
+work. Any later agent event unhides it. `/clear` ends the old row by default
+because Claude opens a fresh session id in its place; keeping both would
+duplicate the session. Turning off the adapter's clear-ends setting preserves
+the old exchange as done instead.
 
 Installing: `signalbox init` converges everything ([cli.md](cli.md); `install` and `setup` are aliases); `signalbox init --agent <name>` (repeatable, `--agent all` for every agent) scopes the run to one or more agents and applies without the picker; `--remove` turns the same components off. `--app` and `--tmux` scope to the other components.
 
@@ -94,7 +94,7 @@ signalbox init --agent claude
 | `PermissionRequest` (any tool) | attention (reason `permission_request`) + `reply` = the actual ask, formatted from `tool_name` and `tool_input` (e.g. `Bash: git push origin main`). Fires when the permission dialog appears, so this is the authoritative blocked-on-you signal with content. Older Claude Code ignores the unknown hook key and degrades to the bare Notification - no fallback machinery needed. |
 | `PreToolUse`, matcher `AskUserQuestion` | attention (reason `question`) + `reply` = the question and its option labels (e.g. `Which auth approach? (JWT / sessions / magic links)`). AskUserQuestion is always interactive, so PreToolUse firing IS the dialog appearing - the question never reaches the transcript or the Notification payload while it waits, so this hook is the only passive source of the question text. The matcher keeps the hook off every other tool call: PreToolUse fires for all tools including auto-approved ones, and an unmatched registration would tax every tool call with a hook spawn to no benefit. |
 | `StopFailure` | error (reason = `error_type`) |
-| `SessionEnd` | done (reason `session_end`) - the row and its exchange history stay on the board because quitting the agent is not the same as being finished with the conversation. |
+| `SessionEnd` | hide (reason `session_end`) - a cleanly exited agent leaves the board, while the row, transcript and exchange history remain available to search and resume. Any later agent event unhides it. |
 | `SessionEnd`, reason `clear` | ended (reason `session_end`) by default. When `claudeClearEnds` is off, done (reason `clear`) keeps the old exchange on the board ([settings.html](https://dwmkerr.github.io/signalbox/specs/settings.html)). |
 | anything else | ignore, exit 0 |
 
@@ -175,11 +175,11 @@ OpenAI's Codex CLI, via [Codex hooks](https://github.com/openai/codex) (needs `[
 | `UserPromptSubmit` | busy - you sent a prompt and Codex is working; `detail` is that prompt (harness/bracket-tag filtered like Claude's). |
 | `Stop` | done (reason `stop`). `reply` is the turn's `last_assistant_message`, carried inline on the payload so no transcript read is needed. |
 | `PermissionRequest` | attention - Codex is blocked waiting for you to approve a command or tool call. |
-| `SessionEnd` | done (reason `session_end`) - the row and its exchange history stay on the board because quitting the agent is not the same as being finished with the conversation. |
+| `SessionEnd` | hide (reason `session_end`) - a cleanly exited agent leaves the board, while the row, transcript and exchange history remain available to search and resume. Any later agent event unhides it. |
 | `SessionEnd`, reason `clear` | ended (reason `session_end`) by default; done (reason `clear`) when `codexClearEnds` is off. |
 
 - `session_key = codex:<session_id>`; title = the session's name when Codex has one, else the `cwd` folder name. A Codex `/rename` writes the thread name to `~/.codex/session_index.jsonl` (one JSON line per named session; last entry for the id wins) and the hook adopts it - toggleable via `codexRenameTitle` (Settings; default on), like Claude's. The user's own jumplist rename still overrides either.
-- `codexClearEnds` mirrors `claudeClearEnds`: true by default to end a `SessionEnd` with reason `clear`; false keeps it on the board as done (reason `clear`). It affects only that reason, so other session ends remain done (reason `session_end`).
+- `codexClearEnds` mirrors `claudeClearEnds`: true by default to end a `SessionEnd` with reason `clear`; false keeps it on the board as done (reason `clear`). Other session ends are hidden (reason `session_end`).
 - Host prefix (display only): a Codex session in an editor's integrated terminal shows under the editor's mark badged with Codex's glyph (`vscode/codex`), the same `TERM_PROGRAM` check as Claude; the key stays `codex:<id>`.
 - `proc` and `SIGNALBOX_RAW` behave as for Claude (shell-wrapper walk to the agent process; raw-payload diagnostic).
 - Codex also has a legacy `notify` program (fires `agent-turn-complete` as the final argv). The hooks path is preferred: it carries busy and attention too, not just turn-complete.

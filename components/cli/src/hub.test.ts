@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { Hub, isLoopbackHost, isLoopbackAddress, validateBindConfig } from "./hub";
 import { lanIPv4 } from "./pair";
 import * as ev from "./event";
-import type { Event } from "./event";
+import type { Event, Proc } from "./event";
 
 // A fake Bun server: hub.handle calls timeout() and requestIP() on it. The
 // default peer is loopback, so every existing test drives the v0 path (no
@@ -18,9 +18,11 @@ function serverFrom(address: string): Bun.Server<undefined> {
 }
 const fakeServer = serverFrom("127.0.0.1");
 
-function newHub(): { hub: Hub; dir: string } {
+function newHub(deadProcesses?: (processes: Proc[]) => Proc[]): { hub: Hub; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "sbhub-"));
-  const hub = new Hub(dir, "test");
+  const hub = new Hub(
+    dir, "test", "", "127.0.0.1", "", 0, false, 0, undefined, undefined, deadProcesses,
+  );
   return { hub, dir };
 }
 
@@ -70,6 +72,14 @@ async function getState(hub: Hub): Promise<{ sessions: Event[] }> {
   const req = new Request("http://127.0.0.1:8377/state", { headers: { Host: "127.0.0.1:8377" } });
   const res = (await hub.handle(req, fakeServer))!;
   return res.json();
+}
+
+async function postProcessCheck(hub: Hub): Promise<Response> {
+  const req = new Request("http://127.0.0.1:8377/process-check", {
+    method: "POST",
+    headers: { Host: "127.0.0.1:8377" },
+  });
+  return (await hub.handle(req, fakeServer))!;
 }
 
 // `query` is appended after the session param, so callers pass "&limit=2".
@@ -1385,6 +1395,47 @@ describe("sweeps", () => {
     expect(doc.sessions[0]).toMatchObject({
       session_key: "recycled", event: ev.Done, reason: "exited",
     });
+  });
+
+  test("open-time process check marks dead idle local sessions, preserving history and hidden or remote rows", async () => {
+    const checkedPids: number[] = [];
+    const { hub } = newHub((processes) => {
+      checkedPids.push(...processes.map((p) => p.pid));
+      return processes.filter((p) => p.pid === 999999);
+    });
+    track(hub);
+    const deadProc = { pid: 999999, name: "claude" };
+    const local = wireEvent("idle-dead", ev.Busy, {
+      host: ev.shortHostname(), proc: deadProc, prompt: "keep this prompt",
+    });
+    await post(hub, local);
+    await post(hub, wireEvent("idle-dead", ev.Done, { host: ev.shortHostname(), reply: "keep this reply" }));
+    const hidden = wireEvent("hidden-dead", ev.Busy, {
+      host: ev.shortHostname(), proc: deadProc,
+    });
+    await post(hub, hidden);
+    await post(hub, wireEvent("hidden-dead", ev.Done, { host: ev.shortHostname() }));
+    await post(hub, wireEvent("hidden-dead", ev.Hide));
+    await post(hub, wireEvent("remote-dead", ev.Done, {
+      host: "some-other-host", proc: deadProc,
+    }));
+    const historyBefore = await (await getExchanges(hub, "idle-dead")).json();
+
+    const checked = await postProcessCheck(hub);
+    expect(checked.status).toBe(200);
+    expect(await checked.json()).toEqual({ checked: true });
+    expect(checkedPids).toEqual([999999]);
+    const doc = await getState(hub);
+    expect(doc.sessions.find((s) => s.session_key === "idle-dead")).toMatchObject({
+      event: ev.Done, reason: "exited", host: ev.shortHostname(), proc: deadProc,
+    });
+    expect(doc.sessions.find((s) => s.session_key === "hidden-dead")).toMatchObject({
+      event: ev.Done, hidden: true,
+    });
+    const remote = doc.sessions.find((s) => s.session_key === "remote-dead")!;
+    expect(remote).toMatchObject({ event: ev.Done, host: "some-other-host" });
+    expect(remote.reason).toBeUndefined();
+    expect(await (await getExchanges(hub, "idle-dead")).json()).toEqual(historyBefore);
   });
 });
 

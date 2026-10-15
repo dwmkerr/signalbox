@@ -5,8 +5,10 @@ import Foundation
 // side does not brick the menu bar.
 struct SessionEvent: Decodable {
     let agent: String
-    let event: String
-    let reason: String?
+    var event: String
+    var reason: String?
+    /// True when either the liveness sweep or a clean SessionEnd confirmed exit.
+    var processStopped: Bool { reason == "exited" || reason == "session_end" }
     let sessionKey: String
     let host: String?
     let cwd: String?

@@ -82,6 +82,16 @@ export class Store {
           // Hide is the stronger, more recent intent than a pin, so it always
           // drops the pin before applying its own rule.
           delete cur.pinned;
+          if (e.reason === "session_end") {
+            // A SessionEnd hook confirms the agent process has gone away.
+            // Unlike a user hiding a busy row, this is an intentional exit and
+            // should leave the session out of the board while preserving its
+            // transcript and exchange history.
+            cur.hidden = true;
+            cur.event = ev.Done;
+            cur.reason = e.reason;
+            return;
+          }
           if (cur.event === ev.Busy) {
             // Hide on a busy row is treated as seen: a running session must
             // stay visible.
