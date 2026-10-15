@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/dwmkerr/signalbox/compare/v0.1.8...v0.1.9) (2026-10-15)
+
+
+### Features
+
+* show deterministic agent session trees ([#91](https://github.com/dwmkerr/signalbox/issues/91)) ([05fd04c](https://github.com/dwmkerr/signalbox/commit/05fd04c0e540a035112aab6a7b905c2afdb6a684))
+
 ## [0.1.8](https://github.com/dwmkerr/signalbox/compare/v0.1.7...v0.1.8) (2026-10-07)
 
 
