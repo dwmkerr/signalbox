@@ -111,6 +111,9 @@ jobs:
         working-directory: components/app
         run: swift build -c release
 
+      - name: Session tree and runtime configuration checks
+        run: make -C components/app test
+
       - name: make app bundle
         # app/Makefile's SWIFTPM_CUSTOM_LIBS_DIR workaround targets a stale
         # CommandLineTools install; under full Xcode it is harmless (removing
