@@ -55,7 +55,7 @@ final class HubSupervisor {
     }
 
     func start() {
-        registerLoginItem()
+        if RuntimeConfiguration.current.foreground { registerLoginItem() }
         task = Task { await supervise() }
     }
 
@@ -156,8 +156,9 @@ final class HubSupervisor {
     // Hub output lands in the state dir next to the data it describes, so
     // "why is my board empty" has one place to look.
     private func logHandle() -> FileHandle? {
-        let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/state/signalbox")
+        let override = ProcessInfo.processInfo.environment["SIGNALBOX_DATA_DIR"]
+        let dir = override.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/state/signalbox")
         let path = dir.appendingPathComponent("hub.log").path
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if !FileManager.default.fileExists(atPath: path) {

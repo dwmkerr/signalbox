@@ -5,12 +5,12 @@ import { appendFileSync, mkdirSync, readFileSync, existsSync, openSync, closeSyn
 import { join } from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
 import * as ev from "./event";
-import type { Event } from "./event";
+import type { Event, Proc } from "./event";
 import * as cmd from "./command";
 import type { Command } from "./command";
 import { Store, DefaultHistoryLimit } from "./state";
 import type { Exchange } from "./state";
-import { procAlive } from "./proc";
+import { deadProcs, procAlive } from "./proc";
 import { buildStamp } from "./build";
 import { openIndex, type SearchIndex } from "./searchindex";
 import { loadSettings } from "./config";
@@ -85,7 +85,10 @@ export class Hub {
     // than captured once, so ticking the box in Settings takes effect within a
     // sweep instead of at the next restart. Injectable so a test does not need
     // a settings file on disk to exercise indexing.
-    private searchEnabledNow: () => boolean = () => loadSettings().searchEnabled
+    private searchEnabledNow: () => boolean = () => loadSettings().searchEnabled,
+    // Injectable so the process-check route can be tested without depending on
+    // the host `ps` utility or spawning test processes.
+    private deadProcesses: (processes: Proc[]) => Proc[] = deadProcs
   ) {
     this.store = new Store(historyLimit);
     mkdirSync(this.stateDirPath, { recursive: true });
@@ -251,6 +254,43 @@ export class Hub {
     this.timers.push(setInterval(sweep, intervalMs));
   }
 
+  // Called asynchronously after the desktop jumplist opens. The periodic
+  // sweep intentionally watches busy rows only; this one-shot check also
+  // catches a process killed while idle, without delaying the panel itself.
+  checkLocalProcesses(): void {
+    const host = ev.shortHostname();
+    const candidates = this.store.list().filter((s) =>
+      s.host === host && !s.hidden && s.proc &&
+      s.reason !== "exited" && s.reason !== "session_end"
+    );
+    const dead = this.deadProcesses(candidates.map((s) => s.proc!));
+    if (dead.length === 0) return;
+    const deadPids = new Set(dead.map((p) => p.pid));
+    for (const s of candidates) {
+      if (!s.proc || !deadPids.has(s.proc.pid)) continue;
+      try {
+        // Preserve the conversation and its metadata; this is a status update,
+        // not a new transcript turn or an intentional session end.
+        this.ingest({
+          v: ev.Version,
+          id: crypto.randomUUID(),
+          ts: ev.nowTS(),
+          host: s.host,
+          machine: s.machine,
+          agent: s.agent,
+          event: ev.Done,
+          reason: "exited",
+          session_key: s.session_key,
+          cwd: s.cwd,
+          title: s.title,
+          transcript: s.transcript,
+        });
+      } catch {
+        return;
+      }
+    }
+  }
+
   /** Starts bounded local transcript indexing when the privacy-sensitive feature is enabled. */
   startSearch(): void {
     // The setting is re-read every tick rather than captured at startup, so
@@ -306,6 +346,10 @@ export class Hub {
     }
     if (req.method === "POST" && url.pathname === "/events") return this.handleEvents(req);
     if (req.method === "POST" && url.pathname === "/command") return this.handleCommand(req);
+    if (req.method === "POST" && url.pathname === "/process-check") {
+      this.checkLocalProcesses();
+      return Response.json({ checked: true }, { headers: { "Cache-Control": "no-store" } });
+    }
     if (req.method === "GET" && url.pathname === "/state") {
       // Serve one horizon so two boards cannot disagree about what "older" means.
       // no-store: /state doubles as the clients' liveness probe, and a

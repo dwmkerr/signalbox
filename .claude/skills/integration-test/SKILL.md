@@ -270,32 +270,36 @@ screenshot generously.
 
 ## Step 10 - the app
 
-Note: the app spawns its own hub on the default port with the default state
-dir - this scenario touches the real board, which is acceptable.
+For rendering and screenshot checks, use a separate background app with the
+isolated environment above. Do not foreground a window or send global keys
+while the user works. The runtime override leaves the real app running,
+registers no shortcut or notification handler, and never saves the override.
 
 ```bash
-open components/app/build/Signalbox.app
-sleep 5
+open -g -n --env SIGNALBOX_URL="$SIGNALBOX_URL" \
+  --env SIGNALBOX_DATA_DIR="$SIGNALBOX_DATA_DIR" \
+  --env SIGNALBOX_CONFIG="$SIGNALBOX_CONFIG" \
+  components/app/build/Signalbox.app --args \
+  --show-jumplist --config-parameter ui.foreground=false
 ```
 
-If the app was already running (the user's real instance), quit it first with
-`osascript -e 'quit app "Signalbox"'` so the relaunch picks up the fresh
-bundle - and note in the report that the user's app was restarted. Verify the
-embedded CLI is fresh: `curl -s http://127.0.0.1:8377/healthz` must report the
-version just built, not an older one.
+Use empty isolated transcript roots too, as in the CLI scenarios. Verify the
+test hub's `/healthz` reports the build just packaged. Locate the capture
+process's jumplist window ID through Core Graphics (filter by its PID and
+window bounds, not a global frontmost window), then capture only that window:
 
-Screenshots via `screencapture` (needs Screen Recording permission for this
-terminal; the jumplist hotkey needs Accessibility - if either is missing,
-verdict `warn` with a note, do not block):
+`screencapture` needs Screen Recording permission. If unavailable, record a
+`warn`; do not bring the app forward as a workaround.
 
 ```bash
-screencapture -x "$EVIDENCE/10-app/menubar.png"        # full screen incl. menu bar icon
-osascript -e 'tell application "System Events" to key code 38 using {control down, option down}'  # ⌃⌥J jumplist
-sleep 1
-screencapture -x "$EVIDENCE/10-app/jumplist.png"
+screencapture -x -o -l "$CAPTURE_WINDOW_ID" "$EVIDENCE/10-app/jumplist.png"
 ```
 
-Evidence: menu bar icon present, jumplist rendering the board.
+Evidence: jumplist renders, trees start collapsed with descendant summaries,
+the original app/hub stays running, and foreground application and preferences
+are unchanged. Close only the capture process and its own hub afterwards.
+Background mode suppresses the menu icon and cannot test real keyboard focus.
+Record those checks as manual unless the user has allowed foreground interaction.
 
 ## Step 10b - the iOS app (Simulator)
 
@@ -479,6 +483,78 @@ Close the Settings window with Cmd-W, never by clicking "button 1 of window 1".
 The toolbar buttons come first in the accessibility order, so button 1 is a
 pane button - on the Search pane that is "Rebuild Index...", which would kick
 off a full reindex of the user's real corpus.
+
+## Step 10f - lifecycle, search scroll, and removal regression
+
+Run these palette regressions against a **separate local hub and data directory**.
+Do not point the test app at the real board. Use a spare port and give both the
+app and its embedded CLI the same isolated environment:
+
+```bash
+mkdir -p "$EVIDENCE/10f-palette-regressions" "$EVIDENCE/10f-state"
+export SIGNALBOX_URL=http://127.0.0.1:8430
+export SIGNALBOX_DATA_DIR="$EVIDENCE/10f-state"
+export SIGNALBOX_CONFIG="$EVIDENCE/10f-settings.json"
+SB="$PWD/components/cli/bin/signalbox"
+
+# Background rendering leaves the real app and the user's focus alone.
+open -g -n --env SIGNALBOX_URL="$SIGNALBOX_URL" \
+  --env SIGNALBOX_DATA_DIR="$SIGNALBOX_DATA_DIR" \
+  --env SIGNALBOX_CONFIG="$SIGNALBOX_CONFIG" \
+  components/app/build/Signalbox.app --args \
+  --show-jumplist --config-parameter ui.foreground=false
+```
+
+Wait for `/healthz`, then create three ordered rows, including a transcript
+whose opening lines precede the word `scholar`:
+
+```bash
+"$SB" fire --agent claude --event done --session-key itest:scholar-preview \
+  --title "itest scholar preview" \
+  --prompt $'first transcript line\nsecond transcript line\n\nscholar is later in this conversation'
+for name in after target before; do
+  "$SB" fire --agent claude --event done --session-key "itest:delete-$name" \
+    --title "itest delete $name" --prompt "fixture for keyboard removal: $name"
+done
+```
+
+The keyboard scenarios below require foreground interaction. When the user is
+working, record them as manual and keep the background screenshot checks; do
+not send global keys. For an explicitly allowed foreground run, relaunch the
+test app without the background override and record the real-app restart.
+
+Open the jumplist for that app instance. Capture a search for `scholar`; the
+selected row should be at the top of the filtered list and the preview should
+show its opening lines, rather than opening at the transcript tail. Clear the
+search, press `⌃J` once to select `itest delete target`, then press `⌃⌫`; the
+adjacent row should remain selected and the removed row should disappear
+immediately. Capture both states.
+
+For the disconnected marker, start a long-lived process, record its PID, fire
+an idle session event, terminate that process, then reopen the jumplist so its
+background process check runs:
+
+```bash
+sleep 600 &
+DEAD_PID=$!
+"$SB" fire --agent claude --event done --session-key itest:dead-process \
+  --title "itest dead process" --pid "$DEAD_PID" --pid-name sleep
+kill "$DEAD_PID"
+```
+
+Capture the row with the crossed-out terminal glyph. Also feed a Claude
+`SessionStart` followed by a non-`clear` `SessionEnd` and capture the separate
+fixture moved into the Hidden section:
+
+```bash
+printf '{"hook_event_name":"SessionStart","session_id":"itest-clean-end","cwd":"%s"}\n' "$PWD" | "$SB" hook claude
+printf '{"hook_event_name":"SessionEnd","session_id":"itest-clean-end","reason":"other","cwd":"%s"}\n' "$PWD" | "$SB" hook claude
+```
+
+Save screenshots and `meta.json` under `10f-palette-regressions/`; if
+Accessibility, Screen Recording, or the isolated app launch fails, record a
+`warn` with the exact limitation and keep the CLI regression tests as the
+machine-checked evidence.
 
 ## Step 11 - teardown
 

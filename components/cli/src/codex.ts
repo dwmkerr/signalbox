@@ -7,7 +7,7 @@
 import { existsSync, opendirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { cropTitle, Busy, Done, Attention, Ended } from "./event";
+import { cropTitle, Busy, Done, Attention, Ended, Hide } from "./event";
 import { stripHarness } from "./claude";
 
 // Subset of the Codex hook stdin JSON that signalbox consumes; unknown fields
@@ -35,10 +35,10 @@ export interface Mapped {
 
 // mapCodexHook translates a hook payload per the adapter table. null means the
 // hook is deliberately ignored - the caller must still exit 0.
-// Quitting must preserve the conversation read by the phone's chat view until
-// expiry or an explicit remove. clearEnds=true mirrors Claude's /clear rule:
-// a fresh session id replaces the old row instead of leaving a duplicate.
-// clearEnds=false keeps the old exchange if Codex sends reason "clear".
+// A clean session exit hides the row but preserves the conversation read by
+// the phone's chat view. clearEnds=true mirrors Claude's /clear rule: a fresh
+// session id replaces the old row instead of leaving a duplicate.
+// clearEnds=false keeps the old exchange visible if Codex sends reason "clear".
 export function mapCodexHook(h: CodexHook, clearEnds = true): Mapped | null {
   switch (h.hook_event_name) {
     case "SessionStart":
@@ -57,7 +57,7 @@ export function mapCodexHook(h: CodexHook, clearEnds = true): Mapped | null {
       if (h.reason === "clear") {
         return { eventType: Ended, reason: "session_end", detail: "" };
       }
-      return { eventType: Done, reason: "session_end", detail: "" };
+      return { eventType: Hide, reason: "session_end", detail: "" };
   }
   return null;
 }

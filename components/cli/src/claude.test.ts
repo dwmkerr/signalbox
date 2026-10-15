@@ -60,7 +60,7 @@ describe("mapClaudeHook", () => {
     [{ hook_event_name: "Notification", message: "Claude is waiting for your input" }, { eventType: "done", reason: "idle" }],
     [{ hook_event_name: "Notification" }, { eventType: "attention", reason: "notification" }],
     [{ hook_event_name: "StopFailure", error_type: "max_turns" }, { eventType: "error", reason: "max_turns" }],
-    [{ hook_event_name: "SessionEnd" }, { eventType: "done", reason: "session_end" }],
+    [{ hook_event_name: "SessionEnd" }, { eventType: "hide", reason: "session_end" }],
     // The permission dialog is up: attention with the rich reason.
     [{ hook_event_name: "PermissionRequest", tool_name: "Bash" }, { eventType: "attention", reason: "permission_request" }],
     // AskUserQuestion rides the permission system - PermissionRequest fires
@@ -120,17 +120,17 @@ describe("mapClaudeHook", () => {
     expect(got?.reason).toBe("clear");
   });
 
-  test("SessionEnd other reasons map to done when clearEnds=false", () => {
+  test("SessionEnd other reasons map to hide when clearEnds=false", () => {
     const got = mapClaudeHook({ hook_event_name: "SessionEnd", reason: "exit" }, false);
-    expect(got?.eventType).toBe("done");
+    expect(got?.eventType).toBe("hide");
     expect(got?.reason).toBe("session_end");
   });
 
-  test("SessionEnd preserves the conversation while clearEnds=true ends a cleared session", () => {
-    // Quitting preserves the phone's chat history; /clear opens a fresh session
-    // id, so the old row must end to avoid a duplicate.
+  test("SessionEnd hides the conversation while clearEnds=true ends a cleared session", () => {
+    // Quitting hides the row but preserves phone chat history; /clear opens a
+    // fresh session id, so the old row must end to avoid a duplicate.
     expect(mapClaudeHook({ hook_event_name: "SessionEnd" })).toEqual({
-      eventType: "done", reason: "session_end", detail: "",
+      eventType: "hide", reason: "session_end", detail: "",
     });
     expect(mapClaudeHook({ hook_event_name: "SessionEnd", reason: "clear" }, true)).toEqual({
       eventType: "ended", reason: "session_end", detail: "",

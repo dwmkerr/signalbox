@@ -9,7 +9,7 @@ JSON on stdin and maps it per [specs/adapters.md](../../../specs/adapters.md):
 | `UserPromptSubmit` | busy + `prompt` = cropped prompt text |
 | `Stop` | done (reason `stop`), `reply` = `last_assistant_message` |
 | `PermissionRequest` | attention (blocked on approval) |
-| `SessionEnd` | done |
+| `SessionEnd` | hide (reason `session_end`), except `clear` |
 
 `session_key = codex:<session_id>`; the title is the `cwd` folder name.
 
@@ -26,6 +26,15 @@ your config. The block sits alongside any hooks you already have (Codex fires
 them all), and Codex records a trust hash for the new hook on its next run.
 
 ## Notes
+
+- The local hub observes new native worker JSONL records without requiring
+  `codex exec --json`. A worker's own `payload.id` and explicit
+  `source.subagent.thread_spawn.parent_thread_id` form the tree. Copied history
+  is skipped using `subagent_history_start_ordinal`; unknown boundaries produce
+  no activity. Existing bytes are baselined, never imported as old sessions.
+- Native children get lifecycle events from the observer and permission events
+  from hooks. Fork provenance, inherited `session_id`, titles, and process
+  ancestry do not establish a parent.
 
 - The Stop payload carries `last_assistant_message` inline, so reply capture
   needs no transcript read (unlike the Claude adapter).

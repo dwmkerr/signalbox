@@ -2,13 +2,21 @@
 // bounded transcript reads for reply capture and /rename session names.
 
 import { openSync, readSync, closeSync, fstatSync } from "node:fs";
-import { cropTitle, Busy, Done, Attention, Error as ErrorType, Ended } from "./event";
+import { cropTitle, Busy, Done, Attention, Error as ErrorType, Ended, Hide } from "./event";
 
 // Subset of Claude Code hook stdin JSON that signalbox consumes; unknown
 // fields are ignored so hook payload growth is harmless.
 export interface ClaudeHook {
   hook_event_name?: string;
   session_id?: string;
+  /** Native worker identity on subagent lifecycle hooks. */
+  agent_id?: string;
+  /** Explicit immediate worker parent, when supplied by the runtime. */
+  parent_agent_id?: string;
+  /** Agent type supplied by Claude, used only as a display name. */
+  agent_type?: string;
+  /** The worker's transcript, distinct from its owning conversation. */
+  agent_transcript_path?: string;
   cwd?: string;
   notification_type?: string;
   // Current Claude Code sends a free-text `message` on Notification, not a
@@ -66,11 +74,15 @@ export interface Mapped {
 
 // mapClaudeHook translates a hook payload per the adapter table. null means
 // the hook is deliberately ignored - the caller must still exit 0.
-// Quitting must preserve the conversation read by the phone's chat view until
-// expiry or an explicit remove. By default /clear ends the old row because
-// Claude opens a fresh session id; clearEnds=false keeps the old exchange.
+// A clean session exit hides the row but preserves the conversation read by
+// the phone's chat view. By default /clear ends the old row because Claude
+// opens a fresh session id; clearEnds=false keeps the old exchange visible.
 export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
   switch (h.hook_event_name) {
+    case "SubagentStart":
+      return h.agent_id ? { eventType: Busy, reason: "session_start", detail: "" } : null;
+    case "SubagentStop":
+      return h.agent_id ? { eventType: Done, reason: "stop", detail: "", reply: h.agent_transcript_path ? stripHarness(lastAssistantText(h.agent_transcript_path)) : "" } : null;
     case "SessionStart":
       return { eventType: Busy, reason: "session_start", detail: "" };
     case "UserPromptSubmit": {
@@ -128,7 +140,7 @@ export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
       if (h.reason === "clear") {
         return { eventType: Ended, reason: "session_end", detail: "" };
       }
-      return { eventType: Done, reason: "session_end", detail: "" };
+      return { eventType: Hide, reason: "session_end", detail: "" };
   }
   return null;
 }

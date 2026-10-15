@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Signalbox - session tree proposal</title>
+  <style>
+    :root { color-scheme:dark; --page:#0d0d0f; --panel:#1e1e21; --line:#ffffff14; --text:#ededed; --muted:#98989d; --dim:#6e6e73; --blue:#0a84ff; --amber:#ff9f0a; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--page); color:#c9c9ce; font:15px/1.6 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif; }
+    button,input { font:inherit; }
+    button { color:inherit; cursor:pointer; }
+    button:focus-visible,input:focus-visible,a:focus-visible { outline:2px solid var(--blue); outline-offset:3px; }
+    a { color:var(--blue); text-decoration:none; }
+    main { max-width:1160px; margin:0 auto; padding:40px 28px 64px; }
+    .nav { color:var(--dim); font-size:12px; margin-bottom:22px; }
+    .intro { display:flex; justify-content:space-between; gap:30px; align-items:flex-start; }
+    .intro h1 { margin:0 0 4px; color:var(--text); font-size:29px; font-weight:620; letter-spacing:-.7px; }
+    .intro p { margin:0; max-width:730px; color:var(--muted); }
+    .proposed { margin-top:8px; color:#e5bb73; background:#e5bb7312; border:1px solid #e5bb7330; border-radius:5px; padding:2px 9px; font-size:11px; white-space:nowrap; }
+    .controls { display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between; margin:28px 0 15px; }
+    .segmented { padding:3px; display:inline-flex; background:#202023; border:1px solid var(--line); border-radius:7px; gap:2px; }
+    .segmented button { border:0; background:none; border-radius:4px; padding:5px 12px; color:var(--muted); font-size:12px; }
+    .segmented button[aria-pressed=true] { background:#38383d; color:var(--text); box-shadow:0 1px 3px #0006; }
+    .options { display:flex; align-items:center; gap:16px; }
+    .options label { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--muted); }
+    .options input { accent-color:var(--blue); }
+    .panel { width:100%; background:var(--panel); border:1px solid #ffffff26; border-radius:16px; box-shadow:0 18px 50px #0008; overflow:hidden; font-size:13px; line-height:normal; }
+    .panel-header { height:54px; display:flex; gap:18px; align-items:center; padding:0 21px; border-bottom:1px solid var(--line); }
+    .brand { display:flex; gap:9px; align-items:center; color:#b5b5ba; font-size:14px; font-weight:650; }
+    .brand svg { width:19px; height:22px; }
+    #search { flex:1; min-width:0; background:none; border:none; color:var(--text); outline:none; font-size:14px; }
+    #search::placeholder { color:var(--dim); }
+    .jump { display:flex; align-items:center; gap:9px; padding:0; background:none; border:0; color:#b5b5ba; font-size:12px; }
+    kbd { background:#ffffff10; border:1px solid #ffffff16; border-radius:4px; padding:2px 5px; font:10px/1.2 "SF Mono",Menlo,monospace; color:#b5b5ba; }
+    .board { display:grid; grid-template-columns:47% 53%; min-height:420px; }
+    .list-pane { border-right:1px solid var(--line); min-width:0; padding:12px 0 14px; }
+    .list-caption { display:flex; align-items:center; justify-content:space-between; height:31px; padding:0 23px; color:var(--dim); font-size:10px; letter-spacing:1.6px; font-weight:650; }
+    #match-count { color:var(--muted); font-weight:400; letter-spacing:0; }
+    #tree { height:351px; overflow:auto; padding:4px 10px 8px; outline:none; }
+    .row { display:flex; gap:8px; align-items:center; min-height:57px; padding:8px 10px 8px calc(4px + var(--depth)*21px); border-radius:8px; cursor:pointer; position:relative; }
+    .row:hover { background:#ffffff05; }
+    .row.selected { background:#2c2c31; }
+    .row.context .name { color:#808087; font-weight:450; }
+    .row.context .description { color:#626269; }
+    .row.placeholder .name { font-style:italic; color:#85858d; font-size:12px; }
+    .disclosure { width:18px; min-width:18px; height:24px; background:none; border:0; padding:0; color:#86868e; display:grid; place-items:center; border-radius:3px; }
+    .disclosure:hover { background:#ffffff10; color:var(--text); }
+    .disclosure svg { width:10px; height:10px; transition:transform .12s; }
+    .disclosure[aria-expanded=true] svg { transform:rotate(90deg); }
+    .disclosure.empty { cursor:default; }
+    .glyph { width:21px; min-width:21px; display:flex; justify-content:center; }
+    .glyph svg { width:20px; height:20px; }
+    .copy { flex:1; min-width:0; }
+    .title-line { display:flex; align-items:center; gap:6px; min-height:18px; }
+    .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#adadb2; font-size:13px; }
+    .row.unread .name,.row.ask .name { color:#ededed; font-weight:650; }
+    .row.selected .name { color:white; }
+    .description { color:var(--dim); font-size:11px; line-height:16px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:1px; }
+    .summary { color:#9999a2; font-size:10px; flex-shrink:0; margin-left:2px; }
+    .summary.needs { color:var(--amber); }
+    .right { display:flex; align-items:center; gap:8px; padding-left:4px; color:var(--muted); font-size:11px; }
+    .state { display:inline-block; height:7px; width:7px; flex-shrink:0; border-radius:50%; }
+    .state.unread { background:var(--blue); }
+    .state.ask { background:var(--amber); }
+    .state.read { border:1px solid #777780; }
+    .state.busy { border:1.5px solid #98989d40; border-top-color:#b5b5ba; width:10px; height:10px; animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .no-results { padding:26px 15px; color:var(--muted); }
+    .preview { background:#000; min-width:0; padding:20px 25px; display:flex; flex-direction:column; }
+    .breadcrumbs { min-height:32px; display:flex; gap:6px; align-items:flex-start; flex-wrap:wrap; color:#626269; font-size:10px; line-height:1.7; padding-bottom:10px; }
+    .breadcrumbs button { padding:0; border:0; background:none; color:#898992; font-size:10px; }
+    .breadcrumbs button:hover { color:#c9c9ce; }
+    .terminal { font:12px/1.8 "SF Mono",ui-monospace,Menlo,monospace; flex:1; }
+    .prompt { color:#98989d; white-space:pre-wrap; margin:5px 0 24px; }
+    .prompt::before { content:"❯ "; color:#5a5a5f; }
+    .reply { display:flex; gap:9px; color:#d8d8dc; white-space:pre-wrap; }
+    .reply .bullet { padding-top:7px; }
+    .reply .bullet .state { width:6px; height:6px; }
+    .response-text { flex:1; }
+    .response-text .ask-title { color:var(--amber); margin-bottom:8px; }
+    .response-text code { color:#e5c07b; background:#ffffff09; padding:3px 6px; border-radius:4px; font:inherit; }
+    .preview-footer { margin-top:24px; color:var(--dim); font-size:11px; line-height:1.8; }
+    .preview-footer button { border:0; padding:0; background:none; color:#b5b5ba; font-size:11px; }
+    .preview-footer button:hover { color:white; }
+    .footer { min-height:37px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; align-items:center; padding:8px 17px; color:var(--dim); font-size:10px; }
+    .keys { display:flex; flex-wrap:wrap; gap:10px; }
+    .keys span { white-space:nowrap; }
+    .keys kbd { font-size:9px; padding:1px 3px; background:none; }
+    #tree-status .attention { color:var(--amber); }
+    .scenario-note { min-height:54px; display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin:17px 2px 0; color:var(--muted); font-size:12px; }
+    .scenario-note p { margin:0; max-width:800px; }
+    .quiet-button { border:1px solid #ffffff25; background:#ffffff08; border-radius:5px; padding:4px 10px; color:#c9c9ce; font-size:12px; white-space:nowrap; }
+    .evidence { display:grid; grid-template-columns:1fr 1fr 1fr; gap:25px; border-top:1px solid var(--line); margin-top:17px; padding-top:23px; }
+    .evidence h2 { font-size:13px; color:#d8d8dc; margin:0 0 5px; font-weight:550; }
+    .evidence p { margin:0; font-size:12px; color:var(--muted); }
+    .footnote { color:var(--dim); font-size:11px; margin:25px 0 0; }
+    #toast { position:fixed; bottom:25px; left:50%; transform:translateX(-50%); background:#313138; border:1px solid #ffffff30; border-radius:7px; padding:11px 18px; color:var(--text); font-size:13px; box-shadow:0 10px 30px #0008; z-index:5; }
+    [hidden] { display:none !important; }
+    mark { background:#0a84ff30; color:inherit; border-radius:2px; padding:0; }
+    @media (max-width:800px) { main { padding:25px 16px; } .intro { gap:12px; } .options { flex-wrap:wrap; } .board { grid-template-columns:1fr; } .list-pane { border-right:0; } #tree { height:330px; } .preview { min-height:300px; border-top:1px solid var(--line); } .evidence { grid-template-columns:1fr; gap:15px; } .panel-header { gap:12px; padding:0 15px; } .brand { font-size:12px; } }
+    @media (prefers-reduced-motion:reduce) { .state.busy { animation:none; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="nav"><a href="hub-jumplist.html">Jumplist</a> / <a href="https://github.com/dwmkerr/signalbox/issues/61">RFC #61</a> / Session trees</div>
+  <div class="intro">
+    <div><h1>Keep delegated work together</h1><p>Follow a conversation from its main agent to the workers it launches, across Claude and Codex.</p></div>
+    <span class="proposed">Interactive reference · scope below</span>
+  </div>
+  <p class="footnote"><b>Implemented scope:</b> native Codex parent-thread records and Claude worker ownership hooks; collapse, search ancestry, unread navigation and missing-parent context in the macOS jumplist. New activity only, with no <code>--json</code> requirement. Cross-agent shell links, wrapper folding and the flat/tree switch below remain illustrative proposals. PID/PPID and titles do not establish session relationships.</p>
+  <p class="footnote"><b>Branch actions:</b> Hide (⌃X) and Remove (⌃⌫ or ⌃⌦) act on the selected session and its recorded descendants, even when collapsed or filtered by search. Hidden or unavailable parent context rows support these actions on real sessions; they cannot jump, rename, or pin. Working sessions retain the existing Hide-as-acknowledge behavior. Unhide restores the hidden branch. See the <a href="hub-jumplist.html">jumplist contract</a>.</p>
+  <div class="controls" aria-label="Mockup controls">
+    <div class="segmented" id="scenarios" aria-label="Example">
+      <button data-scenario="mixed" aria-pressed="true">Claude → Codex</button>
+      <button data-scenario="native" aria-pressed="false">Codex team</button>
+      <button data-scenario="missing" aria-pressed="false">Missing parent</button>
+    </div>
+    <div class="options">
+      <label><input id="compact" type="checkbox">Fold completed launch wrappers</label>
+      <div class="segmented" id="views" aria-label="Layout"><button data-view="tree" aria-pressed="true">Tree</button><button data-view="flat" aria-pressed="false">Flat</button></div>
+    </div>
+  </div>
+  <section class="panel" aria-label="Signalbox session tree mockup">
+    <div class="panel-header">
+      <div class="brand"><svg viewBox="0 0 24 28" fill="none" stroke="#98989d" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 6c5-5 13-5 18 0M6 9c3.3-3.2 8.7-3.2 12 0M9 12c1.7-1.6 4.3-1.6 6 0M3 22c5 5 13 5 18 0M6 19c3.3 3.2 8.7 3.2 12 0"/><circle cx="12" cy="15" r="1.8" fill="#98989d" stroke="none"/></svg>signalbox</div>
+      <input id="search" type="search" placeholder="Search sessions..." autocomplete="off" aria-label="Search sessions">
+      <button class="jump" id="jump">Jump <kbd>↵</kbd></button>
+    </div>
+    <div class="board">
+      <div class="list-pane"><div class="list-caption"><span>SESSIONS</span><span id="match-count"></span></div><div id="tree" role="tree" aria-label="Sessions" tabindex="0"></div></div>
+      <div class="preview"><div class="breadcrumbs" id="breadcrumbs"></div><div class="terminal" id="terminal"></div><div class="preview-footer" id="preview-footer"></div></div>
+    </div>
+    <div class="footer"><div class="keys"><span><kbd>↑ ↓</kbd> move</span><span><kbd>← →</kbd> fold / unfold</span><span><kbd>tab</kbd> next unread</span><span><kbd>↵</kbd> jump</span><span><kbd>esc</kbd> clear</span></div><span id="tree-status"></span></div>
+  </section>
+  <div class="scenario-note"><p id="scenario-note"></p><button class="quiet-button" id="load-parent" hidden>Load parent session</button></div>
+  <div class="evidence">
+    <div><h2>Every worker keeps its identity</h2><p>A Claude wrapper and the Codex thread it launches are separate conversations. Expand either row to follow the work.</p></div>
+    <div><h2>Collapsed work stays visible</h2><p>A child asking for attention leaves an amber summary on its collapsed parent. The parent's own state remains intact.</p></div>
+    <div><h2>Search keeps the path</h2><p>Try <a href="#" id="try-search">session identity</a>. Matching children retain their ancestors. Clearing the query restores your expansion choices.</p></div>
+  </div>
+  <p class="footnote">Illustrative conversations and states; this page does not connect to a live hub. Mixed-agent edges require explicit launch identity metadata that ordinary shell launches do not currently provide. Title-generation helpers are tracked separately in <a href="https://github.com/dwmkerr/signalbox/issues/90">#90</a>. Implemented behavior is specified in the <a href="hub-jumplist.html">jumplist spec</a>.</p>
+</main>
+<div id="toast" role="status" hidden></div>
+<script>
+const glyphs = {
+  claude: '<svg viewBox="0 0 20 20" fill="none" stroke="#D97757" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M10 2v16M2 10h16M4.34 4.34l11.32 11.32M4.34 15.66L15.66 4.34"/></svg>',
+  codex: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M18 10 L14 16.93 L6 16.93 L2 10 L6 3.07 L14 3.07 Z" fill="none" stroke="#10A37F" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  missing: '<svg viewBox="0 0 20 20" fill="none" stroke="#686870" stroke-width="1.4" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="3" stroke-dasharray="3 3"/></svg>'
+};
+const scenarios = {
+  mixed: {
+    selected:'browserdeck', expanded:[],
+    note:'A Claude worker launches Codex, so both conversations appear in the path. Collapse Browserdeck to see its child alert. The other Codex conversation stays independent even though it uses the same project.',
+    nodes:[
+      {id:'browserdeck',agent:'claude',title:'Browserdeck',state:'busy',age:'4s',description:'Build session controls',prompt:'Implement session controls and verify the result.',reply:'The implementation and review are running in separate workers.',jump:'Jump to iTerm · browserdeck',target:'browserdeck'},
+      {id:'wrapper',parent:'browserdeck',agent:'claude',title:'Fix session identity',state:'read',age:'1m',description:'Codex launch instructions and output',wrapper:true,prompt:'Run Codex to fix the session identity findings.',reply:'Codex was launched with the task instructions. Its conversation is available below.',jump:'Jump to parent terminal · browserdeck',target:'browserdeck'},
+      {id:'codex-fix',parent:'wrapper',agent:'codex',title:'Fix session identity',state:'ask',age:'18s',description:'Allow the browser verification run?',prompt:'Fix session identity and run the verification step.',reply:'The changes are ready for verification.',command:'npm run check:identity',jump:'Jump to parent terminal · browserdeck',target:'browserdeck'},
+      {id:'review',parent:'browserdeck',agent:'claude',title:'Review session controls',state:'busy',age:'6s',description:'Checking the close and logout behavior',prompt:'Review the session controls and their error handling.',reply:'Reviewing the implementation and the browser checks.',jump:'Jump to parent terminal · browserdeck',target:'browserdeck'},
+      {id:'release',agent:'codex',title:'Prepare a release',state:'unread',age:'2m',description:'Release notes are ready for review',prompt:'Prepare release notes for Browserdeck.',reply:'The release notes are ready. They cover session controls, identity handling, and the verification results.',jump:'Jump to iTerm · release',target:'release'},
+      {id:'docs',agent:'claude',title:'Update the setup guide',state:'read',age:'12m',description:'Added the local development steps',prompt:'Update the local development instructions.',reply:'Added the local development steps and checked the commands.',jump:'Jump to iTerm · docs',target:'docs'}
+    ]
+  },
+  native: {
+    selected:'layout',expanded:[],
+    note:'Trees start collapsed. Codex records a parent thread ID for each native worker. Grandchildren follow the immediate parent, even when their session_id points at the root. Expand the team, or press Tab to reveal unread work.',
+    nodes:[
+      {id:'layout',agent:'codex',title:'Explore layout options',state:'busy',age:'3s',description:'Compare three directions for the interface',prompt:'Explore layout options with separate workers for space, interaction, and typography.',reply:'The workers are exploring their assigned directions.',jump:'Jump to iTerm · design',target:'layout'},
+      {id:'spatial',parent:'layout',agent:'codex',title:'Spatial explorations',state:'unread',age:'1m',description:'Feynman · Three layouts ready to compare',prompt:'Explore the spatial layout of the interface.',reply:'Three layouts are ready to compare: a compact split view, a wider preview, and a focused single-column view.',jump:'Jump to parent terminal · design',target:'layout'},
+      {id:'mechanisms',parent:'layout',agent:'codex',title:'Interaction explorations',state:'busy',age:'8s',description:'Mill · Check navigation and selection',prompt:'Explore navigation and selection behavior.',reply:'Checking keyboard navigation and selection through a nested tree.',jump:'Jump to parent terminal · design',target:'layout'},
+      {id:'keyboard',parent:'mechanisms',agent:'codex',title:'Verify keyboard flow',state:'ask',age:'14s',description:'Allow the interaction test?',prompt:'Verify keyboard navigation through nested sessions.',reply:'The keyboard flow is ready for an interaction test.',command:'npm run test:keyboard',jump:'Jump to parent terminal · design',target:'layout'},
+      {id:'editorial',parent:'layout',agent:'codex',title:'Typography explorations',state:'read',age:'3m',description:'Franklin · Type scale and spacing reviewed',prompt:'Review the type scale and spacing.',reply:'The proposed type scale preserves readable previews and compact session rows.',jump:'Jump to parent terminal · design',target:'layout'},
+      {id:'independent',agent:'codex',title:'Review migration',state:'unread',age:'5m',description:'Migration checks passed',prompt:'Review the migration steps.',reply:'The migration checks passed. The review is ready.',jump:'Jump to iTerm · migration',target:'independent'}
+    ]
+  },
+  missing: {
+    selected:'absent',expanded:[],
+    note:'This child has a recorded parent ID, but the parent is unavailable. Keep the child accessible under a quiet context row. A session with no known parent stays at the top level. Load the parent to see the tree reconcile without duplicating the child.',
+    nodes:[
+      {id:'absent',agent:'missing',title:'Parent session unavailable',state:'unknown',age:'',description:'One recorded child',placeholder:true},
+      {id:'verification',parent:'absent',agent:'codex',title:'Verify branch behavior',state:'unread',age:'3m',description:'Branch checks passed',prompt:'Verify the branch behavior and report the result.',reply:'The branch checks passed. This transcript remains available even though the parent session is unavailable.',jump:'Open transcript',target:'transcript'},
+      {id:'unlinked',agent:'codex',title:'Review migration',state:'busy',age:'7s',description:'Checking the migration steps',prompt:'Check the migration steps.',reply:'Working through the migration checks.',jump:'Jump to iTerm · migration',target:'unlinked'},
+      {id:'finished',agent:'claude',title:'Update the setup guide',state:'read',age:'18m',description:'Instructions updated',prompt:'Update the setup guide.',reply:'The setup instructions are updated.',jump:'Jump to iTerm · docs',target:'finished'}
+    ]
+  }
+};
+let scenario='mixed', mode='tree', nodes=[], selected='', expanded=new Set(), visible=[];
+let toastTimer;
+const $ = id => document.getElementById(id);
+const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const query = () => $('search').value.trim().toLowerCase();
+const byId = id => nodes.find(n=>n.id===id);
+function ancestors(n) { const path=[], seen=new Set([n.id]); while(n?.parent && !seen.has(n.parent)) { seen.add(n.parent); n=byId(n.parent); if(n) path.unshift(n); } return path; }
+function descendants(id) { return nodes.filter(n=>ancestors(n).some(p=>p.id===id)); }
+function marked(text) { const q=query(), source=String(text ?? ''), index=source.toLowerCase().indexOf(q); return q && index>=0 ? escapeHTML(source.slice(0,index))+'<mark>'+escapeHTML(source.slice(index,index+q.length))+'</mark>'+escapeHTML(source.slice(index+q.length)) : escapeHTML(source); }
+function matching(n) { return !n.placeholder && (n.title+' '+n.description).toLowerCase().includes(query()); }
+function stateDot(n) { return ['busy','ask','unread','read'].includes(n.state) ? '<span class="state '+n.state+'" aria-hidden="true"></span>' : ''; }
+function compacted(n) { return mode==='tree' && $('compact').checked && !query() && n.wrapper && n.state==='read' && nodes.filter(c=>c.parent===n.id).length===1; }
+function displayParent(n) { let parent=byId(n.parent); while(parent && compacted(parent)) parent=byId(parent.parent); return parent?.id; }
+function children(id) { return nodes.filter(n=>!compacted(n) && displayParent(n)===id); }
+function isOpen(id) { return expanded.has(id) || !!query(); }
+function buildVisible() {
+  const q=query(), matches=new Set(nodes.filter(matching).map(n=>n.id));
+  const included=new Set(matches);
+  if(q && mode==='tree') for(const n of nodes.filter(n=>matches.has(n.id))) for(const a of ancestors(n)) included.add(a.id);
+  visible=[];
+  if(mode==='flat') { for(const n of nodes) if(!n.placeholder && (!q || matches.has(n.id))) visible.push({n,depth:0,context:false}); }
+  else {
+    const visit=(n,depth)=>{ if(q && !included.has(n.id)) return; visible.push({n,depth,context:!!q&&!matches.has(n.id)}); if(isOpen(n.id)) for(const c of children(n.id)) visit(c,depth+1); };
+    for(const n of children(undefined)) visit(n,0);
+  }
+  $('match-count').textContent=q ? `${matches.size} ${matches.size===1?'match':'matches'}` : '';
+}
+function summary(n) {
+  if(mode==='flat' || isOpen(n.id)) return '';
+  const ds=descendants(n.id), asks=ds.filter(x=>x.state==='ask').length, busy=ds.filter(x=>x.state==='busy').length, unread=ds.filter(x=>x.state==='unread').length;
+  if(asks) return `<span class="summary needs">${asks} needs you</span>`;
+  if(busy) return `<span class="summary">${busy} working</span>`;
+  if(unread) return `<span class="summary">${unread} unread</span>`;
+  return ds.length ? `<span class="summary">${ds.length} ${ds.length===1?'worker':'workers'}</span>` : '';
+}
+function render() {
+  if(byId(selected) && compacted(byId(selected))) selected=children(selected)[0]?.id || selected;
+  buildVisible();
+  if(!visible.some(v=>v.n.id===selected)) selected=visible.find(v=>!v.context&&!v.n.placeholder)?.n.id || visible[0]?.n.id || '';
+  $('tree').setAttribute('role',mode==='tree'?'tree':'listbox');
+  $('tree').innerHTML=visible.length ? visible.map(({n,depth,context})=>{
+    const hasChildren=mode==='tree'&&children(n.id).length>0;
+    const disclosure=hasChildren ? `<button class="disclosure" tabindex="-1" data-toggle="${n.id}" aria-label="${isOpen(n.id)?'Collapse':'Expand'} ${escapeHTML(n.title)}" aria-expanded="${isOpen(n.id)}"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m3 1 4 4-4 4"/></svg></button>` : '<span class="disclosure empty"></span>';
+    const label=[n.title,n.state!=='unknown'?n.state:'',hasChildren&&!isOpen(n.id)?`${descendants(n.id).filter(x=>x.state==='ask').length} children need attention`:''].filter(Boolean).join(', ');
+    return `<div class="row ${n.state} ${selected===n.id?'selected':''} ${context?'context':''} ${n.placeholder?'placeholder':''}" id="row-${n.id}" role="${mode==='tree'?'treeitem':'option'}" ${mode==='tree'?`aria-level="${depth+1}"`:''} aria-selected="${selected===n.id}" ${hasChildren?`aria-expanded="${isOpen(n.id)}"`:''} aria-label="${escapeHTML(label)}" data-id="${n.id}" style="--depth:${depth}">${disclosure}<span class="glyph">${glyphs[n.agent]}</span><div class="copy"><div class="title-line">${n.state==='busy'?stateDot(n):''}<span class="name">${marked(n.title)}</span>${summary(n)}</div><div class="description">${marked(n.description)}</div></div><div class="right"><span>${escapeHTML(n.age)}</span>${n.state!=='busy'?stateDot(n):''}</div></div>`;
+  }).join('') : '<div class="no-results">No matching sessions.</div>';
+  if(selected) $('tree').setAttribute('aria-activedescendant','row-'+selected); else $('tree').removeAttribute('aria-activedescendant');
+  $('tree').querySelectorAll('[data-id]').forEach(el=>el.addEventListener('click',()=>{select(el.dataset.id);$('tree').focus();}));
+  $('tree').querySelectorAll('[data-toggle]').forEach(el=>el.addEventListener('click',e=>{e.stopPropagation();toggle(el.dataset.toggle);$('tree').focus();}));
+  const real=nodes.filter(n=>!n.placeholder), asks=real.filter(n=>n.state==='ask').length;
+  $('tree-status').innerHTML=asks ? `<span class="attention">${asks} needs you</span> · ${real.length} agents` : `${real.length} agents`;
+  renderPreview();
+}
+function select(id) { selected=id; render(); $('row-'+id)?.scrollIntoView({block:'nearest'}); }
+function toggle(id) { if(query()) return; if(expanded.has(id)) { expanded.delete(id); if(ancestors(byId(selected)||{}).some(n=>n.id===id)) selected=id; } else expanded.add(id); render(); }
+function renderPreview() {
+  const n=byId(selected);
+  if(!n) { $('breadcrumbs').innerHTML='';$('terminal').innerHTML='<div class="prompt">Try another search.</div>';$('preview-footer').innerHTML='';$('jump').disabled=true;return; }
+  const path=[...ancestors(n),n];
+  $('breadcrumbs').innerHTML=path.map((a,i)=>`${i?'<span>›</span>':''}<button data-breadcrumb="${a.id}">${escapeHTML(a.title)}</button>`).join('');
+  $('breadcrumbs').querySelectorAll('button').forEach(button=>button.addEventListener('click',()=>{for(const a of ancestors(byId(button.dataset.breadcrumb)))expanded.add(a.id);select(button.dataset.breadcrumb);}));
+  if(n.placeholder) { $('terminal').innerHTML='<div class="prompt">This session is not available.</div><div class="reply">Its recorded children remain accessible below it.</div>';$('preview-footer').innerHTML='Parent details can appear when the session becomes available.';$('jump').disabled=true;return; }
+  $('jump').disabled=false;
+  $('terminal').innerHTML=`<div class="prompt">${escapeHTML(n.prompt)}</div><div class="reply"><span class="bullet">${stateDot(n)}</span><div class="response-text">${n.state==='ask'?'<div class="ask-title">Waiting for approval</div>':''}${escapeHTML(n.reply)}${n.command?'<br><br><code>'+escapeHTML(n.command)+'</code>':''}</div></div>`;
+  $('preview-footer').innerHTML=`<div>${n.parent?'This worker has its own conversation.':''}</div><button id="preview-jump">${escapeHTML(n.jump)} <kbd>↵</kbd></button>${n.parent&&n.target!=='transcript'?'<div>The terminal opens the parent session.</div>':''}`;
+  $('preview-jump').addEventListener('click',jump);
+}
+function jump() { const n=byId(selected);if(!n||n.placeholder)return;showToast('Mockup: '+n.jump); }
+function showToast(text) { clearTimeout(toastTimer);$('toast').textContent=text;$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,3000); }
+function nextUnread() {
+  const eligible=nodes.filter(n=>['unread','ask'].includes(n.state)&&(!query()||matching(n)));
+  if(!eligible.length)return;
+  const n=eligible[(eligible.findIndex(n=>n.id===selected)+1)%eligible.length];
+  for(const a of ancestors(n))expanded.add(a.id);
+  select(n.id);
+}
+function loadScenario(name) { scenario=name;nodes=structuredClone(scenarios[name].nodes);selected=scenarios[name].selected;expanded=new Set(scenarios[name].expanded);$('search').value='';$('compact').checked=false;$('scenario-note').textContent=scenarios[name].note;$('load-parent').hidden=name!=='missing';document.querySelectorAll('[data-scenario]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.scenario===name));render(); }
+$('scenarios').addEventListener('click',e=>{if(e.target.dataset.scenario)loadScenario(e.target.dataset.scenario);});
+$('views').addEventListener('click',e=>{if(!e.target.dataset.view)return;mode=e.target.dataset.view;document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.view===mode));render();});
+$('search').addEventListener('input',render);
+$('compact').addEventListener('change',render);
+$('jump').addEventListener('click',jump);
+$('try-search').addEventListener('click',e=>{e.preventDefault();loadScenario('mixed');$('search').value='session identity';render();$('search').focus();});
+$('load-parent').addEventListener('click',()=>{Object.assign(byId('absent'),{agent:'claude',title:'Review branch behavior',description:'Verification delegated to Codex',state:'read',age:'8m',placeholder:false,prompt:'Review the branch behavior and delegate verification.',reply:'The implementation review is complete. The Codex verification is attached below.',jump:'Open transcript',target:'transcript'});$('load-parent').hidden=true;render();});
+document.querySelector('.panel').addEventListener('keydown',e=>{
+  if(e.key==='Tab'&&!e.shiftKey && (e.target===$('tree')||e.target===$('search'))) {e.preventDefault();nextUnread();return;}
+  if(e.key==='Escape') {e.preventDefault();$('search').value='';render();$('search').focus();return;}
+  if(e.key==='Enter' && (e.target===$('search')||e.target===$('tree'))) {e.preventDefault();jump();return;}
+  const index=visible.findIndex(v=>v.n.id===selected);
+  if(['ArrowUp','ArrowDown'].includes(e.key) && (e.target===$('search')||e.target===$('tree'))) {e.preventDefault();select(visible[Math.max(0,Math.min(visible.length-1,index+(e.key==='ArrowDown'?1:-1)))]?.n.id);return;}
+  if(e.target!==$('tree')||mode!=='tree'||query())return;
+  if(e.key==='ArrowRight') {e.preventDefault();const cs=children(selected);if(cs.length){if(!expanded.has(selected)){expanded.add(selected);render();}else select(cs[0].id);}}
+  if(e.key==='ArrowLeft') {e.preventDefault();if(expanded.has(selected)&&children(selected).length){expanded.delete(selected);render();}else {const p=displayParent(byId(selected)||{});if(p)select(p);}}
+});
+loadScenario('mixed');
+</script>
+</body>
+</html>

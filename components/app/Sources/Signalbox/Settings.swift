@@ -290,13 +290,7 @@ final class SettingsController: NSObject, NSTextFieldDelegate, NSWindowDelegate,
         // A settings window nobody has open has no business talking to the hub
         // every few seconds, so this surface owns one reference to the monitor.
         monitor.begin("settings") { [weak self] in self?.applyHealth() }
-        // Accessory apps stay background by default; a settings window is a
-        // real window and needs the app frontmost to take keys and clicks.
-        // orderFrontRegardless because activate alone can leave the window
-        // behind the previous app on modern macOS.
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
-        window?.orderFrontRegardless()
+        if let window { WindowPresentation.show(window, activateApp: true) }
     }
 
     private func build() {

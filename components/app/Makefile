@@ -37,7 +37,7 @@ TEAM_ID := 5TTNE9J58F
 NOTARY_PROFILE := signalbox-notary
 NOTARIZE_ZIP := $(BUILD_DIR)/$(APP).zip
 
-.PHONY: all app build manifest-libs clean notarize
+.PHONY: all app build test manifest-libs clean notarize
 
 all: app
 
@@ -50,6 +50,13 @@ manifest-libs:
 
 build: manifest-libs
 	swift build -c release $(SWIFT_FLAGS)
+
+test:
+	mkdir -p $(BUILD_DIR)
+	xcrun swiftc Sources/Signalbox/SessionTree.swift Tests/SessionTreeChecks.swift -o $(BUILD_DIR)/session-tree-checks
+	$(BUILD_DIR)/session-tree-checks
+	xcrun swiftc Sources/Signalbox/RuntimeConfiguration.swift Tests/RuntimeConfigurationChecks.swift -o $(BUILD_DIR)/runtime-configuration-checks
+	$(BUILD_DIR)/runtime-configuration-checks
 
 app: build
 	rm -rf "$(BUNDLE)"

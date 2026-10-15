@@ -65,3 +65,32 @@ export function procAlive(p: Proc): boolean {
   if (!p.name) return true;
   return comm(p.pid) === p.name;
 }
+
+// deadProcs checks a set of captured processes with one `ps` invocation. This
+// is used by the jumplist's background refresh, where starting one `ps`
+// process per row would make larger boards needlessly expensive. If `ps`
+// itself fails, report no deaths: an uncertain check must not mark sessions
+// disconnected.
+export function deadProcs(processes: Proc[]): Proc[] {
+  const named = [...new Map(
+    processes.filter((p) => p.name).map((p) => [p.pid, p])
+  ).values()];
+  if (named.length === 0) {
+    return processes.filter((p) => !p.name && !procAlive(p));
+  }
+
+  const out = spawnSync("ps", ["-o", "pid=,comm=", "-p", named.map((p) => p.pid).join(",")]);
+  if (out.status !== 0) return [];
+
+  const live = new Map<number, string>();
+  for (const line of (out.stdout?.toString() ?? "").split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+(.+)$/);
+    if (match) live.set(Number(match[1]), basename(match[2].trim()));
+  }
+
+  const dead = named.filter((p) => live.get(p.pid) !== p.name);
+  for (const p of processes) {
+    if (!p.name && !procAlive(p)) dead.push(p);
+  }
+  return dead;
+}

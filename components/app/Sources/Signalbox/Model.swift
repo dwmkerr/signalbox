@@ -5,9 +5,17 @@ import Foundation
 // side does not brick the menu bar.
 struct SessionEvent: Decodable {
     let agent: String
-    let event: String
-    let reason: String?
+    var event: String
+    var reason: String?
+    /// True when either the liveness sweep or a clean SessionEnd confirmed exit.
+    var processStopped: Bool { reason == "exited" || reason == "session_end" }
     let sessionKey: String
+    /// Explicit parent on the same machine, supplied by native identity records.
+    let parentSessionKey: String?
+    /// Whether this is direct delegation or ownership by a conversation.
+    let parentRelation: String?
+    /// Stable machine identity for preventing cross-machine parenting.
+    let machine: String?
     let host: String?
     let cwd: String?
     let title: String?
@@ -35,6 +43,9 @@ struct SessionEvent: Decodable {
     enum CodingKeys: String, CodingKey {
         case agent, event, reason, host, cwd, title, prompt, detail, reply, cropped, label, tags, ts, seq, acked, hidden, pinned, origin
         case sessionKey = "session_key"
+        case parentSessionKey = "parent_session_key"
+        case parentRelation = "parent_relation"
+        case machine
         case engagedTs = "engaged_ts"
     }
 
@@ -44,6 +55,9 @@ struct SessionEvent: Decodable {
         // unusable, so let those two throw and the caller drop the event.
         event = try container.decode(String.self, forKey: .event)
         sessionKey = try container.decode(String.self, forKey: .sessionKey)
+        parentSessionKey = try? container.decodeIfPresent(String.self, forKey: .parentSessionKey)
+        parentRelation = try? container.decodeIfPresent(String.self, forKey: .parentRelation)
+        machine = try? container.decodeIfPresent(String.self, forKey: .machine)
         // Everything else decodes leniently: `acked`, `hidden`, and `detail`
         // are landing on the hub concurrently, and a missing or retyped field
         // must never fail the whole /state decode or silently drop stream events.

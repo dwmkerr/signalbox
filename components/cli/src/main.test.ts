@@ -99,7 +99,7 @@ function searchFixture(): { dataDir: string; env: Record<string, string> } {
     host: "test",
     agent: "claude",
     event: "done",
-    session_key: "claude:live",
+    session_key: "claude:11111111-1111-4111-8111-111111111111",
     cwd: "/work/editor-live",
     transcript: liveTranscript,
   }) + "\n");

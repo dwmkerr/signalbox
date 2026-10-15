@@ -381,6 +381,9 @@ extra badge.</p>
 <a href="agent-markdown.md">agent-markdown.md</a>: take the first paragraph, keep inline styles, and
 collapse whitespace to one line. While a session works you see your prompt (what it is working on);
 once it finishes, asks, or fails you see its reply (what came back). Identical rule to the jumplist.</p>
+<p>A session whose agent process exited remains on the board with a muted crossed-terminal marker
+after its preview. A clean <code>SessionEnd</code> is an intentional close, so that row moves to
+Hidden instead.</p>
 
 <h3>Host</h3>
 <p>A row shows the machine it lives on <b>when more than one machine is on the board</b>. The machine

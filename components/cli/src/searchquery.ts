@@ -108,16 +108,18 @@ class SqliteSearchQuery implements SearchQuery {
       LIMIT ?
     `).all(expression, limit);
 
-    const sessionForPath = this.db.query<{ session_uuid: string }, [string]>(`
-      SELECT session_uuid FROM files WHERE path = ?
-    `);
+    // A hit resolves to a live row by transcript uuid: claude, codex and cursor
+    // all key the board as "<agent>:<session-uuid>", the same id the transcript
+    // is filed under. The transcript path cannot serve here - a forwarder strips
+    // it before the event reaches the upstream board this reads back, so live
+    // rows arrive with no path (redact() also hashes the key id on corp hosts,
+    // where an unmatched uuid correctly leaves the row ended).
     const liveKeys = new Map<string, string>();
     for (const session of liveSessions) {
-      if (!session.transcript) continue;
-      const indexed = sessionForPath.get(session.transcript);
-      if (indexed && !liveKeys.has(indexed.session_uuid)) {
-        liveKeys.set(indexed.session_uuid, session.session_key);
-      }
+      const colon = session.session_key.indexOf(":");
+      if (colon <= 0) continue;
+      const uuid = session.session_key.slice(colon + 1);
+      if (uuid && !liveKeys.has(uuid)) liveKeys.set(uuid, session.session_key);
     }
 
     return rows.map((row) => {

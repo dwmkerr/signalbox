@@ -101,9 +101,15 @@ export interface Event {
   event: string;
   reason?: string;
   session_key: string;
+  /** Explicit owning or spawning session on the same machine; never inferred from names or timing. */
+  parent_session_key?: string;
+  /** Native delegation or an explicitly recorded owning conversation. */
+  parent_relation?: "spawned" | "owned";
   cwd?: string;
-  // session_key uses <family>:<tmux-pane> or <family>:<shortHash(cwd)>, never
-  // the transcript uuid, so this path links a content-search hit to its live row.
+  // Local-only path to the on-disk conversation, used to index it for content
+  // search. A forwarder strips it before uplinking and redact() drops it on corp
+  // hosts, since a remote hub cannot read another machine's disk. Content search
+  // links a hit to its live row by the session uuid in session_key, not by this.
   transcript?: string;
   title?: string;
   // The human/trigger side of the exchange breadcrumb (your last prompt, a
@@ -373,6 +379,13 @@ export function validate(e: Event): string | null {
   if (!e.agent) return "agent is required";
   if (!validType(e.event)) return `unknown event type ${JSON.stringify(e.event)}`;
   if (!e.session_key) return "session_key is required";
+  if (e.parent_session_key !== undefined) {
+    if (typeof e.parent_session_key !== "string" || !e.parent_session_key.includes(":") ||
+        e.parent_session_key.length > 256 || e.parent_session_key === e.session_key) {
+      return "parent_session_key must identify a different session";
+    }
+    if (e.parent_relation !== "spawned" && e.parent_relation !== "owned") return "parent_relation is required";
+  } else if (e.parent_relation !== undefined) return "parent_session_key is required for a relationship";
   if (e.origin) {
     const set = [e.origin.tmux, e.origin.url, e.origin.cursor].filter(Boolean).length;
     if (set > 1) return "origin is a union: set exactly one of tmux, url, cursor";
@@ -392,14 +405,20 @@ export async function redact(e: Event): Promise<void> {
   delete e.reply;
   delete e.cropped;
   delete e.raw; // the raw payload carries everything - never leaves a corp host
-  const idx = e.session_key.indexOf(":");
-  if (idx > 0 && idx < e.session_key.length - 1) {
-    const agent = e.session_key.slice(0, idx);
-    const id = e.session_key.slice(idx + 1);
+  if (e.parent_session_key) e.parent_session_key = await redactSessionKey(e.parent_session_key);
+  e.session_key = await redactSessionKey(e.session_key);
+}
+
+async function redactSessionKey(key: string): Promise<string> {
+  const idx = key.indexOf(":");
+  if (idx > 0 && idx < key.length - 1) {
+    const agent = key.slice(0, idx);
+    const id = key.slice(idx + 1);
     const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(id));
     const hex = [...new Uint8Array(digest).slice(0, 6)]
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");
-    e.session_key = `${agent}:${hex}`;
+    return `${agent}:${hex}`;
   }
+  return key;
 }

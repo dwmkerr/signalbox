@@ -82,6 +82,16 @@ export class Store {
           // Hide is the stronger, more recent intent than a pin, so it always
           // drops the pin before applying its own rule.
           delete cur.pinned;
+          if (e.reason === "session_end") {
+            // A SessionEnd hook confirms the agent process has gone away.
+            // Unlike a user hiding a busy row, this is an intentional exit and
+            // should leave the session out of the board while preserving its
+            // transcript and exchange history.
+            cur.hidden = true;
+            cur.event = ev.Done;
+            cur.reason = e.reason;
+            return;
+          }
           if (cur.event === ev.Busy) {
             // Hide on a busy row is treated as seen: a running session must
             // stay visible.
@@ -152,6 +162,11 @@ export class Store {
       if (!e.proc) e.proc = prev.proc;
       // Machine identity is a breadcrumb too, so an older emitter cannot blank it.
       if (!e.machine) e.machine = prev.machine;
+      // A resumed conversation retains its creation relationship.
+      if (prev.parent_session_key) {
+        e.parent_session_key = prev.parent_session_key;
+        e.parent_relation = prev.parent_relation;
+      }
       // The user's label always carries: agent events never set it.
       if (prev.label) e.label = prev.label;
       else delete e.label;

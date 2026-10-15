@@ -23,7 +23,7 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   // Schema version. Always 1 today.
   "v": 1,
 
-  // Unique id for this event (uuid), and when it was fired (UTC).
+  // Unique id for this event (UUID or deterministic digest), and when it was fired (UTC).
   "id": "0197-...",
   "ts": "2026-07-07T18:04:11Z",
 
@@ -66,6 +66,12 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   // agent "vscode/claude" or "cursor/claude" for its icon, but still keys on
   // "claude:<id>" so it never splits between a plain terminal and the editor.
   "session_key": "claude:9f2a...",
+
+  // Optional explicit relationship. Both endpoints belong to this machine.
+  // "spawned" identifies the direct spawning thread; "owned" identifies
+  // the owning conversation without claiming a direct delegation edge.
+  "parent_session_key": "claude:7b1c...",
+  "parent_relation": "owned",
 
   // Where the work is happening.
   "cwd": "/Users/dave/repos/work-project",
@@ -152,6 +158,15 @@ Every field explained in place. Optional fields are omitted from the JSON when e
 
 ## The session
 
+Parent relationships come only from explicit agent records. The first recorded
+parent and relation carry across subsequent events, including resumes; title,
+prompt, cwd, timing, PID and PPID never establish an edge. A parent key must
+be a non-self session key and requires `parent_relation` (`spawned` or `owned`).
+Redaction hashes both endpoints with the same transformation. Forwarders retain
+the relationship while stripping local transcript paths. Surfaces join within
+the same machine identity, discard cyclic claims, and show unavailable parents
+as context rather than inventing a live session. Missing edges leave roots.
+
 What `GET /state` returns: an event plus the five fields the hub derives.
 `seq` is ingest order; `acked`, `hidden`, `pinned`, and `engaged_ts` come from
 the rules below. A fired event that tries to set them is ignored.
@@ -167,6 +182,7 @@ The hub keeps one row per `session_key`, following these rules:
 
 - **Latest event wins.** A new agent event replaces the row's status. `ended` removes the row (the event log keeps everything).
 - **Breadcrumbs carry.** `prompt`, `reply`, `origin`, `proc` and `machine` persist across events that omit them, so a done without prompt text keeps showing the prompt that started it and an older emitter cannot blank the machine identity. `label` always carries, and only a `label` event can change or clear it.
+- **Process exit is not session end.** The periodic liveness sweep marks dead busy processes `done` with reason `exited`; the desktop jumplist also asks `POST /process-check` after it opens, checking all visible sessions captured on the hub's own host in one process-list call. A confirmed exit leaves the row and its history on the board with a disconnected marker. A clean `SessionEnd` is a separate `hide` with reason `session_end` and suppresses the row.
 - **An enriched ask is not clobbered by its bare twin.** One blocked dialog can reach the hub twice (e.g. Claude's `PermissionRequest` with the real ask in `reply`, and its bare `Notification` with only "Claude needs your permission"). While a row is in attention, a second attention event whose `reply` is empty or carries no more than the generic message keeps the richer `reply` already on the row, regardless of arrival order. Any non-attention agent event ends the ask and normal reply rules resume.
 - **Exchange history is bounded.** The reducer keeps recent committed exchanges
   for each session alongside the latest row breadcrumb. Read them with
@@ -221,7 +237,7 @@ until the response contains no exchanges.
 Four user actions on a row's visibility, in ascending strength:
 
 - **seen** (`signalbox session ack`, or any jump): the row is dealt with. It stays on the board, drawn quiet, until the agent speaks again.
-- **hide** (`signalbox session hide`, jumplist `⌃X`): the row disappears until the agent speaks again. Hiding a running session downgrades to seen - running work must stay visible.
+- **hide** (`signalbox session hide`, jumplist `⌃X`): the row disappears until the agent speaks again. Hiding a running session downgrades to seen - running work must stay visible. An agent `SessionEnd` with reason `session_end` is the exception: it confirms the process exited, so the hub hides the row even if its last status was busy.
 - **show** (`signalbox session show`): the reverse of hide - a hidden row reappears in place, with no ack and no reorder. A no-op on a row that is not hidden.
 - **ended** (`signalbox session remove`, jumplist `⌃⌫`): the row is gone now.
 
@@ -233,9 +249,10 @@ still be resumable. `ended` means the session was explicitly ended. Expiry after
 minutes and once at boot, ingesting `ended` reason `expired`; remove ingests
 `ended` reason `removed`.
 
-An agent's own `SessionEnd` does not end a session: it leaves the row as `done`,
-so expiry and an explicit remove take it off the board (see the
-[adapter contract](adapters.md) for `/clear` handling).
+An agent's own `SessionEnd` hides a session without ending it. Its transcript
+and exchange history remain available to search and resume, and any later agent
+event makes the row visible again. `/clear` still ends the old row by default
+because it creates a fresh session id (see the [adapter contract](adapters.md)).
 
 The liveness sweep checks only `busy` rows with a captured `proc` on the hub's
 own host. Within about 30 seconds of that process dying, it ingests `done`
@@ -245,6 +262,10 @@ proc after the sweep. Matching on proc alone would re-fire every 30 seconds
 forever, flooding `events.jsonl` and bumping `ts` so the row could never expire.
 Matching on `busy` makes the sweep self-terminating: once the row is `done` it
 no longer matches.
+
+The macOS jumplist and iOS board show a muted crossed-terminal marker for rows
+whose reason is `exited` or `session_end`. It reports a stopped agent process;
+the row remains available to open, search and resume.
 
 ## Pinning
 
@@ -350,6 +371,7 @@ The default posture is `http://127.0.0.1:8377`, loopback only, with no auth. Wid
 |---|---|
 | `POST /events` | Validate, assign `seq`, append to the log, update state, broadcast. Returns `{"seq": 118}`. Requires `Content-Type: application/json`. |
 | `POST /command` | Fan out a [command](#commands) to every live stream and forget it: no `seq`, no log, no state. Returns `{"ok": true, "delivered": 2}`. |
+| `POST /process-check` | Check captured processes for visible sessions on this hub's host and ingest `done` / `reason: "exited"` for confirmed deaths. Returns `{"checked": true}`. The desktop calls it after opening the jumplist, so the process scan does not delay the panel. |
 | `GET /state` | `{"sessions": [...], "older_horizon_seconds": 86400}` with sessions in display order. The horizon is how long since engagement a row may go before the surfaces draw it as older. |
 | `GET /exchanges?session=K&limit=N&before=S` | `{"session_key": "...", "exchanges": [...], "next_before": 118}` - the newest `N` exchanges for session `K`, **oldest first**. `session` is required and carries the raw `session_key` as an ordinary query value (no path-encoding of keys containing `:`). `limit` defaults to 20 and is clamped to `hub.historyLimit`; `before` pages backwards by returning only exchanges whose `seq` is lower, and `next_before` is the oldest `seq` in the page, so a client pages with it until `exchanges` comes back empty. `400` for a missing `session`; `404` for a session that is not on the board (distinct from a session with no history yet, which is `200` with an empty list). The hub and the [forwarder](#the-forwarder) serve this response contract from their reducer rings rather than from `events.jsonl`. `Cache-Control: no-store`. |
 | `GET /stream?since=N` | Server-sent events: replay everything after seq N, then live. Heartbeat every 15s. Commands are live-only and never appear in the replay. |
@@ -395,6 +417,7 @@ The local listener is always unauthenticated http on `127.0.0.1` (port 8377 by d
 |---|---|
 | `POST /events` | Normalize and validate, remove `transcript`, derived fields and `seq`, append to `${stateDir}/forward-spool.jsonl` under its `.lock`, start an asynchronous drain, and immediately return `202 {"spooled": true}` without waiting for the upstream. `transcript` is removed for every profile because an upstream hub cannot read another machine's local transcript and must not persist its path. This response acknowledges spooling only and carries no `seq`; the upstream assigns one on ingest after the drain delivers the event, and the forwarder receives it later through the downlink. The hook client allows its POST only 200 ms; waiting for a WAN round trip would make the hook spool an event that the forwarder might also have delivered. The drain is the only sender of spooled events, so delivery stays FIFO and there is one spool. |
 | `POST /command` | Validate and synchronously proxy to the upstream. A successful upstream response supplies the same `{"ok": true, "delivered": N}` body; any upstream failure returns `502` with an error body. Commands are never spooled because a stale request has no meaning. |
+| `POST /process-check` | Not supported: a forwarder does not own the processes named by the upstream sessions. |
 | `GET /state` | Return `{"sessions": [...], "older_horizon_seconds": 86400}` with sessions in display order from the in-memory downlink cache and the horizon from the forwarder's own binary. Forwarder clients need the same horizon as hub clients; the uplink has nothing to add. |
 | `GET /exchanges?session=K&limit=N&before=S` | Return the session's exchanges from the in-memory downlink cache, with the same shape, defaults, clamping and `400`/`404` behaviour as the hub's route. The forwarder writes no `events.jsonl`, so this is served from the reducer's ring like every other read; the ring is grown by the shared reducer as downlink frames arrive, which is why it needs no forwarder-specific code. A locally spooled `POST /events` never appears here until the upstream has assigned it a `seq` and the downlink has returned it. |
 | `GET /stream?since=N` | Replay cached `signal` frames after N, then re-broadcast live `signal` and `command` frames from the downlink. The signal backlog is bounded to the newest 2,000 events; commands remain live-only. The stream sends an immediate `: connected` comment so a same-process fetch receives first bytes before the first event, then the normal 15-second heartbeat comments. |

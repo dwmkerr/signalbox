@@ -56,12 +56,7 @@ final class ConnectPhoneController: NSObject, NSWindowDelegate {
 
     func show() {
         if window == nil { buildWindow() }
-        // Accessory apps run in the background; a real window needs the app
-        // frontmost to take key and clicks (orderFrontRegardless because
-        // activate alone can leave it behind the previous app on modern macOS).
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
-        window?.orderFrontRegardless()
+        if let window { WindowPresentation.show(window, activateApp: true) }
         startFlow()
     }
 

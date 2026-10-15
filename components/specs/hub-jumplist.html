@@ -248,7 +248,51 @@
 </div>
 
 <div class="prose">
+  <h2>Session trees</h2>
+  <p>The macOS jumplist nests workers using explicit parent records from the same
+  machine. See the <a href="session-tree.html">interactive tree reference</a>.
+  Trees start collapsed, including newly discovered parents. Explicit expansion
+  choices last for this app run and survive closing/reopening the jumplist.
+  Click the chevron or use left/right with an empty search
+  to collapse, expand, or move to a parent/child. A collapsed row summarizes its
+  descendants' attention, working and unread counts without changing its own status.
+  Tab reaches unread descendants and expands their path. Search retains matching
+  rows and their ancestors, temporarily expanding paths; clearing it restores
+  collapse choices.</p>
+  <p>A tree takes the position of its earliest member in hub order and stays in
+  Visible while any member is current. Dismissed branches remain under Hidden;
+  dismissed ancestors are context for visible children. Missing parents appear
+  as "Parent session unavailable". Context rows have no rename, pin, or jump
+  action, but support <b>Hide Branch</b> and <b>Remove Branch</b>. Their header
+  and preview show those actions instead of promising a jump.
+  Cyclic parent claims are dropped so sessions remain reachable.
+  Claude ownership is labelled "Owned by" in the preview; it does not claim
+  direct delegation. A worker without an origin can use "Jump to parent terminal"
+  when an explicit ancestor has one. That jump acknowledges the destination
+  session only. The child retains its own unread state.</p>
+  <p><kbd>⌃X</kbd> hides the selected session and all its recorded descendants;
+  <kbd>⌃⌫</kbd> or <kbd>⌃⌦</kbd> removes that branch. This works while collapsed,
+  in search, and on a hidden or missing parent's context row. Search does not
+  narrow the action to matching descendants. Synthetic context identities never
+  receive session events. The cursor moves outside the affected branch before
+  updates arrive. A leaf still acts on itself alone; ancestors and siblings are
+  unaffected. Hide keeps the existing busy-session rule: working sessions stay
+  visible and are acknowledged. Unhide on a hidden parent restores its branch.
+  The context menu and footer label branch actions explicitly.</p>
+  <p>Native Codex and Claude workers are supported. Ordinary cross-agent shell
+  launches remain separate without an explicit session identity link. No PID or
+  title guesses, historical backfill, flat/tree toggle, or wrapper folding are
+  included. The menu bar list and iOS remain flat.</p>
   <h2>What this is</h2>
+  <p>For background captures, launch the app with <code>--show-jumplist
+  --config-parameter ui.foreground=false</code>. It renders behind existing
+  windows at normal window level without taking key focus, floating above work,
+  or accepting mouse input. The override applies only to that process; normal
+  launches keep the interactive presentation. See the
+  <a href="cli.md#macos-app-runtime-overrides">runtime override contract</a>.</p>
+  <p>Jump diagnostics in the macOS unified log distinguish Return dispatch,
+  rows without a terminal target, and CLI failures. Failed CLI actions retain
+  their error output and exit status after the jumplist closes.</p>
   <p>The jumplist shows every agent session in one place and jumps you to the machine session you pick:
   the right terminal window and tmux pane, or the captured editor window. URL-only rows such as CI
   runs stay on the board as
@@ -349,7 +393,11 @@
   <p>Rows keep the order you work in (most recently engaged first, like the app switcher), with
   pinned sessions first; status does not reorder them. Older and Hidden are the two trailing
   sections, in that order, below every visible row. The panel opens with the topmost unread row
-  selected, and selection stays topmost-unread within the filtered rows.</p>
+  selected, and selection stays topmost-unread within the filtered rows. A live search starts the
+  selected conversation preview at its beginning so matching context is not hidden below the fold.</p>
+  <p>A row whose captured agent process has exited carries a muted terminal icon crossed by a slash,
+  beside its age. It remains visible and its conversation remains available. A clean agent
+  <code>SessionEnd</code> instead moves the row to Hidden.</p>
 
   <h2>Older sessions</h2>
   <p>A collapsed <b>Older (N)</b> divider sits below every visible row and above the Hidden
@@ -436,7 +484,7 @@
     <tr><td><kbd>⌃P</kbd></td><td>Pin / unpin the selected session (pinned sessions sort first)</td></tr>
     <tr><td><kbd>⌃R</kbd></td><td>Rename session (your own name for it; empty clears)</td></tr>
     <tr><td><kbd>⌃X</kbd></td><td>Hide until the session speaks again; on a row in the expanded Hidden section, unhide it</td></tr>
-    <tr><td><kbd>⌃⌫</kbd></td><td>Remove now</td></tr>
+    <tr><td><kbd>⌃⌫</kbd></td><td>Remove now; the row disappears immediately and selection moves to the next row in place (or the previous row when removing the last one)</td></tr>
     <tr><td><kbd>⌘,</kbd></td><td>Open Settings (same as the footer cog)</td></tr>
     <tr><td><b>Hub status light</b></td><td>Open the hub facts popover; Open Settings targets Hub and Open log targets Logs</td></tr>
     <tr><td><kbd>⌘+</kbd> <kbd>⌘−</kbd> <kbd>⌘0</kbd></td><td>Zoom the jumplist in / out / reset (0.8×-1.6×, persists)</td></tr>
@@ -819,7 +867,7 @@ function hiddenHTML(){
 }
 function toggleHidden(){ hiddenOpen = !hiddenOpen; renderList(); }
 const GLYPHS = ["·","✢","✳","∗","✻","✽"]; let gi = 0;
-let lastPreviewKey = null, lastPreviewHeight = 0;
+let lastPreviewKey = null, lastPreviewHeight = 0, lastPreviewQuery = "";
 let unsupportedJumpKey = null;
 setInterval(()=>{ gi=(gi+1)%GLYPHS.length; const el=document.querySelector(".spinch"); if(el) el.textContent=GLYPHS[gi];
   SESSIONS.forEach(s=>s.ageSeconds++);
@@ -830,7 +878,7 @@ function renderPreview(){
   const term = document.getElementById("term");
   const actline = document.getElementById("actline");
   const s = SESSIONS[sel];
-  if (!s) { term.innerHTML = ""; actline.innerHTML = ""; unsupportedJumpKey = null; lastPreviewKey = null; lastPreviewHeight = 0; return; }
+  if (!s) { term.innerHTML = ""; actline.innerHTML = ""; unsupportedJumpKey = null; lastPreviewKey = null; lastPreviewHeight = 0; lastPreviewQuery = query; return; }
   if (unsupportedJumpKey !== s.key || s.jumpable !== false || s.infoOnly) unsupportedJumpKey = null;
   actline.style.display = s.infoOnly ? "none" : "flex";
   const exchanges = (s.exchanges && s.exchanges.length ? s.exchanges : [
@@ -864,9 +912,14 @@ function renderPreview(){
   markPreviewMatches(term);
   actline.innerHTML = act;
   const contentHeight = term.scrollHeight;
-  if (lastPreviewKey !== s.key || contentHeight > previousHeight) term.scrollTop = contentHeight;
+  const sessionChanged = lastPreviewKey !== s.key;
+  const queryChanged = lastPreviewQuery !== query;
+  if (sessionChanged || queryChanged || (contentHeight > previousHeight && !query)) {
+    term.scrollTop = query ? 0 : contentHeight;
+  }
   lastPreviewKey = s.key;
   lastPreviewHeight = contentHeight;
+  lastPreviewQuery = query;
 }
 function select(i){ sel = i; renderList(); renderPreview(); }
 function markPreviewMatches(root){
@@ -1024,7 +1077,7 @@ function ctxAction(i, a){
   if (a==="pin") togglePin(i);
   else if (a==="rename") beginLabel();
   else if (a==="hide") { SESSIONS[i].state="read"; renderList(); renderPreview(); toast("hidden until it speaks (mock: shown as read)"); }
-  else if (a==="remove") { SESSIONS.splice(i,1); sel=defaultSel(); renderList(); renderPreview(); toast("removed"); }
+  else if (a==="remove") { SESSIONS.splice(i,1); sel=Math.min(i,SESSIONS.length-1); renderList(); renderPreview(); toast("removed"); }
 }
 document.addEventListener("click", hideCtx);
 window.addEventListener("blur", hideCtx);
@@ -1100,7 +1153,7 @@ document.addEventListener("keydown", e => {
   else if (ctrl && (e.key==="p"||e.key==="P")) { e.preventDefault(); if (sel>=0) togglePin(sel); }
   else if (ctrl && (e.key==="r"||e.key==="R")) { e.preventDefault(); beginLabel(); }
   else if (ctrl && (e.key==="x"||e.key==="X")) { e.preventDefault(); if (sel>=0) { SESSIONS[sel].state="read"; renderList(); renderPreview(); toast("hidden until it speaks (mock: shown as read)"); } }
-  else if (ctrl && e.key==="Backspace") { e.preventDefault(); if (sel>=0) { SESSIONS.splice(sel,1); sel=defaultSel(); renderList(); renderPreview(); toast("removed"); } }
+  else if (ctrl && e.key==="Backspace") { e.preventDefault(); if (sel>=0) { SESSIONS.splice(sel,1); sel=Math.min(sel,SESSIONS.length-1); renderList(); renderPreview(); toast("removed"); } }
   else if (e.key==="Escape") {
     if (query) { searchEl.value=""; query=""; sel=defaultSel(); updateMode(); renderList(); renderPreview(); toast("search cleared"); }
     else toast("would dismiss the jumplist");

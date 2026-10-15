@@ -71,7 +71,7 @@ describe("mapCodexHook", () => {
     ],
     [{ hook_event_name: "Stop", last_assistant_message: "done" }, { eventType: "done", reason: "stop" }],
     [{ hook_event_name: "PermissionRequest" }, { eventType: "attention", reason: "permission_request" }],
-    [{ hook_event_name: "SessionEnd" }, { eventType: "done", reason: "session_end" }],
+    [{ hook_event_name: "SessionEnd" }, { eventType: "hide", reason: "session_end" }],
     [{ hook_event_name: "SessionEnd", reason: "clear" }, { eventType: "ended", reason: "session_end" }],
     // Anything else (a PreToolUse, an empty payload) is ignored - the caller
     // still exits 0.
@@ -141,16 +141,16 @@ describe("mapCodexHook clearEnds", () => {
     expect(got?.eventType).toBe("done");
     expect(got?.reason).toBe("clear");
   });
-  test("clearEnds=false maps a non-clear SessionEnd to done", () => {
+  test("clearEnds=false maps a non-clear SessionEnd to hide", () => {
     const got = mapCodexHook({ hook_event_name: "SessionEnd", reason: "exit" }, false);
-    expect(got?.eventType).toBe("done");
+    expect(got?.eventType).toBe("hide");
     expect(got?.reason).toBe("session_end");
   });
-  test("SessionEnd preserves the conversation while clearEnds=true ends a cleared session", () => {
-    // Quitting preserves the phone's chat history; Claude's /clear opens a fresh
-    // session id, so Codex mirrors its guard to avoid a duplicate old row.
+  test("SessionEnd hides the conversation while clearEnds=true ends a cleared session", () => {
+    // Quitting hides the row but preserves phone chat history; /clear opens a
+    // fresh session id, so Codex mirrors Claude's guard to avoid a duplicate.
     expect(mapCodexHook({ hook_event_name: "SessionEnd" })).toEqual({
-      eventType: "done", reason: "session_end", detail: "",
+      eventType: "hide", reason: "session_end", detail: "",
     });
     expect(mapCodexHook({ hook_event_name: "SessionEnd", reason: "clear" }, true)).toEqual({
       eventType: "ended", reason: "session_end", detail: "",

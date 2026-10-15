@@ -29,7 +29,7 @@ function readSettings(home: string): any {
 
 const hookBlock = (cmd: string) => ({
   hooks: Object.fromEntries(
-    ["Notification", "Stop", "UserPromptSubmit", "SessionStart", "SessionEnd"].map((e) => [
+    ["Notification", "Stop", "UserPromptSubmit", "SessionStart", "SessionEnd", "SubagentStart", "SubagentStop"].map((e) => [
       e,
       [{ hooks: [{ type: "command", command: cmd }] }],
     ])
