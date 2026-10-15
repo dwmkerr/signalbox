@@ -22,11 +22,11 @@ An adapter can only surface what its agent's hooks emit, so the board shows diff
 
 | Agent | Live status | Prompt + reply | Permission ask | Question ask | Errors | Jump-back |
 |---|:-:|:-:|:-:|:-:|:-:|:-:|
-| Claude Code | yes | yes | command shown | yes, with options | yes | tmux / editor |
+| Claude Code | yes | yes | command shown | yes, with options | yes | tmux / editor / iTerm / Terminal |
 | Codex | yes | yes | command shown | - | - `*` | tmux / Cursor |
 | Cursor | yes | yes | yes (shell / MCP) | - | yes | Cursor window |
-| OpenCode | yes | yes | yes | - | yes | tmux |
-| pi | yes | yes | - | - | - | tmux |
+| OpenCode | yes | yes | yes | - | yes | tmux / iTerm / Terminal |
+| pi | yes | yes | - | - | - | tmux / iTerm / Terminal |
 | GitHub Actions | as fired | as fired | - | - | yes (fire) | opens on GitHub |
 
 - **Question ask** is Claude Code's `AskUserQuestion` (the agent asks you to pick an option); no other agent has an equivalent tool, so the column is Claude-only by nature.
@@ -222,6 +222,13 @@ No adapter and no config. Agents you run in VS Code's *integrated terminal* (cla
 - Icon: a detected editor host prefixes the agent's *display* name so the board shows the editor's mark badged with the agent glyph - `vscode/claude` (VS Code, and forks) or `cursor/claude` (Cursor). Display only: `session_key` keeps the agent family (`claude:<id>`), so a session stays on one row across a plain terminal and the editor. See the Claude adapter's host-prefix note above.
 - A tmux pane inside the editor terminal still wins as the *jump* target (the pane is more precise), but the editor host still prefixes the display name.
 - VS Code's *own* agent (Copilot Chat / agent mode) has no external hook system, so there is no event adapter for it - terminal jump-back is the whole VS Code surface for now.
+
+## iTerm2 and Terminal.app - jump-back
+
+No adapter and no config. On macOS, an agent in a plain iTerm2 or Terminal.app tab (outside tmux, launched from that app per `__CFBundleIdentifier`) gets a `tty` origin: the agent's controlling tty. Both apps expose each session's tty to AppleScript, so jump selects that exact tab or iTerm split pane, probing only terminals already running.
+
+- Other terminals get no origin: they cannot be searched by tty. Codex gets none either: its hooks run under a shared daemon, not the session's process.
+- If no tab holds the tty any more, the jump fails rather than raising an unrelated tab. macOS reuses a closed tab's tty, so an old row can raise the newer tab that took it.
 
 ## tmux - in-terminal signals and jump-back
 
