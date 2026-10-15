@@ -56,6 +56,34 @@ Installing: `signalbox init` converges everything ([cli.md](cli.md); `install` a
 
 ## Where adapters send events
 
+### Session relationships
+
+The macOS jumplist groups new native workers using explicit identities. No
+`--json` launch flag is required and existing transcripts are not backfilled.
+
+- **Codex:** the local hub or forwarder watches appended native JSONL records.
+  The first `session_meta.payload.id` must match the rollout filename; inherited
+  `session_id` and later copied metadata never replace it. Only
+  `source.subagent.thread_spawn.parent_thread_id` establishes a `spawned` edge.
+  Fork provenance alone does not. `subagent_history_start_ordinal` excludes
+  copied ancestor turns; a missing boundary fails closed. The observer starts
+  at existing byte offsets and observes new `task_started`, `task_complete`
+  and `turn_aborted` records, mapping them to busy, done and done/interrupted.
+  Deterministic event IDs make retries idempotent. Native lifecycle hooks for
+  identified children are suppressed; permission hooks remain immediate.
+- **Claude Code:** `SubagentStart` and `SubagentStop` create/update
+  `claude:<session_id>:agent:<agent_id>`, with busy and done respectively.
+  The owning `session_id` establishes an `owned` edge. A supplied
+  `parent_agent_id` establishes a direct `spawned` worker edge instead.
+  The stop hook's `agent_transcript_path` supplies the worker's final reply.
+  In-process workers do not inherit their owner's process lifetime or origin.
+
+Missing parents remain explicit unavailable context. Ordinary Claude-to-Codex
+shell launches remain separate roots: process ancestry alone cannot identify
+the originating in-process worker or bind the launched process to a session.
+No title, prompt, output-format, timing, or PID matching fills that gap.
+OpenCode, pi and Cursor relationships are not added by this observer.
+
 Every adapter posts to `SIGNALBOX_URL`, which defaults to the trusted loopback endpoint `http://127.0.0.1:8377` and needs no token. That endpoint may be the hub that owns the state or a forwarder relaying to a remote hub; the adapter cannot tell and does not need to.
 
 Do not give an adapter a bearer token. Copying the upstream credential into every hook environment is the leak the forwarder exists to close: the forwarder keeps it in one place and presents the same unauthenticated loopback contract to every local adapter.
@@ -77,6 +105,8 @@ signalbox init --agent claude
     "Stop": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }]

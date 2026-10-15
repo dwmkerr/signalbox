@@ -248,7 +248,40 @@
 </div>
 
 <div class="prose">
+  <h2>Session trees</h2>
+  <p>The macOS jumplist nests workers using explicit parent records from the same
+  machine. See the <a href="session-tree.html">interactive tree reference</a>.
+  Trees start collapsed, including newly discovered parents. Explicit expansion
+  choices last for this app run and survive closing/reopening the jumplist.
+  Click the chevron or use left/right with an empty search
+  to collapse, expand, or move to a parent/child. A collapsed row summarizes its
+  descendants' attention, working and unread counts without changing its own status.
+  Tab reaches unread descendants and expands their path. Search retains matching
+  rows and their ancestors, temporarily expanding paths; clearing it restores
+  collapse choices.</p>
+  <p>A tree takes the position of its earliest member in hub order and stays in
+  Visible while any member is current. Dismissed branches remain under Hidden;
+  dismissed ancestors are context for visible children. Missing parents appear
+  as "Parent session unavailable". Context rows have no rename, hide, remove
+  or jump action. Cyclic parent claims are dropped so sessions remain reachable.
+  Claude ownership is labelled "Owned by" in the preview; it does not claim
+  direct delegation. A worker without an origin can use "Jump to parent terminal"
+  when an explicit ancestor has one. That jump acknowledges the destination
+  session only. The child retains its own unread state.</p>
+  <p>Native Codex and Claude workers are supported. Ordinary cross-agent shell
+  launches remain separate without an explicit session identity link. No PID or
+  title guesses, historical backfill, flat/tree toggle, or wrapper folding are
+  included. The menu bar list and iOS remain flat.</p>
   <h2>What this is</h2>
+  <p>For background captures, launch the app with <code>--show-jumplist
+  --config-parameter ui.foreground=false</code>. It renders behind existing
+  windows at normal window level without taking key focus, floating above work,
+  or accepting mouse input. The override applies only to that process; normal
+  launches keep the interactive presentation. See the
+  <a href="cli.md#macos-app-runtime-overrides">runtime override contract</a>.</p>
+  <p>Jump diagnostics in the macOS unified log distinguish Return dispatch,
+  rows without a terminal target, and CLI failures. Failed CLI actions retain
+  their error output and exit status after the jumplist closes.</p>
   <p>The jumplist shows every agent session in one place and jumps you to the machine session you pick:
   the right terminal window and tmux pane, or the captured editor window. URL-only rows such as CI
   runs stay on the board as

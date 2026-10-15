@@ -10,6 +10,7 @@ import type { Event, Origin, Proc } from "./event";
 import { Client, fetchState, hubURL, stateDir, logTo, DefaultURL } from "./client";
 import { Hub, listen, validateBindConfig, isLoopbackAddress } from "./hub";
 import { Forwarder } from "./forwarder";
+import { CodexTreeWatcher, readCodexParent } from "./sessiontree";
 import { versionString } from "./build";
 import { hubLog } from "./log";
 import { ensureCert, type HubTLS } from "./tls";
@@ -215,6 +216,8 @@ async function buildEvent(opts: {
   cropped?: boolean;
   replyCap?: number;
   sessionKey?: string;
+  parentSessionKey?: string;
+  parentRelation?: "spawned" | "owned";
   originURL?: string;
   origin?: Origin | null;
   cwd?: string;
@@ -227,7 +230,7 @@ async function buildEvent(opts: {
   // otherwise a URL origin, otherwise the calling tmux pane, otherwise an
   // editor's integrated terminal (VS Code / Cursor). tmux beats the editor
   // check: a pane is a more precise jump target than an app window.
-  if (opts.origin) origin = opts.origin;
+  if (opts.origin !== undefined) origin = opts.origin;
   else if (opts.originURL) origin = { kind: "url", url: opts.originURL };
   else origin = tmux.currentOrigin(cwd, ev.agentFamily(opts.agent)) ?? editorTerminalOrigin(process.env);
   let sessionKey = opts.sessionKey ?? "";
@@ -262,6 +265,10 @@ async function buildEvent(opts: {
   if (prompt.cropped || reply.cropped || opts.cropped) e.cropped = true;
   if (origin) e.origin = origin;
   if (opts.proc) e.proc = opts.proc;
+  if (opts.parentSessionKey) {
+    e.parent_session_key = opts.parentSessionKey;
+    e.parent_relation = opts.parentRelation;
+  }
   if (process.env.SIGNALBOX_PROFILE === "redacted") await ev.redact(e);
   return e;
 }
@@ -464,7 +471,11 @@ async function runClaudeHook(): Promise<void> {
   // buildEvent falls back to a pane/cwd-derived key. That fallback can split one
   // session across several rows, so log the degraded case rather than let it
   // happen silently.
-  const key = payload.session_id ? `claude:${payload.session_id}` : "";
+  const workerId = typeof payload.agent_id === "string" && /^[\w-]{1,160}$/.test(payload.agent_id) ? payload.agent_id : undefined;
+  if (payload.hook_event_name?.startsWith("Subagent") && (!workerId || !payload.session_id)) return;
+  const ownerKey = payload.session_id ? `claude:${payload.session_id}` : "";
+  const key = workerId && ownerKey ? `${ownerKey}:agent:${workerId}` : ownerKey;
+  const parentWorker = typeof payload.parent_agent_id === "string" && /^[\w-]{1,160}$/.test(payload.parent_agent_id) ? payload.parent_agent_id : undefined;
   if (!payload.session_id) logTo(dir, "claude-hook: no session_id; falling back to a pane/cwd key (session rows may split)");
   // A Claude session running inside an editor's integrated terminal is shown
   // under that editor's icon: the DISPLAY agent gains a host prefix
@@ -480,6 +491,7 @@ async function runClaudeHook(): Promise<void> {
   let title =
     settings.claudeRenameTitle && payload.transcript_path ? sessionName(payload.transcript_path) : "";
   if (!title && payload.cwd) title = basename(payload.cwd);
+  if (workerId) title = payload.agent_type || "Claude worker";
   // Hooks are descendants of the agent, but usually via a transient shell
   // (sh -c, or the agent-notify.sh dispatcher) - walk past shells to the
   // agent itself so the liveness sweep tracks the right process.
@@ -493,9 +505,12 @@ async function runClaudeHook(): Promise<void> {
     reply: mapped.reply ?? claudeReply(payload),
     replyCap: settings.hub.replyCap,
     sessionKey: key,
+    parentSessionKey: workerId ? (parentWorker ? `${ownerKey}:agent:${parentWorker}` : ownerKey) : undefined,
+    parentRelation: workerId ? (parentWorker ? "spawned" : "owned") : undefined,
+    origin: workerId ? null : undefined,
     cwd: payload.cwd,
-    transcript: payload.transcript_path,
-    proc,
+    transcript: workerId ? payload.agent_transcript_path : payload.transcript_path,
+    proc: workerId ? undefined : proc,
   });
   // Diagnostic (off by default): SIGNALBOX_RAW attaches the untouched hook
   // payload so it rides into the hub's own event log - inspect it from the
@@ -570,6 +585,11 @@ async function runCodexHook(): Promise<void> {
   // Without a session_id we cannot form the stable codex:<id> key, so buildEvent
   // falls back to a pane/cwd key that can split one session across rows - log it.
   const key = payload.session_id ? `codex:${payload.session_id}` : "";
+  const transcript = payload.session_id ? resolveCodexTranscript(payload.session_id) : "";
+  const parent = transcript && payload.session_id ? readCodexParent(transcript, payload.session_id) : undefined;
+  // Native worker lifecycle comes from its own post-fork records, avoiding
+  // duplicate turns when the runtime also emits hooks. Approval remains immediate.
+  if (parent && payload.hook_event_name !== "PermissionRequest") return;
   if (!payload.session_id) logTo(dir, "codex-hook: no session_id; falling back to a pane/cwd key (session rows may split)");
   // Codex run inside an editor terminal shows under the editor mark, badged with
   // Codex's glyph (display only; the key stays codex:<id>).
@@ -590,14 +610,30 @@ async function runCodexHook(): Promise<void> {
     replyCap: settings.hub.replyCap,
     sessionKey: key,
     cwd: payload.cwd,
-    transcript: payload.session_id ? resolveCodexTranscript(payload.session_id) : "",
-    proc,
+    transcript,
+    parentSessionKey: parent?.parentKey,
+    parentRelation: parent ? "spawned" : undefined,
+    origin: parent ? null : undefined,
+    proc: parent ? undefined : proc,
   });
   if (process.env.SIGNALBOX_RAW) e.raw = text;
   await fireEvent(e);
 }
 
 // ---- hub -----------------------------------------------------------------------
+
+function startSessionTrees(port: number): void {
+  const client = new Client(`http://127.0.0.1:${port}`, stateDir());
+  const watcher = new CodexTreeWatcher(async event => {
+    if (process.env.SIGNALBOX_PROFILE === "redacted") await ev.redact(event);
+    await client.deliver(event);
+  }, undefined, stateDir());
+  watcher.baseline();
+  const timer = setInterval(() => {
+    void watcher.sweep().catch(err => logTo(stateDir(), `session-tree: ${err}`));
+  }, 1000);
+  process.on("SIGTERM", () => clearInterval(timer));
+}
 
 function runHub(args: string[]): void {
   const { flags } = parseFlags(args, ["remote"]);
@@ -649,6 +685,7 @@ function runHub(args: string[]): void {
     listen(fwd, port, "127.0.0.1");
     fwd.start();
     fwd.startSearch();
+    startSessionTrees(port);
     // PID 1 has no default SIGTERM disposition, so stop the uplink and spool
     // work before the platform stops the container.
     process.on("SIGTERM", () => { fwd.close(); process.exit(0); });
@@ -759,6 +796,7 @@ function runHub(args: string[]): void {
   // Loopback http always: the menu bar app, CLI, and adapters speak to this and
   // are entirely unchanged by the LAN TLS work.
   listen(hub, port, "127.0.0.1");
+  startSessionTrees(port);
   hubLog(
     `signalbox hub ${displayVersion} listening on http://127.0.0.1:${port} (state: ${stateDir()}, expire: ${expireLabel(expire)})`
   );

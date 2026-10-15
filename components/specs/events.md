@@ -23,7 +23,7 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   // Schema version. Always 1 today.
   "v": 1,
 
-  // Unique id for this event (uuid), and when it was fired (UTC).
+  // Unique id for this event (UUID or deterministic digest), and when it was fired (UTC).
   "id": "0197-...",
   "ts": "2026-07-07T18:04:11Z",
 
@@ -66,6 +66,12 @@ Every field explained in place. Optional fields are omitted from the JSON when e
   // agent "vscode/claude" or "cursor/claude" for its icon, but still keys on
   // "claude:<id>" so it never splits between a plain terminal and the editor.
   "session_key": "claude:9f2a...",
+
+  // Optional explicit relationship. Both endpoints belong to this machine.
+  // "spawned" identifies the direct spawning thread; "owned" identifies
+  // the owning conversation without claiming a direct delegation edge.
+  "parent_session_key": "claude:7b1c...",
+  "parent_relation": "owned",
 
   // Where the work is happening.
   "cwd": "/Users/dave/repos/work-project",
@@ -151,6 +157,15 @@ Every field explained in place. Optional fields are omitted from the JSON when e
 ```
 
 ## The session
+
+Parent relationships come only from explicit agent records. The first recorded
+parent and relation carry across subsequent events, including resumes; title,
+prompt, cwd, timing, PID and PPID never establish an edge. A parent key must
+be a non-self session key and requires `parent_relation` (`spawned` or `owned`).
+Redaction hashes both endpoints with the same transformation. Forwarders retain
+the relationship while stripping local transcript paths. Surfaces join within
+the same machine identity, discard cyclic claims, and show unavailable parents
+as context rather than inventing a live session. Missing edges leave roots.
 
 What `GET /state` returns: an event plus the five fields the hub derives.
 `seq` is ingest order; `acked`, `hidden`, `pinned`, and `engaged_ts` come from

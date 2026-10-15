@@ -143,12 +143,21 @@ export function discoverTranscripts(): TranscriptFile[] {
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-interface CompleteWindow {
+/** Locate native Codex records without walking unrelated agent stores. */
+export function discoverCodexTranscripts(): TranscriptFile[] {
+  return discoverCodex(transcriptRoot(codexRootEnv, join(homedir(), ".codex", "sessions")));
+}
+
+/** A bounded read ending at a complete JSONL record boundary. */
+export interface CompleteWindow {
+  /** Complete records in the read window. */
   lines: string[];
+  /** Byte offset immediately after the last complete record. */
   endOffset: number;
 }
 
-function readCompleteWindow(path: string, fromOffset: number): CompleteWindow {
+/** Read complete records without allowing a partial append to advance the cursor. */
+export function readCompleteWindow(path: string, fromOffset: number): CompleteWindow {
   let fd: number | undefined;
   try {
     fd = openSync(path, "r");
@@ -274,8 +283,10 @@ function parseCodex(path: string, window: CompleteWindow): ParsedTurns {
     const entry = json(line);
     if (!entry) continue;
     if (entry.type === "session_meta") {
+      // Forks embed their ancestor's session_meta after their own header.
+      if (entry.payload?.id && entry.payload.id !== codexSessionUuid(path)) continue;
       result.cwd = nonEmptyString(entry.payload?.cwd) ?? result.cwd;
-      result.sessionUuid = nonEmptyString(entry.payload?.session_id) ?? result.sessionUuid;
+      result.sessionUuid = nonEmptyString(entry.payload?.id) ?? result.sessionUuid;
       continue;
     }
     if (entry.type !== "event_msg") continue;

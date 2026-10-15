@@ -41,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var pinned: Bool
         // Tracked locally so a `done` after a long `busy` can earn a notification.
         var busySince: Date?
+        /// Creation relationship survives subsequent lifecycle events without metadata.
+        var parentSessionKey: String? = nil
     }
 
     private let hubURL: URL = {
@@ -106,12 +108,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // two menu bar icons that fight over hub ownership. The old app takes
         // its hub child down on terminate; our supervisor respawns within its
         // tick, and the board state survives in the event log.
-        let others = NSRunningApplication.runningApplications(
-            withBundleIdentifier: Bundle.main.bundleIdentifier ?? ""
-        ).filter { $0 != NSRunningApplication.current }
-        others.forEach { $0.terminate() }
-
-        applyLaunchFilter()
+        if RuntimeConfiguration.current.foreground {
+            let others = NSRunningApplication.runningApplications(
+                withBundleIdentifier: Bundle.main.bundleIdentifier ?? ""
+            ).filter { $0 != NSRunningApplication.current }
+            others.forEach { $0.terminate() }
+            applyLaunchFilter()
+        }
 
         // Start the hub before the stream connects - the stream loop's
         // backoff absorbs the moment it takes to come up.
@@ -119,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hubSupervisor?.start()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.isVisible = RuntimeConfiguration.current.foreground
         if let button = statusItem.button {
             button.image = statusItemImage(style: .current, dot: nil)
             button.imagePosition = .imageOnly
@@ -138,8 +142,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hubURL: hubURL,
             openSettingsHubTab: { [weak self] in self?.settings?.show(tab: .hub) }
         )
-        setupNotifications()
-        migrateJumplistShortcut()
+        if RuntimeConfiguration.current.foreground {
+            setupNotifications()
+            migrateJumplistShortcut()
+        }
         setupPalette()
 
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -150,6 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         restartStream()
+        if RuntimeConfiguration.current.showJumplist { palette?.show() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -380,7 +387,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 tags: event.tags,
                 // /state carries pinned; hub-authoritative, no local carry.
                 pinned: event.pinned ?? false,
-                busySince: busyStart(for: event, date: date, prev: prev)
+                busySince: busyStart(for: event, date: date, prev: prev),
+                parentSessionKey: event.parentSessionKey ?? prev?.parentSessionKey
             )
             if fresh[event.sessionKey] == nil { freshOrder.append(event.sessionKey) }
             fresh[event.sessionKey] = session
@@ -514,7 +522,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Pins survive agent activity: raw events omit pinned, so keep
                 // the known state rather than clearing it.
                 pinned: event.pinned ?? prev?.pinned ?? false,
-                busySince: busyStart(for: event, date: date, prev: prev)
+                busySince: busyStart(for: event, date: date, prev: prev),
+                parentSessionKey: prev?.parentSessionKey ?? event.parentSessionKey
             )
             sessions[key] = session
             // Status never reorders (contract): only engagement, or arrival of
@@ -673,7 +682,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         palette?.searchStatusProvider = { [weak self] in await self?.fetchSearchStatus() }
         settings?.rebuildIndexAction = { [weak self] in await self?.rebuildSearchIndex() ?? false }
-        KeyboardShortcuts.onKeyDown(for: .openJumplist) { [weak self] in self?.palette?.toggle() }
+        if RuntimeConfiguration.current.foreground {
+            KeyboardShortcuts.onKeyDown(for: .openJumplist) { [weak self] in self?.palette?.toggle() }
+        }
     }
 
     // Only hidden rows drop out (contract: hide suppresses until the next
@@ -786,7 +797,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 pinned: session.pinned,
                 processStopped: session.processStopped,
                 isHidden: session.hidden,
-                isOlder: isOlder(session, now: now)
+                isOlder: isOlder(session, now: now),
+                parentSessionKey: session.parentSessionKey,
+                parentRelation: event.parentRelation,
+                machineScope: event.machine ?? event.host ?? ""
             )
         }
     }
@@ -1158,6 +1172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ours: a phone cannot jump, but it can ask the machine that owns the
     /// session to, and that machine is the only one that may answer.
     private func perform(_ command: HubCommand) {
+        guard RuntimeConfiguration.current.foreground else { return }
         guard command.command == "jump" else { return }
         // Two independent checks, both required. The caller's target_host is
         // what it read off the row it tapped; the session's own host is what
@@ -1236,7 +1251,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = arguments
         process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        // A failed terminal switch must leave evidence even when the palette
+        // has already closed. Drain stderr while running to avoid pipe stalls.
+        let errors = Pipe()
+        process.standardError = errors
+        let action = arguments.first ?? "command"
+        errors.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil; return }
+            if let message = String(data: data, encoding: .utf8) {
+                NSLog("Signalbox: %@: %@", action, message.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+        process.terminationHandler = { child in
+            if child.terminationStatus != 0 {
+                NSLog("Signalbox: %@ exited with status %d", action, child.terminationStatus)
+            }
+        }
         do {
             try process.run()
             runningProcesses.append(process)

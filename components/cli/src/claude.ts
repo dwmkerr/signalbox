@@ -9,6 +9,14 @@ import { cropTitle, Busy, Done, Attention, Error as ErrorType, Ended, Hide } fro
 export interface ClaudeHook {
   hook_event_name?: string;
   session_id?: string;
+  /** Native worker identity on subagent lifecycle hooks. */
+  agent_id?: string;
+  /** Explicit immediate worker parent, when supplied by the runtime. */
+  parent_agent_id?: string;
+  /** Agent type supplied by Claude, used only as a display name. */
+  agent_type?: string;
+  /** The worker's transcript, distinct from its owning conversation. */
+  agent_transcript_path?: string;
   cwd?: string;
   notification_type?: string;
   // Current Claude Code sends a free-text `message` on Notification, not a
@@ -71,6 +79,10 @@ export interface Mapped {
 // opens a fresh session id; clearEnds=false keeps the old exchange visible.
 export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
   switch (h.hook_event_name) {
+    case "SubagentStart":
+      return h.agent_id ? { eventType: Busy, reason: "session_start", detail: "" } : null;
+    case "SubagentStop":
+      return h.agent_id ? { eventType: Done, reason: "stop", detail: "", reply: h.agent_transcript_path ? stripHarness(lastAssistantText(h.agent_transcript_path)) : "" } : null;
     case "SessionStart":
       return { eventType: Busy, reason: "session_start", detail: "" };
     case "UserPromptSubmit": {

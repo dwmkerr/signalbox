@@ -51,6 +51,8 @@ const claudeHooksBlock = `{
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
+    "SubagentStart": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
+    "SubagentStop": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }],
     "PreToolUse": [{ "matcher": "AskUserQuestion", "hooks": [{ "type": "command", "command": "signalbox hook claude" }] }]
   }
@@ -617,7 +619,7 @@ function mergeJSONFile(path: string, mutate: (obj: any) => void): string | null 
 // PreToolUse - are ADDITIVE: they are only merged when the classic setup is
 // signalbox's own, never over a wrapper we cannot inspect (adding a direct
 // hook then could double-fire whatever the wrapper already does).
-const claudeHookEvents = ["Notification", "Stop", "UserPromptSubmit", "SessionStart", "SessionEnd"];
+const claudeHookEvents = ["Notification", "Stop", "UserPromptSubmit", "SessionStart", "SessionEnd", "SubagentStart", "SubagentStop"];
 
 // signalboxHookOnEvent reports whether a plain (matcher-less) event routes to
 // signalbox. Used for the additive PermissionRequest hook.

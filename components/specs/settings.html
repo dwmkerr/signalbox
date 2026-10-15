@@ -397,6 +397,10 @@ click its light for the status popover.</div>
   Logs tab). Clicking elsewhere closes it. There are no menu bar menu items for any of this.</p>
 
   <h2>Where settings are stored</h2>
+  <p><code>--config-parameter ui.foreground=false</code> is a process-local app
+  override for background captures. It is never stored here. The jumplist,
+  Settings and Connect Phone render behind existing windows without activation
+  or key focus. Normal launches retain interactive presentation.</p>
   <table>
     <tr><th>Store</th><th>What</th><th>Why</th></tr>
     <tr><td><code>UserDefaults</code></td><td>menu bar icon (<code>menuBarIcon</code>), jumplist shortcut (<code>KeyboardShortcuts_openJumplist</code>, the live value written by the recorder: a JSON-encoded shortcut or boolean <code>false</code> when deliberately cleared; legacy <code>hotkey</code>, migration only: the old <code>ctrl+alt+j</code> config string, read once at first launch to seed the key above, then ignored and left in place; <code>defaults write</code> no longer changes anything), board tag filter (<code>tagFilter</code>), jumplist zoom (<code>uiScale</code>), login-item one-shot (<code>didRegisterLoginItem</code>)</td><td>only the app needs these</td></tr>

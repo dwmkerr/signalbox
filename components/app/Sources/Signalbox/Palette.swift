@@ -58,6 +58,30 @@ struct PaletteRow {
     var hiddenCount = 0
     /// The matching older count, so the divider reflects the current search.
     var olderCount = 0
+    /// Explicit recorded relationship; no display-text or process inference.
+    var parentSessionKey: String? = nil
+    /// Ownership does not assert which in-process worker delegated the task.
+    var parentRelation: String? = nil
+    /// Parent links are valid only within this machine identity.
+    var machineScope = ""
+    /// Indentation assigned by the forest projection.
+    var treeDepth = 0
+    /// Whether the projected row has children.
+    var hasChildren = false
+    /// Current disclosure state, with search temporarily revealing ancestors.
+    var treeExpanded = false
+    /// Descendants requiring attention, including collapsed children.
+    var childAttention = 0
+    /// Descendants actively working.
+    var childWorking = 0
+    /// Descendants with unread output.
+    var childUnread = 0
+    /// A recorded parent whose session is unavailable; never a jump target.
+    var isTreeContext = false
+    /// Explicit parent terminal fallback, separate from the child's identity.
+    var jumpSessionKey: String? = nil
+    /// An explicit label for a jump that targets an ancestor terminal.
+    var parentLocation: String? = nil
 }
 
 // Mark tints per the amber scheme: amber = needs your input (act), blue =
@@ -667,7 +691,7 @@ final class AgentGlyphView: NSView {
 final class PalettePanel: NSPanel {
     var onKeyDown: ((NSEvent) -> Bool)?
 
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { RuntimeConfiguration.current.foreground }
 
     override func keyDown(with event: NSEvent) {
         // Swallow unhandled keys: a palette must never beep or type-select.
@@ -757,6 +781,8 @@ final class PaletteController: NSObject {
     // All rows from the provider, and the slice that survives the search
     // filter - every selection/cycle operation works on the filtered view.
     private var allRows: [PaletteRow] = []
+    private var treeExpansion = SessionTreeExpansion()
+    private var sessionForest = SessionForest([])
     private var rows: [PaletteRow] = []
     private var visibleCount = 0
     // Revealed older rows remain selectable across the intervening divider.
@@ -904,7 +930,8 @@ final class PaletteController: NSObject {
         monitor.begin("palette") { [weak self] in self?.applyHubStatus() }
         // Nonactivating panel takes key focus while the previous app stays
         // active - Spotlight's pattern. Never call NSApp.activate here.
-        panel.makeKeyAndOrderFront(nil)
+        WindowPresentation.show(panel)
+        guard RuntimeConfiguration.current.foreground else { return }
         panel.makeFirstResponder(searchField)
         onOpen()
         if keyMonitor == nil {
@@ -1012,7 +1039,7 @@ final class PaletteController: NSObject {
     // Preselect the topmost unread row (oldest-engaged was jarring at the
     // bottom of the list); with nothing needing you, the top row.
     private func defaultSelectionIndex() -> Int {
-        nextToCheckIndex() ?? selectableIndices.first ?? -1
+        nextToCheckIndex() ?? selectableIndices.first(where: { matchesQuery(rows[$0]) }) ?? selectableIndices.first ?? -1
     }
 
     // MARK: - Search
@@ -1040,48 +1067,123 @@ final class PaletteController: NSObject {
     // A search reveals matching rows inside either collapsed section so the
     // board never hides what it knows about. Older has no zero-state divider:
     // automatic ageing adds no information when there is nothing older.
+    private func contextRow(key: String, scope: String) -> PaletteRow {
+        var row = PaletteRow(
+            sessionKey: key, mark: .read, statusWord: "unavailable", isAsking: false,
+            isUnread: false, isRead: true, agent: "", name: "Parent session unavailable",
+            ageStart: Date(), detail: nil, reply: nil, cropped: false, location: "",
+            jumpable: false, infoOnly: true, needsCheck: false, engagedDate: .distantPast,
+            tags: [], pinned: false
+        )
+        row.isTreeContext = true
+        row.machineScope = scope
+        return row
+    }
+
     private func composeRows() -> [PaletteRow] {
-        let matching = allRows.filter { matchesQuery($0) }
-        let visible = matching.filter { !$0.isHidden && !$0.isOlder }
-        let older = matching.filter { $0.isOlder && !$0.isHidden }
-        let hidden = matching.filter { $0.isHidden }
-        visibleCount = visible.count
-        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
-        var display = visible
-        if !older.isEmpty {
-            var divider = PaletteRow(
-                sessionKey: "", mark: .working, statusWord: "", isAsking: false,
-                isUnread: false, isRead: false, agent: "", name: "", ageStart: Date(),
-                detail: nil, reply: nil, cropped: false, location: "", jumpable: false, infoOnly: true,
-                needsCheck: false,
-                engagedDate: Date(), tags: [], pinned: false
-            )
-            divider.isDivider = true
-            divider.isOlderDivider = true
-            divider.olderCount = older.count
-            display.append(divider)
-            if olderExpanded || searching { display.append(contentsOf: older) }
+        var indexed = Dictionary(allRows.map { ($0.sessionKey, $0) }, uniquingKeysWith: { first, _ in first })
+        var nodes: [SessionTreeNode] = []
+        for row in allRows {
+            var parent: String?
+            if let key = row.parentSessionKey, key != row.sessionKey {
+                if let owner = indexed[key], owner.machineScope == row.machineScope {
+                    parent = key
+                } else {
+                    let contextKey = "tree-context:" + row.machineScope + ":" + key
+                    if indexed[contextKey] == nil {
+                        indexed[contextKey] = contextRow(key: contextKey, scope: row.machineScope)
+                        nodes.append(SessionTreeNode(key: contextKey, parent: nil))
+                    }
+                    parent = contextKey
+                }
+            }
+            nodes.append(SessionTreeNode(key: row.sessionKey, parent: parent))
         }
-        // Always show the Hidden divider once the board has any session, even at
-        // "Hidden (0)", so it is always clear whether a session is set aside (a
-        // missing row is otherwise a mystery). A truly empty board shows the empty
-        // state instead. A zero count is inert (no chevron, nothing to expand).
-        if !matching.isEmpty {
-            var divider = PaletteRow(
-                sessionKey: "", mark: .working, statusWord: "", isAsking: false,
-                isUnread: false, isRead: false, agent: "", name: "", ageStart: Date(),
-                detail: nil, reply: nil, cropped: false, location: "", jumpable: false, infoOnly: true,
-                needsCheck: false,
-                engagedDate: Date(), tags: [], pinned: false
-            )
-            divider.isDivider = true
-            divider.hiddenCount = hidden.count
-            display.append(divider)
-            if !hidden.isEmpty && (hiddenExpanded || searching) { display.append(contentsOf: hidden) }
+        sessionForest = SessionForest(nodes)
+        let searching = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        let matches = Set(allRows.filter { matchesQuery($0) }.map(\.sessionKey))
+        var included = matches
+        for key in matches { included.formUnion(sessionForest.ancestors(of: key)) }
+        var sections: [[PaletteRow]] = [[], [], []]
+        for root in sessionForest.roots {
+            let memberKeys = [root] + sessionForest.descendants(of: root)
+            let members = memberKeys.compactMap { indexed[$0] }.filter { !$0.isTreeContext }
+            guard memberKeys.contains(where: { included.contains($0) }) else { continue }
+            let section = members.contains(where: { !$0.isHidden && !$0.isOlder }) ? 0
+                : members.contains(where: { !$0.isHidden }) ? 1 : 2
+            func append(_ key: String, depth: Int, targetSection: Int) {
+                guard included.contains(key), var row = indexed[key] else { return }
+                let children = (sessionForest.children[key] ?? []).filter { included.contains($0) }
+                let descendants = sessionForest.descendants(of: key).compactMap { indexed[$0] }.filter { !$0.isHidden }
+                // Dismissed branches belong under Hidden even when a sibling is
+                // still active. Keep dismissed ancestors only as path context.
+                if row.isHidden && targetSection != 2 && descendants.isEmpty {
+                    append(key, depth: 0, targetSection: 2)
+                    return
+                }
+                row.treeDepth = depth
+                row.hasChildren = !children.isEmpty
+                row.treeExpanded = treeExpansion.isExpanded(key, searching: searching)
+                row.childAttention = descendants.filter { $0.isAsking || $0.mark == .failed && $0.needsCheck }.count
+                row.childWorking = descendants.filter { $0.mark == .working }.count
+                row.childUnread = descendants.filter { $0.needsCheck && !$0.isAsking }.count
+                row.parentSessionKey = sessionForest.parents[key]
+                if row.isHidden && targetSection != 2 && !children.isEmpty { row.isHidden = false; row.isTreeContext = true }
+                if !row.jumpable && !row.isTreeContext {
+                    for ancestor in sessionForest.ancestors(of: key) {
+                        if let parent = indexed[ancestor], parent.jumpable {
+                            row.jumpSessionKey = parent.sessionKey
+                            row.parentLocation = "Jump to parent terminal: " + parent.name
+                            break
+                        }
+                    }
+                }
+                sections[targetSection].append(row)
+                if row.treeExpanded { for child in children { append(child, depth: depth + 1, targetSection: targetSection) } }
+            }
+            append(root, depth: 0, targetSection: section)
+        }
+        visibleCount = sections[0].count
+        var display = sections[0]
+        func divider(older: Bool, count: Int) -> PaletteRow {
+            var row = contextRow(key: "", scope: "")
+            row.isTreeContext = false
+            row.isDivider = true
+            row.isOlderDivider = older
+            row.olderCount = older ? count : 0
+            row.hiddenCount = older ? 0 : count
+            return row
+        }
+        if !sections[1].isEmpty {
+            display.append(divider(older: true, count: sections[1].count))
+            if olderExpanded || searching { display.append(contentsOf: sections[1]) }
+        }
+        if !matches.isEmpty {
+            display.append(divider(older: false, count: sections[2].count))
+            if hiddenExpanded || searching { display.append(contentsOf: sections[2]) }
         }
         selectableIndices = display.indices.filter { !display[$0].isDivider && !display[$0].isHidden }
         return display
     }
+
+    private func toggleTree(_ key: String) {
+        treeExpansion.toggle(key)
+        reload(preservingSelection: true)
+        if let index = rows.firstIndex(where: { $0.sessionKey == key }) { select(index) }
+        panel.makeFirstResponder(searchField)
+    }
+
+    private func navigateTree(expand: Bool) {
+        guard !contentMode, query.isEmpty, rows.indices.contains(tableView.selectedRow) else { return }
+        let row = rows[tableView.selectedRow]
+        if expand {
+            if row.hasChildren && !row.treeExpanded { toggleTree(row.sessionKey) }
+            else if row.hasChildren, let child = sessionForest.children[row.sessionKey]?.first,
+                    let index = rows.firstIndex(where: { $0.sessionKey == child }) { select(index) }
+        } else if row.hasChildren && row.treeExpanded { toggleTree(row.sessionKey) }
+        else if let parent = row.parentSessionKey, let index = rows.firstIndex(where: { $0.sessionKey == parent }) { select(index) }
+    }
+
 
     // Query changes reset the cursor to the topmost unread within the
     // filtered rows - searching is re-asking "what needs me in here".
@@ -1340,14 +1442,14 @@ final class PaletteController: NSObject {
     private func nextToCheckIndex(excluding key: String? = nil) -> Int? {
         rows.indices.first {
             rows[$0].needsCheck && !rows[$0].isHidden && !rows[$0].isDivider
-                && rows[$0].sessionKey != key
+                && rows[$0].sessionKey != key && matchesQuery(rows[$0])
         }
     }
 
     private func selectedKey() -> String? {
         guard !contentMode else { return nil }
         let index = tableView.selectedRow
-        guard rows.indices.contains(index), !rows[index].isHidden, !rows[index].isDivider else { return nil }
+        guard rows.indices.contains(index), !rows[index].isHidden, !rows[index].isDivider, !rows[index].isTreeContext else { return nil }
         return rows[index].sessionKey
     }
 
@@ -1395,6 +1497,9 @@ final class PaletteController: NSObject {
     // arrows, tab, ↩ and esc stay bare. Anything unhandled falls through to
     // the search field's editor. Returns nil when the event was consumed.
     private func handleMonitoredKey(_ event: NSEvent) -> NSEvent? {
+        if event.keyCode == 36 || event.keyCode == 76 {
+            NSLog("Signalbox: Return received (palette window: %d, editing label: %d)", event.window === panel, labelEditingKey != nil)
+        }
         guard event.window === panel else { return event }
         // While the label editor is up its field delegate owns ↩/esc; the
         // list must not react underneath the rename.
@@ -1438,6 +1543,8 @@ final class PaletteController: NSObject {
         case 51 where ctrl: // ⌃⌫ (bare ⌫ edits the search)
             if !contentMode { removeSelected() }
             return nil
+        case 123 where query.isEmpty && !contentMode: navigateTree(expand: false); return nil
+        case 124 where query.isEmpty && !contentMode: navigateTree(expand: true); return nil
         case 125: moveSelection(1); return nil // down arrow
         case 126: moveSelection(-1); return nil // up arrow
         default: break
@@ -1505,13 +1612,14 @@ final class PaletteController: NSObject {
     // Tab cycles unread rows in list order, top to bottom - same reading
     // order as the topmost-unread default selection.
     private func cycleNeedsCheck() {
-        let cycle = rows.indices.filter { rows[$0].needsCheck && !rows[$0].isHidden && !rows[$0].isDivider }
-        guard !cycle.isEmpty else { return }
-        if let position = cycle.firstIndex(of: tableView.selectedRow) {
-            select(cycle[(position + 1) % cycle.count])
-        } else {
-            select(cycle[0])
-        }
+        let candidates = allRows.filter { $0.needsCheck && !$0.isHidden && matchesQuery($0) }
+        guard !candidates.isEmpty else { return }
+        let current = selectedKey()
+        let next = candidates[((candidates.firstIndex(where: { $0.sessionKey == current }) ?? -1) + 1) % candidates.count]
+        treeExpansion.reveal(ancestors: sessionForest.ancestors(of: next.sessionKey))
+        if next.isOlder { olderExpanded = true }
+        reload(preservingSelection: true)
+        if let index = rows.firstIndex(where: { $0.sessionKey == next.sessionKey }) { select(index) }
     }
 
     private func jumpSelected() {
@@ -1519,16 +1627,24 @@ final class PaletteController: NSObject {
     }
 
     private func jumpRow(_ index: Int) {
-        guard selectableIndices.contains(index) else { return }
+        guard selectableIndices.contains(index) else {
+            NSLog("Signalbox: jump ignored (no selected session)")
+            return
+        }
         let row = rows[index]
-        guard !row.infoOnly else { return }
-        guard row.jumpable else {
+        guard !row.infoOnly && !row.isTreeContext else {
+            NSLog("Signalbox: jump ignored (information/context row: %@)", row.sessionKey)
+            return
+        }
+        guard row.jumpable || row.jumpSessionKey != nil else {
+            NSLog("Signalbox: jump unavailable (no terminal: %@)", row.sessionKey)
             unsupportedJumpKey = row.sessionKey
             renderPreview()
             return
         }
         hide()
-        onJump(row.sessionKey)
+        NSLog("Signalbox: jump dispatched (%@)", row.jumpSessionKey ?? row.sessionKey)
+        onJump(row.jumpSessionKey ?? row.sessionKey)
     }
 
     private func hideSelected() {
@@ -1561,7 +1677,7 @@ final class PaletteController: NSObject {
         guard !contentMode else { return nil }
         guard rows.indices.contains(row) else { return nil }
         // Dividers have no session actions; a hidden row offers only Unhide.
-        if rows[row].isDivider { return nil }
+        if rows[row].isDivider || rows[row].isTreeContext { return nil }
         if rows[row].isHidden {
             let menu = NSMenu()
             let item = NSMenuItem(title: "Unhide", action: #selector(contextUnhide(_:)), keyEquivalent: "")
@@ -1740,9 +1856,10 @@ final class PaletteController: NSObject {
             backing: .buffered,
             defer: true
         )
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let foreground = RuntimeConfiguration.current.foreground
+        panel.isFloatingPanel = foreground
+        panel.level = foreground ? .floating : .normal
+        panel.collectionBehavior = foreground ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
         panel.hidesOnDeactivate = false
         // Draggable like Alfred/Raycast: grab any background area to move it,
         // and the position is remembered across opens (restorePosition). The
@@ -2401,14 +2518,14 @@ final class PaletteController: NSObject {
             return
         }
         let row = rows[index]
-        if unsupportedJumpKey != row.sessionKey || row.jumpable || row.infoOnly {
+        if unsupportedJumpKey != row.sessionKey || row.jumpable || row.jumpSessionKey != nil || row.infoOnly {
             unsupportedJumpKey = nil
         }
-        actionRow.isHidden = row.infoOnly
+        actionRow.isHidden = row.infoOnly || row.isTreeContext
 
         let key = row.sessionKey
         let history = exchangeCache[key] ?? []
-        if exchangeCache[key] == nil, exchangeRequest[key] != true {
+        if !row.isTreeContext, exchangeCache[key] == nil, exchangeRequest[key] != true {
             exchangeRequest[key] = true
             let generation = exchangeGeneration
             Task { [weak self] in
@@ -2422,7 +2539,7 @@ final class PaletteController: NSObject {
         }
 
         let exchanges = history.isEmpty
-            ? [Exchange(prompt: row.detail, reply: row.reply, ts: "", cropped: row.cropped, seq: 0)]
+            ? [Exchange(prompt: row.isTreeContext ? nil : row.detail, reply: row.isTreeContext ? "This parent is unavailable or hidden. Expand it to follow its recorded children." : row.reply, ts: "", cropped: row.cropped, seq: 0)]
             : Array(history.suffix(3))
         let mono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .regular)
         let boldMono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .bold)
@@ -2454,6 +2571,15 @@ final class PaletteController: NSObject {
             indent: s(16)
         )
         let text = NSMutableAttributedString()
+        let path = sessionForest.ancestors(of: row.sessionKey).reversed().compactMap { key in
+            allRows.first(where: { $0.sessionKey == key })?.name
+        }
+        if !path.isEmpty {
+            let prefix = row.parentRelation == "owned" ? "Owned by: " : ""
+            text.append(NSAttributedString(string: prefix + (path + [row.name]).joined(separator: " › ") + "\n\n", attributes: [
+                .font: NSFont.systemFont(ofSize: s(10)), .foregroundColor: Theme.textDim,
+            ]))
+        }
 
         for (exchangeIndex, exchange) in exchanges.enumerated() {
             let newest = exchangeIndex == exchanges.count - 1
@@ -2539,7 +2665,7 @@ final class PaletteController: NSObject {
         // temperature as the row's mark.
         let actionText = unsupportedJumpKey == row.sessionKey
             ? "Jump not supported for this session yet (plain terminal). Press F to send feedback."
-            : row.location
+            : (row.parentLocation ?? row.location)
         let action = NSMutableAttributedString(string: actionText, attributes: [
             .font: NSFont.systemFont(ofSize: s(11)), .foregroundColor: Theme.textDim,
         ])
@@ -2619,12 +2745,15 @@ final class PaletteController: NSObject {
             panel.setFrameOrigin(origin)
         } else {
             // Stale offscreen origin (screen change): recenter and forget it.
-            UserDefaults.standard.removeObject(forKey: Self.frameOriginKey)
+            if RuntimeConfiguration.current.foreground {
+                UserDefaults.standard.removeObject(forKey: Self.frameOriginKey)
+            }
             position()
         }
     }
 
     private func savePosition() {
+        guard RuntimeConfiguration.current.foreground else { return }
         UserDefaults.standard.set(NSStringFromPoint(panel.frame.origin), forKey: Self.frameOriginKey)
     }
 
@@ -2860,7 +2989,7 @@ extension PaletteController: NSTableViewDataSource, NSTableViewDelegate {
                 ? SectionDividerView(title: "Older (\(row.olderCount))", count: row.olderCount, expanded: olderExpanded)
                 : SectionDividerView(title: "Hidden (\(row.hiddenCount))", count: row.hiddenCount, expanded: hiddenExpanded)
         }
-        let cell = SessionCellView(row: row)
+        let cell = SessionCellView(row: row, toggle: { [weak self] in self?.toggleTree(row.sessionKey) })
         // Hidden rows read as dismissed: dimmed, and inert (see shouldSelectRow).
         cell.alphaValue = row.isHidden ? 0.45 : 1
         return cell
@@ -2928,6 +3057,7 @@ private final class SessionCellView: NSTableCellView {
     private static var textLeading: CGFloat { s(52) } // 20 + 22 + 10
 
     private let row: PaletteRow
+    private let toggle: () -> Void
     private let titleLabel = NSTextField(labelWithString: "")
     private let ageLabel = NSTextField(labelWithString: "")
     // The platform's own activity indicator: it animates itself, so no tick
@@ -2935,8 +3065,9 @@ private final class SessionCellView: NSTableCellView {
     // Claude Code's statusline spinner, which is wrong on a codex row.
     private let spinner = NSProgressIndicator()
 
-    init(row: PaletteRow) {
+    init(row: PaletteRow, toggle: @escaping () -> Void) {
         self.row = row
+        self.toggle = toggle
         super.init(frame: .zero)
         build()
         applyColors()
@@ -2952,10 +3083,30 @@ private final class SessionCellView: NSTableCellView {
     }
 
     func tick(now: Date) {
-        ageLabel.stringValue = ageString(from: row.ageStart, to: now)
+        ageLabel.stringValue = row.isTreeContext ? "" : ageString(from: row.ageStart, to: now)
     }
 
+    @objc private func toggleDisclosure() { toggle() }
+
     private func build() {
+        let indent = s(CGFloat(min(row.treeDepth, 8) * 16 + 16))
+        if row.hasChildren {
+            let disclosure = NSButton()
+            disclosure.isBordered = false
+            disclosure.image = NSImage(systemSymbolName: row.treeExpanded ? "chevron.down" : "chevron.right", accessibilityDescription: nil)
+            disclosure.contentTintColor = Theme.age
+            disclosure.target = self
+            disclosure.action = #selector(toggleDisclosure)
+            disclosure.setAccessibilityLabel((row.treeExpanded ? "Collapse " : "Expand ") + row.name)
+            disclosure.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(disclosure)
+            NSLayoutConstraint.activate([
+                disclosure.leadingAnchor.constraint(equalTo: leadingAnchor, constant: s(10) + indent - s(16)),
+                disclosure.centerYAnchor.constraint(equalTo: centerYAnchor),
+                disclosure.widthAnchor.constraint(equalToConstant: s(16)),
+                disclosure.heightAnchor.constraint(equalToConstant: s(22)),
+            ])
+        }
         let glyph = AgentGlyphView(agent: row.agent)
         glyph.translatesAutoresizingMaskIntoConstraints = false
         addSubview(glyph)
@@ -2983,6 +3134,18 @@ private final class SessionCellView: NSTableCellView {
             titleRow.addArrangedSubview(spinner)
         }
         titleRow.addArrangedSubview(titleLabel)
+        if row.hasChildren && !row.treeExpanded {
+            let summary = row.childAttention > 0 ? "\(row.childAttention) needs you"
+                : row.childWorking > 0 ? "\(row.childWorking) working"
+                : row.childUnread > 0 ? "\(row.childUnread) unread" : ""
+            if !summary.isEmpty {
+                let label = NSTextField(labelWithString: summary)
+                label.font = .systemFont(ofSize: s(9.5))
+                label.textColor = row.childAttention > 0 ? Theme.attention : Theme.age
+                label.setContentCompressionResistancePriority(.required, for: .horizontal)
+                titleRow.addArrangedSubview(label)
+            }
+        }
         for tag in row.tags.prefix(3) {
             titleRow.addArrangedSubview(tagPill(tag))
         }
@@ -2991,7 +3154,7 @@ private final class SessionCellView: NSTableCellView {
 
         ageLabel.font = .monospacedDigitSystemFont(ofSize: s(11), weight: .semibold)
         ageLabel.textColor = Theme.age
-        ageLabel.stringValue = ageString(from: row.ageStart)
+        ageLabel.stringValue = row.isTreeContext ? "" : ageString(from: row.ageStart)
         ageLabel.alignment = .right
 
         // No "?" pill: the amber mark alone carries the ask (amber scheme). A
@@ -3032,11 +3195,11 @@ private final class SessionCellView: NSTableCellView {
         addSubview(right)
 
         NSLayoutConstraint.activate([
-            glyph.centerXAnchor.constraint(equalTo: leadingAnchor, constant: Self.glyphCenterX),
+            glyph.centerXAnchor.constraint(equalTo: leadingAnchor, constant: Self.glyphCenterX + indent),
             glyph.centerYAnchor.constraint(equalTo: centerYAnchor),
             glyph.widthAnchor.constraint(equalToConstant: s(22)),
             glyph.heightAnchor.constraint(equalToConstant: s(20)),
-            titleRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading),
+            titleRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading + indent),
             right.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -s(20)),
             right.centerYAnchor.constraint(equalTo: centerYAnchor),
             right.leadingAnchor.constraint(greaterThanOrEqualTo: titleRow.trailingAnchor, constant: s(8)),
@@ -3097,7 +3260,7 @@ private final class SessionCellView: NSTableCellView {
             NSLayoutConstraint.activate([
                 titleRow.topAnchor.constraint(equalTo: topAnchor, constant: s(8)),
                 breadcrumb.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: s(2)),
-                breadcrumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading),
+                breadcrumb.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.textLeading + indent),
                 breadcrumb.trailingAnchor.constraint(
                     lessThanOrEqualTo: right.leadingAnchor, constant: -s(8)
                 ),

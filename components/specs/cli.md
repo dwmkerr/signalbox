@@ -73,6 +73,11 @@ signalbox init --remove --agent pi     # unlink the pi extension
 signalbox init --remove --app          # quit the app (the hub stops with it)
 ```
 
+Claude setup includes `SubagentStart` and `SubagentStop` for native worker rows.
+Run the scoped initializer again to merge missing hooks into an existing setup.
+The local hub and forwarder also observe new Codex worker JSONL activity;
+this needs no launch flag and does not import historical sessions.
+
 `~/.claude/settings.json` and `~/.cursor/hooks.json` are merged directly on
 the scope flag (the flag is the consent, as above). Freeform or third-party
 config (`~/.tmux.conf`, `~/.codex/hooks.json`) gets its snippet **printed**
@@ -281,6 +286,36 @@ osascript -e 'quit app "Signalbox"'; open Signalbox.app --args --filter
 ```
 
 These are the CLI forms of the jumplist keys (`↩` ack-via-jump, `⌃X` hide, `⌃R` rename, `⌃⌫` remove).
+
+## macOS app runtime overrides
+
+These arguments belong to the macOS app executable, not the `signalbox` CLI:
+
+```bash
+open -g -n Signalbox.app --args --show-jumplist --config-parameter ui.foreground=false
+```
+
+`--show-jumplist` opens the palette on launch without a keyboard shortcut.
+`--config-parameter ui.foreground=false` renders UI behind existing windows
+without activation, keyboard focus, floating windows, or mouse input. Settings
+and Connect Phone use the same presentation policy. It also suppresses this
+instance's menu icon, global shortcut, notifications, login registration and
+jump-command handling, and leaves an existing app instance running. This makes
+window-ID screenshots possible while the user works. It does not simulate
+typing or enable keyboard-navigation tests without focus.
+
+The default is `ui.foreground=true`. Overrides are process-local and never
+saved; duplicate overrides use the last value. `--config-parameter=ui.foreground=false`
+is also accepted. Unknown parameters, missing values and non-boolean values
+exit 64 before starting the app. `--filter` is ignored in background mode so a
+capture cannot overwrite the user's saved filter. Window position is read but
+never saved by that instance. Use `open -g` or launch the executable directly
+so macOS itself does not activate the application at launch.
+
+For test captures, supply isolated `SIGNALBOX_URL`, `SIGNALBOX_DATA_DIR`,
+`SIGNALBOX_CONFIG` and transcript roots as usual; the foreground override does
+not change which hub or data the app uses. Capture its window using
+`screencapture -l <window-id> output.png`, without bringing it forward.
 
 ## hub
 

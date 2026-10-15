@@ -270,32 +270,36 @@ screenshot generously.
 
 ## Step 10 - the app
 
-Note: the app spawns its own hub on the default port with the default state
-dir - this scenario touches the real board, which is acceptable.
+For rendering and screenshot checks, use a separate background app with the
+isolated environment above. Do not foreground a window or send global keys
+while the user works. The runtime override leaves the real app running,
+registers no shortcut or notification handler, and never saves the override.
 
 ```bash
-open components/app/build/Signalbox.app
-sleep 5
+open -g -n --env SIGNALBOX_URL="$SIGNALBOX_URL" \
+  --env SIGNALBOX_DATA_DIR="$SIGNALBOX_DATA_DIR" \
+  --env SIGNALBOX_CONFIG="$SIGNALBOX_CONFIG" \
+  components/app/build/Signalbox.app --args \
+  --show-jumplist --config-parameter ui.foreground=false
 ```
 
-If the app was already running (the user's real instance), quit it first with
-`osascript -e 'quit app "Signalbox"'` so the relaunch picks up the fresh
-bundle - and note in the report that the user's app was restarted. Verify the
-embedded CLI is fresh: `curl -s http://127.0.0.1:8377/healthz` must report the
-version just built, not an older one.
+Use empty isolated transcript roots too, as in the CLI scenarios. Verify the
+test hub's `/healthz` reports the build just packaged. Locate the capture
+process's jumplist window ID through Core Graphics (filter by its PID and
+window bounds, not a global frontmost window), then capture only that window:
 
-Screenshots via `screencapture` (needs Screen Recording permission for this
-terminal; the jumplist hotkey needs Accessibility - if either is missing,
-verdict `warn` with a note, do not block):
+`screencapture` needs Screen Recording permission. If unavailable, record a
+`warn`; do not bring the app forward as a workaround.
 
 ```bash
-screencapture -x "$EVIDENCE/10-app/menubar.png"        # full screen incl. menu bar icon
-osascript -e 'tell application "System Events" to key code 38 using {control down, option down}'  # ⌃⌥J jumplist
-sleep 1
-screencapture -x "$EVIDENCE/10-app/jumplist.png"
+screencapture -x -o -l "$CAPTURE_WINDOW_ID" "$EVIDENCE/10-app/jumplist.png"
 ```
 
-Evidence: menu bar icon present, jumplist rendering the board.
+Evidence: jumplist renders, trees start collapsed with descendant summaries,
+the original app/hub stays running, and foreground application and preferences
+are unchanged. Close only the capture process and its own hub afterwards.
+Background mode suppresses the menu icon and cannot test real keyboard focus.
+Record those checks as manual unless the user has allowed foreground interaction.
 
 ## Step 10b - the iOS app (Simulator)
 
@@ -493,11 +497,12 @@ export SIGNALBOX_DATA_DIR="$EVIDENCE/10f-state"
 export SIGNALBOX_CONFIG="$EVIDENCE/10f-settings.json"
 SB="$PWD/components/cli/bin/signalbox"
 
-# The app gets these environment values and starts its own hub on 8430.
-open -n --env SIGNALBOX_URL="$SIGNALBOX_URL" \
+# Background rendering leaves the real app and the user's focus alone.
+open -g -n --env SIGNALBOX_URL="$SIGNALBOX_URL" \
   --env SIGNALBOX_DATA_DIR="$SIGNALBOX_DATA_DIR" \
   --env SIGNALBOX_CONFIG="$SIGNALBOX_CONFIG" \
-  components/app/build/Signalbox.app
+  components/app/build/Signalbox.app --args \
+  --show-jumplist --config-parameter ui.foreground=false
 ```
 
 Wait for `/healthz`, then create three ordered rows, including a transcript
@@ -512,6 +517,11 @@ for name in after target before; do
     --title "itest delete $name" --prompt "fixture for keyboard removal: $name"
 done
 ```
+
+The keyboard scenarios below require foreground interaction. When the user is
+working, record them as manual and keep the background screenshot checks; do
+not send global keys. For an explicitly allowed foreground run, relaunch the
+test app without the background override and record the real-app restart.
 
 Open the jumplist for that app instance. Capture a search for `scholar`; the
 selected row should be at the top of the filtered list and the preview should

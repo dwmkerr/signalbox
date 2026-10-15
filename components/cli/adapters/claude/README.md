@@ -6,6 +6,8 @@ on stdin and maps it per [specs/adapters.md](../../../specs/adapters.md):
 | Hook | Event |
 |---|---|
 | `SessionStart` | busy (reason `session_start`) |
+| `SubagentStart` | busy on the explicit worker identity, linked to its owning session |
+| `SubagentStop` | done on the worker identity, with its final transcript reply |
 | `UserPromptSubmit` | busy + `prompt` = cropped prompt text |
 | `Stop` | done (reason `stop`) |
 | `Notification` (`permission_prompt` / `elicitation_dialog`) | attention |
@@ -16,6 +18,12 @@ on stdin and maps it per [specs/adapters.md](../../../specs/adapters.md):
 | `SessionEnd` | hide (reason `session_end`), except `clear` |
 
 ## The exchange breadcrumb
+
+Worker keys are `claude:<session_id>:agent:<agent_id>`. An owning-session link
+does not claim which worker directly delegated the task. Workers have no
+independent terminal origin; the jumplist labels a jump to the parent's terminal
+explicitly. Launching another agent from a shell does not establish a session
+relationship without an explicit identity link.
 
 The hook extracts the prompt text from the `UserPromptSubmit` payload and
 sends it as `prompt` - a single line cropped to 160 chars at the emitter,
