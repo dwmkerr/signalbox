@@ -1129,6 +1129,7 @@ final class PaletteController: NSObject {
                 row.childUnread = descendants.filter { $0.needsCheck && !$0.isAsking }.count
                 row.parentSessionKey = sessionForest.parents[key]
                 if row.isHidden && targetSection != 2 && !children.isEmpty { row.isHidden = false; row.isTreeContext = true }
+                if row.isTreeContext && targetSection == 2 { row.isHidden = true }
                 if !row.jumpable && !row.isTreeContext {
                     for ancestor in sessionForest.ancestors(of: key) {
                         if let parent = indexed[ancestor], parent.jumpable {
@@ -1273,7 +1274,11 @@ final class PaletteController: NSObject {
         "searching session contents  ·  ⌃j/⌃k move  ·  ↩ jump or show resume  ·  esc back to the board"
 
     private func updateFooterHint() {
-        keysLabel?.stringValue = contentMode ? Self.contentKeys : Self.boardKeys
+        var hint = contentMode ? Self.contentKeys : Self.boardKeys
+        if let key = selectedBranchKey(), branchSessionKeys(key).count > 1 || rows[tableView.selectedRow].isTreeContext {
+            hint = hint.replacingOccurrences(of: "⌃x hide  ·  ⌃⌫ remove", with: "⌃x hide branch  ·  ⌃⌫ remove branch")
+        }
+        keysLabel?.stringValue = hint
     }
 
     private func matchSummary(_ count: Int) -> String {
@@ -1310,6 +1315,11 @@ final class PaletteController: NSObject {
                 ?? "search session contents"
             headerVerbs.addArrangedSubview(label(summary, color: Theme.age))
             headerVerbs.addArrangedSubview(Self.keycap("⌘↩"))
+        } else if rows.indices.contains(tableView.selectedRow), rows[tableView.selectedRow].isTreeContext {
+            headerVerbs.addArrangedSubview(label("Hide branch"))
+            headerVerbs.addArrangedSubview(Self.keycap("⌃X"))
+            headerVerbs.addArrangedSubview(label("Remove branch"))
+            headerVerbs.addArrangedSubview(Self.keycap("⌃⌫"))
         } else {
             headerVerbs.addArrangedSubview(label("Jump"))
             headerVerbs.addArrangedSubview(Self.keycap("↩"))
@@ -1439,10 +1449,10 @@ final class PaletteController: NSObject {
 
     // "Next to check": the first unread row from the top - reading order, so
     // where the cursor lands is always where the eye already is.
-    private func nextToCheckIndex(excluding key: String? = nil) -> Int? {
+    private func nextToCheckIndex(excluding keys: Set<String> = []) -> Int? {
         rows.indices.first {
             rows[$0].needsCheck && !rows[$0].isHidden && !rows[$0].isDivider
-                && rows[$0].sessionKey != key && matchesQuery(rows[$0])
+                && !keys.contains(rows[$0].sessionKey) && matchesQuery(rows[$0])
         }
     }
 
@@ -1540,7 +1550,7 @@ final class PaletteController: NSObject {
         case 48: // tab
             if !contentMode { cycleNeedsCheck() }
             return nil
-        case 51 where ctrl: // ⌃⌫ (bare ⌫ edits the search)
+        case 51 where ctrl, 117 where ctrl: // ⌃⌫ / ⌃⌦ (bare delete edits the search)
             if !contentMode { removeSelected() }
             return nil
         case 123 where query.isEmpty && !contentMode: navigateTree(expand: false); return nil
@@ -1648,15 +1658,28 @@ final class PaletteController: NSObject {
     }
 
     private func hideSelected() {
-        guard let key = selectedKey() else { return }
-        onHide(key)
-        parkSelection(leaving: key)
+        guard let key = selectedBranchKey() else { return }
+        let keys = branchSessionKeys(key)
+        parkSelection(leaving: Set(keys + [key]))
+        for target in keys { onHide(target) }
     }
 
     private func removeSelected() {
-        guard let key = selectedKey() else { return }
-        parkSelectionAfterRemoval(leaving: key)
-        onRemove(key)
+        guard let key = selectedBranchKey() else { return }
+        // Snapshot before callbacks: removing a row can synchronously rebuild
+        // the forest, but must not strand the remainder of the selected branch.
+        let keys = branchSessionKeys(key)
+        parkSelectionAfterRemoval(leaving: Set(keys + [key]))
+        for target in keys { onRemove(target) }
+    }
+
+    private func selectedBranchKey() -> String? {
+        guard !contentMode, selectableIndices.contains(tableView.selectedRow) else { return nil }
+        return rows[tableView.selectedRow].sessionKey
+    }
+
+    private func branchSessionKeys(_ key: String) -> [String] {
+        sessionForest.sessionKeys(inBranch: key, existingKeys: Set(allRows.map(\.sessionKey)))
     }
 
     // ⌃P / context menu: toggle the pin. Fires optimistically; the hub echoes
@@ -1677,10 +1700,11 @@ final class PaletteController: NSObject {
         guard !contentMode else { return nil }
         guard rows.indices.contains(row) else { return nil }
         // Dividers have no session actions; a hidden row offers only Unhide.
-        if rows[row].isDivider || rows[row].isTreeContext { return nil }
+        if rows[row].isDivider { return nil }
+        let branch = branchSessionKeys(rows[row].sessionKey).count > 1 || rows[row].isTreeContext
         if rows[row].isHidden {
             let menu = NSMenu()
-            let item = NSMenuItem(title: "Unhide", action: #selector(contextUnhide(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: branch ? "Unhide Branch" : "Unhide", action: #selector(contextUnhide(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = rows[row].sessionKey
             menu.addItem(item)
@@ -1694,11 +1718,13 @@ final class PaletteController: NSObject {
             item.target = self
             menu.addItem(item)
         }
-        add(rows[row].pinned ? "Unpin" : "Pin", #selector(contextPin))
-        add("Rename…", #selector(contextRename))
-        menu.addItem(.separator())
-        add("Hide", #selector(contextHide))
-        add("Remove", #selector(contextRemove))
+        if !rows[row].isTreeContext {
+            add(rows[row].pinned ? "Unpin" : "Pin", #selector(contextPin))
+            add("Rename…", #selector(contextRename))
+            menu.addItem(.separator())
+        }
+        add(branch ? "Hide Branch" : "Hide", #selector(contextHide))
+        add(branch ? "Remove Branch" : "Remove", #selector(contextRemove))
         return menu
     }
 
@@ -1706,7 +1732,7 @@ final class PaletteController: NSObject {
 
     @objc private func contextUnhide(_ sender: NSMenuItem) {
         guard let key = sender.representedObject as? String else { return }
-        onShow(key)
+        for target in branchSessionKeys(key) { onShow(target) }
     }
     @objc private func contextRename() { beginLabelEdit() }
     @objc private func contextHide() { hideSelected() }
@@ -1715,13 +1741,13 @@ final class PaletteController: NSObject {
     // Move ahead of the SSE round trip: the acted-on row is dealt with
     // (vanishing, or staying as a seen busy row) and the cursor should
     // already sit on the next thing to deal with.
-    private func parkSelection(leaving key: String) {
-        if let next = nextToCheckIndex(excluding: key) {
+    private func parkSelection(leaving keys: Set<String>) {
+        if let next = nextToCheckIndex(excluding: keys) {
             select(next)
             return
         }
         let index = tableView.selectedRow
-        let candidates = selectableIndices.filter { rows[$0].sessionKey != key }
+        let candidates = selectableIndices.filter { !keys.contains(rows[$0].sessionKey) }
         if let next = candidates.first(where: { $0 > index }) ?? candidates.last {
             select(next)
         }
@@ -1730,9 +1756,9 @@ final class PaletteController: NSObject {
     // Removal keeps the cursor at the same place in the list: select the next
     // row there, or the previous row when removing the last one. Hiding still
     // prefers the next unread row through parkSelection above.
-    private func parkSelectionAfterRemoval(leaving key: String) {
+    private func parkSelectionAfterRemoval(leaving keys: Set<String>) {
         let index = tableView.selectedRow
-        let candidates = selectableIndices.filter { rows[$0].sessionKey != key }
+        let candidates = selectableIndices.filter { !keys.contains(rows[$0].sessionKey) }
         if let next = candidates.first(where: { $0 > index }) ?? candidates.last {
             select(next)
         }
@@ -1804,7 +1830,7 @@ final class PaletteController: NSObject {
             hiddenExpanded.toggle()
             reload(preservingSelection: true)
         } else if row.isHidden {
-            onShow(row.sessionKey)
+            for target in branchSessionKeys(row.sessionKey) { onShow(target) }
         }
     }
 
@@ -2508,6 +2534,8 @@ final class PaletteController: NSObject {
 
     private func renderPreview(now: Date = Date()) {
         guard !contentMode else { return }
+        updateFooterHint()
+        updateSearchChrome()
         let index = tableView.selectedRow
         guard rows.indices.contains(index) else {
             termLabel.attributedStringValue = NSAttributedString()
@@ -2539,7 +2567,7 @@ final class PaletteController: NSObject {
         }
 
         let exchanges = history.isEmpty
-            ? [Exchange(prompt: row.isTreeContext ? nil : row.detail, reply: row.isTreeContext ? "This parent is unavailable or hidden. Expand it to follow its recorded children." : row.reply, ts: "", cropped: row.cropped, seq: 0)]
+            ? [Exchange(prompt: row.isTreeContext ? nil : row.detail, reply: row.isTreeContext ? "This parent is unavailable or hidden. Expand it to inspect its children. ⌃X hides this branch; ⌃⌫ removes it." : row.reply, ts: "", cropped: row.cropped, seq: 0)]
             : Array(history.suffix(3))
         let mono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .regular)
         let boldMono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .bold)

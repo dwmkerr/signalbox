@@ -81,4 +81,10 @@ struct SessionForest {
     func descendants(of key: String) -> [String] {
         (children[key] ?? []).flatMap { [$0] + descendants(of: $0) }
     }
+
+    /// Concrete sessions in a branch, children before parents. Placeholders
+    /// are excluded so actions cannot create events for synthetic identities.
+    func sessionKeys(inBranch key: String, existingKeys: Set<String>) -> [String] {
+        ([key] + descendants(of: key)).reversed().filter { existingKeys.contains($0) }
+    }
 }

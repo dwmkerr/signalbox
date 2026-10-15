@@ -33,6 +33,15 @@ struct SessionTreeChecks {
         precondition(!expansion.isExpanded("root"), "Clearing search restores collapse")
         expansion.reveal(ancestors: tree.ancestors(of: "grandchild"))
         precondition(expansion.isExpanded("root") && expansion.isExpanded("worker") && !expansion.isExpanded("unrelated"), "Unread navigation opens only its ancestor path")
-        print("13 session forest and expansion checks passed")
+        let realKeys: Set<String> = ["root", "worker", "grandchild", "sibling", "unrelated"]
+        let branch = tree.sessionKeys(inBranch: "root", existingKeys: realKeys)
+        precondition(Set(branch) == realKeys.subtracting(["unrelated"]), "Collapsed parent actions include the entire recorded branch")
+        precondition(branch.last == "root" && branch.firstIndex(of: "grandchild")! < branch.firstIndex(of: "worker")!, "Children are removed before their parents")
+        precondition(Set(tree.sessionKeys(inBranch: "worker", existingKeys: realKeys)) == ["worker", "grandchild"], "Worker actions leave ancestors and siblings alone")
+        precondition(tree.sessionKeys(inBranch: "unrelated", existingKeys: realKeys) == ["unrelated"], "Standalone sessions keep their single-row actions")
+        let orphan = SessionForest([.init(key: "context", parent: nil), .init(key: "child", parent: "context")])
+        precondition(orphan.sessionKeys(inBranch: "context", existingKeys: ["child"]) == ["child"], "Context actions target real children, never synthetic keys")
+        precondition(orphan.sessionKeys(inBranch: "missing", existingKeys: ["child"]).isEmpty, "An absent branch has no action targets")
+        print("19 session forest, expansion and branch-action checks passed")
     }
 }

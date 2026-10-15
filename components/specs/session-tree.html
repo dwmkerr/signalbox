@@ -110,6 +110,7 @@
     <span class="proposed">Interactive reference · scope below</span>
   </div>
   <p class="footnote"><b>Implemented scope:</b> native Codex parent-thread records and Claude worker ownership hooks; collapse, search ancestry, unread navigation and missing-parent context in the macOS jumplist. New activity only, with no <code>--json</code> requirement. Cross-agent shell links, wrapper folding and the flat/tree switch below remain illustrative proposals. PID/PPID and titles do not establish session relationships.</p>
+  <p class="footnote"><b>Branch actions:</b> Hide (⌃X) and Remove (⌃⌫ or ⌃⌦) act on the selected session and its recorded descendants, even when collapsed or filtered by search. Hidden or unavailable parent context rows support these actions on real sessions; they cannot jump, rename, or pin. Working sessions retain the existing Hide-as-acknowledge behavior. Unhide restores the hidden branch. See the <a href="hub-jumplist.html">jumplist contract</a>.</p>
   <div class="controls" aria-label="Mockup controls">
     <div class="segmented" id="scenarios" aria-label="Example">
       <button data-scenario="mixed" aria-pressed="true">Claude → Codex</button>
