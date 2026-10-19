@@ -1036,10 +1036,21 @@ final class PaletteController: NSObject {
         renderPreview()
     }
 
-    // Preselect the topmost unread row (oldest-engaged was jarring at the
-    // bottom of the list); with nothing needing you, the top row.
+    // Naming a session takes priority over unread output that mentions it.
+    // Within equally strong matches, keep the board's unread-first selection.
     private func defaultSelectionIndex() -> Int {
-        nextToCheckIndex() ?? selectableIndices.first(where: { matchesQuery(rows[$0]) }) ?? selectableIndices.first ?? -1
+        let q = query.trimmingCharacters(in: .whitespaces)
+        if !q.isEmpty && !q.hasPrefix("#") {
+            let named = selectableIndices.filter {
+                !rows[$0].isTreeContext && rows[$0].name.localizedCaseInsensitiveContains(q)
+            }
+            let exact = named.filter { rows[$0].name.localizedCaseInsensitiveCompare(q) == .orderedSame }
+            let preferred = exact.isEmpty ? named : exact
+            if let index = preferred.first(where: { rows[$0].needsCheck }) ?? preferred.first {
+                return index
+            }
+        }
+        return nextToCheckIndex() ?? selectableIndices.first(where: { matchesQuery(rows[$0]) }) ?? selectableIndices.first ?? -1
     }
 
     // MARK: - Search
@@ -1186,8 +1197,7 @@ final class PaletteController: NSObject {
     }
 
 
-    // Query changes reset the cursor to the topmost unread within the
-    // filtered rows - searching is re-asking "what needs me in here".
+    // Query edits select the strongest match; live updates preserve the cursor.
     private func applyQuery(_ newQuery: String) {
         query = newQuery
         // Editing the query leaves contents mode: the results on screen answer
