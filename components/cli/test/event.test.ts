@@ -261,5 +261,9 @@ describe("normalizeInbound (legacy migration)", () => {
     const url: ev.Event = { v: 1, id: "x", ts: "t", host: "h", agent: "github", event: "done", session_key: "github:1", origin: { url: "https://x" } };
     ev.normalizeInbound(url);
     expect(url.origin?.kind).toBe("url");
+    const tty: ev.Event = { v: ev.Version, id: "x", ts: "t", host: "h", agent: "claude", event: "done", session_key: "claude:1", origin: { tty: { path: "/dev/ttys002" } } };
+    ev.normalizeInbound(tty);
+    expect(tty.origin?.kind).toBe("tty");
+    expect(ev.validate(tty)).toBeNull();
   });
 });
