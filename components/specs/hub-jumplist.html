@@ -393,7 +393,12 @@
   <p>Rows keep the order you work in (most recently engaged first, like the app switcher), with
   pinned sessions first; status does not reorder them. Older and Hidden are the two trailing
   sections, in that order, below every visible row. The panel opens with the topmost unread row
-  selected, and selection stays topmost-unread within the filtered rows. A live search starts the
+  selected. For a text search, selection prefers an exact session-name match, then a partial
+  name match, then a match in the prompt, reply, or agent. Matching ignores case. Within each
+  group, select the topmost unread row, falling back to its first row. For example,
+  <code>aib</code> selects <b>AIBook</b> ahead of an unread child whose reply mentions AIBook;
+  searching a child's own name selects that child. Search does not reorder the session tree.
+  Empty searches and <code>#tag</code> searches retain topmost-unread selection. A live search starts the
   selected conversation preview at its beginning so matching context is not hidden below the fold.</p>
   <p>A row whose captured agent process has exited carries a muted terminal icon crossed by a slash,
   beside its age. It remains visible and its conversation remains available. A clean agent
@@ -604,7 +609,7 @@ const GREEN = "#32D74B", AMBER = "#FF9F0A", STARTING = "#98989D";
 const HUB_VERSION = "0.9.2";
 const HUB_ADDR = { local:"127.0.0.1:8377", lan:"192.168.1.24:8377", remote:"signalbox-hub.fly.dev" };
 const HUB_NAME = { local:"Local", lan:"LAN", remote:"Remote" };
-// Topmost-unread default selection (fallback: top row).
+// Name matches lead during search; unread status breaks ties.
 const needsCheck = s => s.state==="ask" || s.state==="unread" || s.state==="failed";
 let query = "";
 let mode = "board";
@@ -629,7 +634,17 @@ const visible = () => SESSIONS.map((s,i)=>i).filter(i => !SESSIONS[i].hidden && 
 const olderList = () => SESSIONS.map((s,i)=>i).filter(i => !SESSIONS[i].hidden && isOlder(SESSIONS[i]) && matchesQuery(i));
 const hiddenList = () => SESSIONS.map((s,i)=>i).filter(i => SESSIONS[i].hidden && matchesQuery(i));
 const selectable = () => visible().concat(olderOpen || query !== "" ? olderList() : []);
-function defaultSel(){ const v = selectable(); return v.find(i=>needsCheck(SESSIONS[i])) ?? v[0] ?? -1; }
+function defaultSel(){
+  let candidates = selectable();
+  const q = query.trim().toLowerCase();
+  if (q && !q.startsWith("#")) {
+    const name = i => (SESSIONS[i].label || SESSIONS[i].title).toLowerCase();
+    const named = candidates.filter(i => name(i).includes(q));
+    const exact = named.filter(i => name(i) === q);
+    if (named.length) candidates = exact.length ? exact : named;
+  }
+  return candidates.find(i=>needsCheck(SESSIONS[i])) ?? candidates[0] ?? -1;
+}
 let sel = -1;
 let editing = false;
 // Collapsed sections keep older and set-aside work from crowding the active list.
