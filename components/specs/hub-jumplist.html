@@ -106,6 +106,13 @@
   /* The preview is full black: a window into the terminal it quotes. */
   .preview { flex:1; padding:18px 22px; min-height:360px; background:#000;
              display:flex; flex-direction:column; }
+  .chat-composer { margin:10px 0 8px; font-size:11px; }
+  .chat-composer textarea { width:100%; height:54px; margin:5px 0; background:#1e1e21; color:#ededed; border:0; border-radius:7px; padding:7px; resize:none; font:12px -apple-system,sans-serif; }
+  .chat-controls { display:flex; align-items:center; justify-content:space-between; }
+  .chat-controls a { color:#0a84ff; text-decoration:none; }
+  .chat-controls button { color:#ededed; background:#2c2c31; border:1px solid #ffffff22; border-radius:5px; padding:3px 9px; }
+  .chat-controls button:disabled { opacity:.4; }
+  #chat-status { color:#98989d; }
   .term { flex:1; min-height:0; overflow-y:auto;
           font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.75; color:#C8C8CC; }
   .term .turn { margin-bottom:12px; }
@@ -234,6 +241,11 @@
     <div class="list"><h3>SESSIONS</h3><div id="rows"></div></div>
     <div class="preview">
       <div class="term" id="term"></div>
+      <div class="chat-composer" id="chat-composer">
+        <div id="chat-status">Message · ⌘L to type</div>
+        <textarea id="chat-message" aria-label="Message"></textarea>
+        <div class="chat-controls"><a href="mobile-chat.md">Set up mobile chat</a><button id="chat-send" disabled>Send ⌘↩</button></div>
+      </div>
       <div class="actline" id="actline"></div>
     </div>
     <div class="contents" id="contents"></div>
@@ -457,6 +469,22 @@
   <a href="https://github.com/dwmkerr/signalbox/blob/main/components/specs/adapters.md">adapters.md</a>.
   The board never answers for you: asks are read-only signal, and the answer happens where the
   agent runs - jump.</p>
+
+  <h2>Chat from the jump box (local spike)</h2>
+  <p>The composer below the selected conversation uses the same tmux command and execution receipt
+  as iOS. Click the field or press <kbd>⌘L</kbd>. Return inserts a newline; <kbd>⌘↩</kbd> or Send sends.
+  Escape returns focus to search. While editing, arrows, Tab, control keys and text shortcuts belong
+  to the editor; they never move, remove, hide or jump to a session. Outside the composer the existing
+  search and jump keys retain their behavior.</p>
+  <p>Drafts are per session and survive row changes, closing the panel and zoom rebuilds for this app
+  run. A pending send stays addressed to the original session. Sending disables duplicate submission;
+  only <b>Sent to terminal</b> clears that session's unchanged draft. Refused or unconfirmed delivery
+  keeps it. The next hook update refreshes the conversation and shows the submitted prompt while
+  the agent is working, before its finished exchange reaches history.</p>
+  <p>Disconnected, busy, attention, stopped, child, unsupported and non-tmux sessions show why input is
+  disabled. The field accepts up to 8,192 UTF-16 code units with the same literal-input rules as iOS.
+  <b>Set up mobile chat</b> opens offline launch/resume instructions. Codex uses
+  <code>codex --no-daemon</code> inside tmux for this spike. See <a href="mobile-chat.md">setup</a>.</p>
 
   <h2>Preview</h2>
   <p>The right pane shows the last three exchanges on black like the terminal it quotes, oldest first,
@@ -889,16 +917,45 @@ setInterval(()=>{ gi=(gi+1)%GLYPHS.length; const el=document.querySelector(".spi
   // Session indices keep ages attached to their rows across section dividers.
   document.querySelectorAll(".age[data-i]").forEach(el=>{ el.textContent=ageStr(SESSIONS[+el.dataset.i].ageSeconds); }); }, 1000);
 
+const chatDrafts = new Map();
+const chatReceipts = new Map();
+const chatInput = document.getElementById("chat-message");
+const chatSend = document.getElementById("chat-send");
+function renderChat(){
+  const session = SESSIONS[sel];
+  document.getElementById("chat-composer").hidden = !session;
+  if (!session) return;
+  let reason = !["claude", "codex"].includes(session.agent) ? "Chat supports Claude Code and Codex sessions."
+    : session.processStopped ? "This agent is no longer running."
+    : session.jumpable === false ? "Coding agent sessions must run in tmux for mobile chat."
+    : session.state === "working" ? "Wait for this task to finish before sending."
+    : session.state === "ask" ? "Answer the pending question or permission request in the terminal first." : "";
+  chatInput.value = chatDrafts.get(session.key) || "";
+  chatInput.disabled = !!reason;
+  chatSend.disabled = !!reason || !chatInput.value.trim() || chatInput.value.length > 8192;
+  document.getElementById("chat-status").textContent = reason || chatReceipts.get(session.key) || "Message · ⌘L to type";
+}
+chatInput.addEventListener("input", () => { if (SESSIONS[sel]) chatDrafts.set(SESSIONS[sel].key, chatInput.value); renderChat(); });
+chatSend.addEventListener("click", () => {
+  if (chatSend.disabled || !SESSIONS[sel]) return;
+  chatDrafts.set(SESSIONS[sel].key, "");
+  chatReceipts.set(SESSIONS[sel].key, "Sent to terminal (mock)");
+  renderChat();
+});
 function renderPreview(){
+  renderChat();
   const term = document.getElementById("term");
   const actline = document.getElementById("actline");
   const s = SESSIONS[sel];
   if (!s) { term.innerHTML = ""; actline.innerHTML = ""; unsupportedJumpKey = null; lastPreviewKey = null; lastPreviewHeight = 0; lastPreviewQuery = query; return; }
   if (unsupportedJumpKey !== s.key || s.jumpable !== false || s.infoOnly) unsupportedJumpKey = null;
   actline.style.display = s.infoOnly ? "none" : "flex";
-  const exchanges = (s.exchanges && s.exchanges.length ? s.exchanges : [
+  let exchanges = (s.exchanges && s.exchanges.length ? s.exchanges : [
     {prompt:s.prompt, reply:s.reply, cropped:false}
   ]).slice(-3);
+  if (s.state === "working" && s.prompt && exchanges.at(-1)?.prompt !== s.prompt) {
+    exchanges = [...exchanges, {prompt:s.prompt, reply:null}].slice(-3);
+  }
   let h = "";
   const showingUnsupported = unsupportedJumpKey === s.key;
   let act = showingUnsupported
@@ -1142,6 +1199,12 @@ searchEl.addEventListener("input", () => {
 });
 
 document.addEventListener("keydown", e => {
+  if (document.activeElement === chatInput) {
+    if (e.metaKey && e.key === "Enter") { e.preventDefault(); chatSend.click(); }
+    else if (e.key === "Escape") { e.preventDefault(); searchEl.focus(); }
+    return;
+  }
+  if (mode !== "contents" && e.metaKey && e.key.toLowerCase() === "l") { e.preventDefault(); chatInput.focus(); return; }
   if (e.key === "Escape" && hub.popOpen) { e.preventDefault(); closePop(); return; }
   if (editing) return;
   const ctrl = e.ctrlKey;

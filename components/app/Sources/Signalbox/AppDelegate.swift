@@ -268,6 +268,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return doc.exchanges
     }
 
+    private func chatSession(for key: String) -> ChatSession? {
+        guard let session = sessions[key], !session.hidden else { return nil }
+        let event = session.event
+        return ChatSession(key: key, agent: event.agent, host: event.host ?? "", machine: event.machine,
+                           event: event.event, stopped: session.processStopped,
+                           child: session.parentSessionKey != nil, hasTmux: session.origin?.tmux != nil)
+    }
+
+    private func sendChat(key: String, text: String) async -> ChatReceipt {
+        guard let target = chatSession(for: key), hubProblem == nil else {
+            return ChatReceipt(id: "", status: "failed", message: "Reconnect to the session's hub before sending.")
+        }
+        return await ChatClient.send(text, to: target, hubURL: hubURL)
+    }
+
     // Search answers only from the local machine's own index, so unlike
     // /exchanges this call means something different depending on which hub is
     // behind it: a forwarder refuses it outright. The three failure states are
@@ -676,6 +691,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         palette?.exchangeProvider = { [weak self] key, limit in
             await self?.fetchExchanges(sessionKey: key, limit: limit) ?? []
+        }
+        palette?.chatSessionProvider = { [weak self] key in self?.chatSession(for: key) }
+        palette?.chatSendProvider = { [weak self] key, text in
+            guard let self else { return ChatReceipt(id: "", status: "failed", message: "The app disconnected.") }
+            return await self.sendChat(key: key, text: text)
         }
         palette?.searchProvider = { [weak self] query, limit in
             await self?.fetchSearch(query: query, limit: limit) ?? .unreachable

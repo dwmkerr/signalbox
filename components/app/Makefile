@@ -57,6 +57,10 @@ test:
 	$(BUILD_DIR)/session-tree-checks
 	xcrun swiftc Sources/Signalbox/RuntimeConfiguration.swift Tests/RuntimeConfigurationChecks.swift -o $(BUILD_DIR)/runtime-configuration-checks
 	$(BUILD_DIR)/runtime-configuration-checks
+	xcrun swiftc Sources/Signalbox/Model.swift Sources/Signalbox/Chat.swift Tests/ChatChecks.swift -o $(BUILD_DIR)/chat-checks
+	$(BUILD_DIR)/chat-checks
+	xcrun swiftc Sources/Signalbox/Model.swift Sources/Signalbox/Chat.swift Sources/Signalbox/ChatComposer.swift Tests/ChatKeyboardChecks.swift -o $(BUILD_DIR)/chat-keyboard-checks
+	$(BUILD_DIR)/chat-keyboard-checks
 
 app: build
 	rm -rf "$(BUNDLE)"

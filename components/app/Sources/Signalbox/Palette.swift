@@ -819,6 +819,12 @@ final class PaletteController: NSObject {
     private var contentsSummaryLabel: NSTextField!
     private var listBorder: NSView!
     private var previewView: NSView!
+    private let chatDrafts = ChatDrafts()
+    private var chatComposer: ChatComposer!
+    /// Resolve the selected conversation's current routing and availability.
+    var chatSessionProvider: ((String) -> ChatSession?)?
+    /// Send using the same acknowledged hub command as the mobile app.
+    var chatSendProvider: ((String, String) async -> ChatReceipt)?
     private var listWidthConstraint: NSLayoutConstraint!
     private var termLabel: NSTextField!
     private var termScrollView: NSScrollView!
@@ -1521,6 +1527,8 @@ final class PaletteController: NSObject {
             NSLog("Signalbox: Return received (palette window: %d, editing label: %d)", event.window === panel, labelEditingKey != nil)
         }
         guard event.window === panel else { return event }
+        // Editing must own Return, arrows, Tab and control keys even while a send is pending.
+        if chatComposer.isEditing { return event }
         // While the label editor is up its field delegate owns ↩/esc; the
         // list must not react underneath the rename.
         guard labelEditingKey == nil else { return event }
@@ -1577,6 +1585,9 @@ final class PaletteController: NSObject {
            !event.modifierFlags.contains(.option),
            let chars = event.charactersIgnoringModifiers {
             switch chars {
+            case "l" where !contentMode:
+                chatComposer.focus()
+                return nil
             case ",":
                 settingsClicked()
                 return nil
@@ -2253,6 +2264,7 @@ final class PaletteController: NSObject {
     }
 
     private func applyHubStatus() {
+        renderChat()
         let status = HubStatus(
             health: monitor.health,
             lastGood: monitor.lastGood,
@@ -2459,7 +2471,21 @@ final class PaletteController: NSObject {
         actionRow.spacing = s(6)
         actionRow.alignment = .centerY
 
-        for view in [termScroll, actionRow] {
+        let composer = ChatComposer(drafts: chatDrafts, scale: PaletteScale.current)
+        composer.onEscape = { [weak self] in
+            guard let self else { return }
+            self.panel.makeFirstResponder(self.searchField)
+        }
+        composer.onSend = { [weak self] key, text in
+            guard let self, let send = self.chatSendProvider else {
+                return ChatReceipt(id: "", status: "failed", message: "Chat is unavailable.")
+            }
+            let receipt = await send(key, text)
+            self.exchangeCache[key] = nil
+            self.renderPreview()
+            return receipt
+        }
+        for view in [termScroll, composer, actionRow] {
             view.translatesAutoresizingMaskIntoConstraints = false
             preview.addSubview(view)
         }
@@ -2467,7 +2493,10 @@ final class PaletteController: NSObject {
             termScroll.topAnchor.constraint(equalTo: preview.topAnchor, constant: s(18)),
             termScroll.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: s(22)),
             termScroll.trailingAnchor.constraint(equalTo: preview.trailingAnchor, constant: -s(22)),
-            termScroll.bottomAnchor.constraint(equalTo: actionRow.topAnchor, constant: -s(16)),
+            termScroll.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -s(10)),
+            composer.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: s(22)),
+            composer.trailingAnchor.constraint(equalTo: preview.trailingAnchor, constant: -s(22)),
+            composer.bottomAnchor.constraint(equalTo: actionRow.topAnchor, constant: -s(8)),
             actionRow.leadingAnchor.constraint(equalTo: preview.leadingAnchor, constant: s(22)),
             actionRow.trailingAnchor.constraint(lessThanOrEqualTo: preview.trailingAnchor, constant: -s(22)),
             actionRow.bottomAnchor.constraint(equalTo: preview.bottomAnchor, constant: -s(18)),
@@ -2499,6 +2528,7 @@ final class PaletteController: NSObject {
         self.contentsSummaryLabel = contentsSummary
         self.listBorder = listBorder
         self.previewView = preview
+        self.chatComposer = composer
         self.listWidthConstraint = listWidth
         self.termLabel = term
         self.termScrollView = termScroll
@@ -2542,7 +2572,20 @@ final class PaletteController: NSObject {
 
     // MARK: - Preview rendering
 
+    private func renderChat() {
+        guard chatComposer != nil, !contentMode, let key = selectedKey() else {
+            chatComposer?.display(key: nil)
+            return
+        }
+        let target = chatSessionProvider?(key)
+        let disconnected = monitor.health == nil || monitor.health?.upstream?.connected == false
+        let reason = disconnected ? "Reconnect to the hub before sending."
+            : target?.unavailable ?? (target == nil ? "This session is unavailable for chat." : nil)
+        chatComposer.display(key: key, agent: target?.agent ?? "", unavailable: reason)
+    }
+
     private func renderPreview(now: Date = Date()) {
+        renderChat()
         guard !contentMode else { return }
         updateFooterHint()
         updateSearchChrome()
@@ -2576,9 +2619,15 @@ final class PaletteController: NSObject {
             }
         }
 
-        let exchanges = history.isEmpty
+        var exchanges = history.isEmpty
             ? [Exchange(prompt: row.isTreeContext ? nil : row.detail, reply: row.isTreeContext ? "This parent is unavailable or hidden. Expand it to inspect its children. ⌃X hides this branch; ⌃⌫ removes it." : row.reply, ts: "", cropped: row.cropped, seq: 0)]
             : Array(history.suffix(3))
+        // History commits when a turn finishes; show the just-submitted prompt while it is running.
+        if row.mark == .working, !row.isTreeContext, let prompt = row.detail, !prompt.isEmpty,
+           !history.isEmpty, exchanges.last?.prompt != prompt {
+            exchanges.append(Exchange(prompt: prompt, reply: nil, ts: "", cropped: row.cropped, seq: Int.max))
+            exchanges = Array(exchanges.suffix(3))
+        }
         let mono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .regular)
         let boldMono = NSFont.monospacedSystemFont(ofSize: s(11.5), weight: .bold)
         let italicMono = NSFontManager.shared.convert(mono, toHaveTrait: .italicFontMask)
