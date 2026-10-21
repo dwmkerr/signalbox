@@ -525,6 +525,13 @@ phone.</p>
           <div class="chat-time reply">9:41</div>
         </div>
       </div>
+    <div style="padding:12px;background:#111;border-radius:0 0 20px 20px">
+      <div style="display:flex;gap:10px;align-items:center">
+        <textarea aria-label="Message" placeholder="Message" rows="2" style="flex:1;background:#202024;color:white;border:0;border-radius:14px;padding:10px;resize:none"></textarea>
+        <button aria-label="Send message" style="background:#0a84ff;color:white;border:0;border-radius:50%;width:34px;height:34px;font-size:24px">&#8593;</button>
+      </div>
+      <a href="mobile-chat.md" style="display:block;font-size:12px;margin-top:8px">Set up mobile chat</a>
+    </div>
     </div></div>
     <div class="phonecap">The newest three exchanges. Prompts sit right, replies sit left, and
       the top &hellip; loads older turns only while another page may exist.</div>
@@ -541,6 +548,21 @@ history has been reached.</p>
 and offers <b>Retry</b>. Opening the page marks the session read, and its trailing nav-bar button jumps
 to the session; it never hides a
 session.</p>
+
+<h3>Mobile chat (local spike)</h3>
+<p>The bottom composer sends text to idle Claude Code and Codex sessions in tmux.
+It grows from one to five lines and has a separate <b>Send message</b> button.
+Return inserts a newline. Sending shows a spinner and disables repeat taps.
+An owning-machine receipt clears the draft only for <b>Sent to terminal</b>;
+refused or unconfirmed delivery keeps the text. Drafts survive navigation within
+the app and clear when changing hubs. Messages are limited to 8,192 UTF-16 code units.</p>
+<p>Disconnected, stopped, child, busy and attention sessions disable input with
+an explanation. A session without tmux reads <b>Coding agent sessions must run in tmux
+for mobile chat.</b> The link <b>Set up mobile chat</b> opens an in-app help sheet
+with tmux, Claude and <code>codex --no-daemon</code> launch/resume instructions;
+the <a href="mobile-chat.md">help text</a> remains available offline. Permission
+dialogs and interactive questions are answered in the terminal in this spike.
+The owning machine checks the target again when it receives a send.</p>
 
 <h2>Connection state</h2>
 <p>A remote hub needs the network, so the app always says what it is showing. The state line under the

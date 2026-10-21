@@ -12,6 +12,10 @@ struct ChatView: View {
     @State private var hasMore = false
     @State private var failed = false
     @State private var olderFailed = false
+    @State private var sending = false
+    @State private var receipt: ChatReceipt?
+    @State private var showChatHelp = false
+    @FocusState private var composerFocused: Bool
 
     private let pageLimit = 3
 
@@ -50,6 +54,8 @@ struct ChatView: View {
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle(session.name)
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) { composer }
+        .sheet(isPresented: $showChatHelp) { MobileChatHelp(agent: session.agentFamily, sessionKey: session.key) }
         // Jump belongs in the trailing nav-bar slot, where per-screen actions
         // live on iOS, and carries the same arrow as the row so it reads as the
         // same action. Absent on information-only rows, which have nothing to
@@ -77,6 +83,73 @@ struct ChatView: View {
             // Opening the thread is reading it. Leaving the dot lit would make
             // it untrustworthy, and Mark as Unread is the way back.
             if session.isUnread { await hub.ack(session) }
+        }
+    }
+
+    private var liveSession: Session { hub.sessions.first { $0.key == session.key } ?? session }
+
+    private var composerUnavailable: String? {
+        guard case .live = hub.connection else { return "Reconnect to the hub before sending." }
+        guard hub.sessions.contains(where: { $0.key == session.key }) else { return "This session is no longer available." }
+        return liveSession.mobileChatUnavailable
+    }
+
+    private var draft: Binding<String> {
+        Binding(get: { hub.chatDrafts[session.key] ?? "" }, set: { hub.chatDrafts[session.key] = $0 })
+    }
+
+    private var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let reason = composerUnavailable {
+                Text(reason).font(.footnote).foregroundStyle(Theme.dim)
+            }
+            if let receipt {
+                Text(receipt.message)
+                    .font(.footnote)
+                    .foregroundStyle(receipt.status == "sent" ? Theme.dim : Theme.amber)
+                    .accessibilityIdentifier("chat-delivery-status")
+            }
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Message", text: draft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .padding(10)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
+                    .focused($composerFocused)
+                    .disabled(sending || composerUnavailable != nil)
+                    .accessibilityIdentifier("chat-message")
+                Button { Task { await send() } } label: {
+                    if sending { ProgressView().frame(width: 34, height: 34) }
+                    else { Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)) }
+                }
+                .disabled(sending || composerUnavailable != nil || draft.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.wrappedValue.utf16.count > 8192)
+                .accessibilityLabel("Send message")
+                .accessibilityIdentifier("chat-send")
+            }
+            if draft.wrappedValue.utf16.count > 8192 {
+                Text("Keep messages under 8,192 characters.").font(.footnote).foregroundStyle(Theme.amber)
+            }
+            Button("Set up mobile chat") { showChatHelp = true }
+                .font(.footnote)
+                .accessibilityIdentifier("mobile-chat-help")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Theme.bg)
+    }
+
+    private func send() async {
+        guard !sending, composerUnavailable == nil else { return }
+        let text = draft.wrappedValue
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        sending = true
+        receipt = nil
+        let result = await hub.sendChat(text, to: liveSession)
+        receipt = result
+        sending = false
+        if result.status == "sent", draft.wrappedValue == text {
+            hub.chatDrafts[session.key] = ""
+            composerFocused = false
+            await loadNewer()
         }
     }
 

@@ -16,6 +16,10 @@ struct SessionEvent: Decodable {
     let reason: String?
     let sessionKey: String
     let host: String?
+    /// Stable identity used to route mobile input to the owning machine.
+    let machine: String?
+    /// Child agents share their owner's conversation input.
+    let parentSessionKey: String?
     let cwd: String?
     let title: String?
     // The human/trigger side of the exchange breadcrumb. The hub sends
@@ -40,6 +44,8 @@ struct SessionEvent: Decodable {
         case agent, event, reason, host, cwd, title, prompt, detail, reply, label, tags, ts, seq, acked, hidden, pinned, origin
         case sessionKey = "session_key"
         case engagedTs = "engaged_ts"
+        case machine
+        case parentSessionKey = "parent_session_key"
     }
 
     init(from decoder: Decoder) throws {
@@ -50,6 +56,8 @@ struct SessionEvent: Decodable {
         // commands: a command has no `event` key, so it fails here and is
         // skipped rather than misread as a session status.
         event = try container.decode(String.self, forKey: .event)
+        machine = try? container.decodeIfPresent(String.self, forKey: .machine)
+        parentSessionKey = try? container.decodeIfPresent(String.self, forKey: .parentSessionKey)
         sessionKey = try container.decode(String.self, forKey: .sessionKey)
         // Everything else decodes leniently: a missing or retyped field must
         // never fail the whole /state decode or silently drop stream events.
@@ -177,6 +185,12 @@ struct Session: Identifiable, Hashable {
     let agent: String
     let event: String
     let host: String
+    /// Stable machine identity required by the input command.
+    let machine: String?
+    /// Whether a tmux target was captured for this session.
+    let hasTmux: Bool
+    /// A child agent cannot receive independent terminal input.
+    let isChild: Bool
     let name: String
     let prompt: String?
     let reply: String?
@@ -202,10 +216,34 @@ struct Session: Identifiable, Hashable {
 
     var id: String { key }
 
+    /// Editor-hosted agents keep the same input capabilities as their terminal family.
+    var agentFamily: String { String(agent.split(separator: "/").last ?? "") }
+
     // Bold means unread, and it is also the only state where firing `seen` would
     // change anything: a quiet acked row and a busy-working row are both no-ops,
     // so the trailing swipe only offers Seen when this is true.
     var isUnread: Bool { !acked && event != "busy" }
+
+    /// Explain why this session cannot currently receive a plain-text prompt.
+    var mobileChatUnavailable: String? {
+        if !["claude", "codex"].contains(agentFamily) { return "Mobile chat supports Claude Code and Codex sessions." }
+        if isChild { return "Open the owning session to chat with this agent." }
+        if processStopped { return "This agent is no longer running." }
+        if !hasTmux || machine == nil { return "Coding agent sessions must run in tmux for mobile chat." }
+        if event == "busy" { return "Wait for this task to finish before sending." }
+        if event == "attention" { return "Answer the pending question or permission request in the terminal first." }
+        return nil
+    }
+}
+
+/// Receipt from the computer that attempted terminal input.
+struct ChatReceipt: Decodable {
+    /// Correlates this receipt with the original send.
+    let id: String
+    /// Sent to the terminal, definitely failed, or delivery is unknown.
+    let status: String
+    /// Feedback suitable for the chat composer.
+    let message: String
 }
 
 enum EventDate {

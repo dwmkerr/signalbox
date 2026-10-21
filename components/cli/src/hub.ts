@@ -14,6 +14,7 @@ import { deadProcs, procAlive } from "./proc";
 import { buildStamp } from "./build";
 import { openIndex, type SearchIndex } from "./searchindex";
 import { loadSettings } from "./config";
+import { ChatBroker, ChatExecutor, chatResult, type ChatResult } from "./chat";
 
 const heartbeatMs = 15_000;
 export const searchSweepIntervalMs = 250;
@@ -48,6 +49,8 @@ export class Hub {
   private timers: ReturnType<typeof setInterval>[] = [];
   private logPath: string;
   private searchIndex: SearchIndex | null = null;
+  private chatBroker = new ChatBroker();
+  private chatExecutor: ChatExecutor;
 
   // Rebuilds state from events.jsonl in stateDir (creating it if needed).
   // Seq continues from the highest persisted value. token is the bearer secret
@@ -91,6 +94,7 @@ export class Hub {
     private deadProcesses: (processes: Proc[]) => Proc[] = deadProcs
   ) {
     this.store = new Store(historyLimit);
+    this.chatExecutor = new ChatExecutor(stateDirPath, () => this.sessions());
     mkdirSync(this.stateDirPath, { recursive: true });
     this.logPath = join(this.stateDirPath, "events.jsonl");
     if (existsSync(this.logPath)) {
@@ -123,6 +127,7 @@ export class Hub {
   }
 
   close(): void {
+    this.chatBroker.close();
     for (const t of this.timers) clearInterval(t);
     try {
       closeSync(this.logFd);
@@ -346,6 +351,7 @@ export class Hub {
     }
     if (req.method === "POST" && url.pathname === "/events") return this.handleEvents(req);
     if (req.method === "POST" && url.pathname === "/command") return this.handleCommand(req);
+    if (req.method === "POST" && url.pathname === "/command-result") return this.handleCommandResult(req);
     if (req.method === "POST" && url.pathname === "/process-check") {
       this.checkLocalProcesses();
       return Response.json({ checked: true }, { headers: { "Cache-Control": "no-store" } });
@@ -509,10 +515,34 @@ export class Hub {
     }
     const invalid = cmd.validateCommand(c);
     if (invalid) return jsonError(400, invalid);
+    if (c.command === cmd.Chat) {
+      const result = await this.chatBroker.submit(c, () => {
+        this.dispatch(c);
+        if (!this.remote) {
+          void this.chatExecutor.execute(c).then(result => {
+            if (result) this.chatBroker.accept(result);
+          }).catch(() => this.chatBroker.accept(chatResult(c, "unknown", "Delivery could not be confirmed. Check the terminal.")));
+        }
+      });
+      return noStoreJSON(result);
+    }
     // The hub does not adjudicate targets: whoever owns the session decides
     // whether to act, so a command for a session this hub has never seen is
     // still delivered. `delivered` counts listeners reached, never work done.
     return Response.json({ ok: true, delivered: this.dispatch(c) });
+  }
+
+  private async handleCommandResult(req: Request): Promise<Response> {
+    if (!(req.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) return jsonError(415, "Content-Type must be application/json");
+    const body = await req.arrayBuffer();
+    if (body.byteLength > 4096) return jsonError(400, "receipt too large");
+    try {
+      const result = JSON.parse(new TextDecoder().decode(body)) as ChatResult;
+      if (!this.chatBroker.accept(result)) return jsonError(409, "no matching pending command");
+      return noStoreJSON({ ok: true });
+    } catch {
+      return jsonError(400, "invalid receipt");
+    }
   }
 
   // handlePair trades a valid pairing code for the bearer token. Unauthenticated

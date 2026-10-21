@@ -75,7 +75,8 @@ The macOS jumplist groups new native workers using explicit identities. No
   `claude:<session_id>:agent:<agent_id>`, with busy and done respectively.
   The owning `session_id` establishes an `owned` edge. A supplied
   `parent_agent_id` establishes a direct `spawned` worker edge instead.
-  The stop hook's `agent_transcript_path` supplies the worker's final reply.
+  The stop hook's `last_assistant_message` supplies the worker's final reply,
+  with `agent_transcript_path` as a fallback when the inline field is absent.
   In-process workers do not inherit their owner's process lifetime or origin.
 
 Missing parents remain explicit unavailable context. Ordinary Claude-to-Codex
@@ -131,7 +132,7 @@ signalbox init --agent claude
 - `session_key = claude:<session_id>`.
 - Host prefix (display only): when the hook fires from an editor's *integrated terminal* the displayed `agent` gains the editor host as a prefix - `cursor/claude` in Cursor, `vscode/claude` in VS Code (and unrecognized VS Code forks). The same `TERM_PROGRAM=vscode` + `__CFBundleIdentifier` check as the [VS Code terminal jump-back](#vs-code---terminal-jump-back---available-still-in-testing) below tells them apart; a plain terminal keeps the bare `claude`. The prefix drives the icon only (the editor's mark with Claude's glyph badged bottom-right). `session_key` stays `claude:<session_id>`, keyed on the agent family, so the same session stays on one row across a plain terminal and an editor.
 - Title: explicit `/rename` from the transcript's `custom-title` entries (bounded head+tail read, last one wins) beats the cwd basename. The `claudeRenameTitle` setting turns the `/rename` lookup off; your own jumplist rename (a label event) overrides either.
-- `reply`: final assistant text from the transcript (bounded tail read of `transcript_path`, never the full file). Captured on `Stop` and on **any idle notification** - by the same idle test the mapping uses, so a typeless idle `message` on current Claude Code refreshes the reply just like a typed `idle_prompt`. **Not** captured on permission/attention notifications, where the transcript's last line is stale. Filtered like the prompt; empty on any miss, so the previous reply carries.
+- `reply`: `Stop` uses inline `last_assistant_message` because the transcript may not be flushed yet. When that field is absent, read the final assistant text from the transcript (bounded tail read of `transcript_path`, never the full file). The transcript is also read on **any idle notification** - by the same idle test the mapping uses, so a typeless idle `message` on current Claude Code refreshes the reply just like a typed `idle_prompt`. **Not** captured on permission/attention notifications, where the transcript's last line is stale. Filtered like the prompt; empty on any miss, so the previous reply carries.
 - Prompt filter (shared with reply): strip leading bracket-tag prefixes (`[Image #1]` etc.); skip text that then starts with `<` (harness XML) - detail is the last *human* prompt.
 - Ask formatting: `reply` for an ask is still formatted at the emitter (never file contents; a `Write`/`Edit` input is summarized to its path), but it is no longer cropped there. Cropping happens once in the event builder against the configured caps.
 - Ask dedup: one dialog can produce both a `PermissionRequest` and a `Notification`. Both map to attention for the same session; the reducer's no-clobber rule ([events.md](events.md)) keeps the enriched reply regardless of arrival order.
@@ -278,3 +279,14 @@ No adapter needed - the CLI is the adapter:
 ```
 
 The `--origin-url` makes the row jumpable: Enter opens the run in the browser. See `.github/workflows/ci.yml` (the `signal` job) for the living example.
+
+## Mobile chat pane binding
+
+Claude and Codex root `SessionStart` / `UserPromptSubmit` hooks bind the final
+wire session key and process ID to the pane-local `@signalbox_chat_session`
+option after verifying foreground process ownership. The final key supports
+the redacted profile. Codex additionally requires a matching transcript
+`session_meta` with `source: cli` and `originator: codex-tui`; internal title
+generation and worker sessions cannot claim input. Sending requires this exact
+binding, so a previous conversation in a reused pane is refused. See
+[Set up mobile chat](mobile-chat.md).

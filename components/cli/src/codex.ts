@@ -1,7 +1,7 @@
 // Codex CLI adapter: hook payload -> event mapping (specs/adapters.md). Codex's
 // hooks (config `[features] hooks = true`, ~/.codex/hooks.json) mirror Claude
-// Code's: JSON on stdin, snake_case fields, PascalCase `hook_event_name`. Unlike
-// Claude, the Stop payload carries `last_assistant_message` directly, so reply
+// Code's: JSON on stdin, snake_case fields, PascalCase `hook_event_name`. The
+// Stop payload carries `last_assistant_message` directly, so reply
 // capture needs no transcript read.
 
 import { existsSync, opendirSync, readFileSync, statSync } from "node:fs";

@@ -14,10 +14,12 @@
 // and drops anything that fails, so a command is inert to a client that does
 // not know about commands, rather than corrupting a row.
 
-// The one command today. Jumping is machine-local - it spawns tmux against a
+// Jumping is machine-local - it spawns tmux against a
 // local socket, or raises a local window - so a phone cannot jump, but it can
 // ask the machine that owns the session to.
 export const Jump = "jump";
+/** Send a plain-text prompt to an idle coding agent in its tmux pane. */
+export const Chat = "chat";
 
 export interface Command {
   v: number;
@@ -33,18 +35,32 @@ export interface Command {
   target_host: string;
   // Where the tap happened. Provenance for the debug surface; never routing.
   host?: string;
+  /** Stable owning-machine identity; required for chat delivery. */
+  target_machine?: string;
+  /** Literal prompt text; only present on chat commands. */
+  text?: string;
 }
 
 export function validCommand(c: string): boolean {
-  return [Jump].includes(c);
+  return [Jump, Chat].includes(c);
 }
 
 export function validateCommand(c: Command): string | null {
+  if (!c || typeof c !== "object") return "command must be an object";
   if (c.v !== 1) return "v must be 1";
   if (!c.id) return "id is required";
   if (!c.ts) return "ts is required";
   if (!validCommand(c.command)) return `unknown command ${JSON.stringify(c.command)}`;
   if (!c.session_key) return "session_key is required";
   if (!c.target_host) return "target_host is required";
+  if (c.command === Chat) {
+    if (typeof c.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(c.id)) return "chat id must be a UUID";
+    if (typeof c.session_key !== "string" || typeof c.target_host !== "string") return "invalid chat target";
+    if (typeof c.target_machine !== "string" || !c.target_machine) return "target_machine is required";
+    if (typeof c.ts !== "string" || !Number.isFinite(Date.parse(c.ts))) return "invalid chat timestamp";
+    if (typeof c.text !== "string" || !c.text.trim()) return "text is required";
+    if (c.text.length > 8192) return "text exceeds 8192 characters";
+    if (/[\x00-\x08\x0b-\x1f\x7f]/.test(c.text)) return "text contains terminal control characters";
+  }
   return null;
 }

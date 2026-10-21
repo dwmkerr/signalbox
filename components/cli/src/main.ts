@@ -19,6 +19,7 @@ import { jump } from "./jump";
 import { runPair, lanIPv4 } from "./pair";
 import { captureProc, captureAgentProc } from "./proc";
 import { mapClaudeHook, claudeReply, sessionName, type ClaudeHook } from "./claude";
+import { bindTmuxChat } from "./tmuxchat";
 import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle, editorTerminalOrigin, hostPrefixedAgent, type CursorHook } from "./cursor";
 import { mapCodexHook, codexReply, codexSessionName, resolveCodexTranscript, type CodexHook } from "./codex";
 import {
@@ -514,6 +515,7 @@ async function runClaudeHook(): Promise<void> {
     transcript: workerId ? payload.agent_transcript_path : payload.transcript_path,
     proc: workerId ? undefined : proc,
   });
+  if (["SessionStart", "UserPromptSubmit"].includes(payload.hook_event_name ?? "")) bindTmuxChat(e);
   // Diagnostic (off by default): SIGNALBOX_RAW attaches the untouched hook
   // payload so it rides into the hub's own event log - inspect it from the
   // server (`state --json` / events.jsonl) instead of a stray file. Redacted
@@ -618,6 +620,9 @@ async function runCodexHook(): Promise<void> {
     origin: parent ? null : undefined,
     proc: parent ? undefined : proc,
   });
+  if (["SessionStart", "UserPromptSubmit"].includes(payload.hook_event_name ?? "")) {
+    bindTmuxChat(e, transcript, payload.session_id);
+  }
   if (process.env.SIGNALBOX_RAW) e.raw = text;
   await fireEvent(e);
 }

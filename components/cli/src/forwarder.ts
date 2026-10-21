@@ -19,6 +19,7 @@ import { openIndex, type SearchIndex } from "./searchindex";
 import { loadSettings } from "./config";
 import { buildStamp } from "./build";
 import { hubLog } from "./log";
+import { ChatExecutor } from "./chat";
 
 // A bounded replay ring prevents a long-running forwarder from retaining the
 // upstream's entire history in memory.
@@ -94,9 +95,11 @@ export class Forwarder implements RequestHandler {
   private searchTimer: ReturnType<typeof setInterval> | null = null;
   private streamCleanups = new Set<() => void>();
   private failureLogged = false;
+  private chatExecutor: ChatExecutor;
 
   constructor(private opts: ForwarderOptions) {
     this.store = new Store(opts.historyLimit);
+    this.chatExecutor = new ChatExecutor(opts.stateDir, () => this.store.list());
 
     this.spool = new Spool(
       opts.stateDir,
@@ -335,7 +338,7 @@ export class Forwarder implements RequestHandler {
         method: "POST",
         headers: this.postHeaders(),
         body: JSON.stringify(c),
-        signal: AbortSignal.timeout(postTimeoutMs),
+        signal: AbortSignal.timeout(c.command === cmd.Chat ? 15_000 : postTimeoutMs),
       });
       if (!res.ok) {
         const detail = (await res.text()).trim();
@@ -500,6 +503,7 @@ export class Forwarder implements RequestHandler {
     try {
       if (label === "command") {
         const c = JSON.parse(payload) as Command;
+        if (c.command === cmd.Chat) void this.deliverChat(c);
         for (const send of this.cmdSubs) {
           try {
             send(c);
@@ -527,6 +531,21 @@ export class Forwarder implements RequestHandler {
       }
     } catch {
       // A malformed upstream frame is skipped so later frames can still flow.
+    }
+  }
+
+  private async deliverChat(command: Command): Promise<void> {
+    try {
+      const result = await this.chatExecutor.execute(command);
+      if (!result || this.closed) return;
+      // Receipts are safe to repeat; input itself is never queued or spooled.
+      const response = await fetch(`${this.opts.upstream}/command-result`, {
+        method: "POST", headers: this.postHeaders(), body: JSON.stringify(result),
+        signal: AbortSignal.timeout(postTimeoutMs),
+      });
+      if (!response.ok) this.log(`chat receipt rejected: ${response.status}`);
+    } catch {
+      this.log("chat delivery receipt could not reach the hub");
     }
   }
 

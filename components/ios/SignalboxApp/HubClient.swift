@@ -128,6 +128,8 @@ final class HubClient: ObservableObject {
     @Published private(set) var hosts: [String] = []
     // The last command sent and what became of it, for the jump feedback line.
     @Published var jumpFeedback: JumpFeedback?
+    /// Keep unsent text when navigating between conversations.
+    @Published var chatDrafts: [String: String] = [:]
     private var feedbackTask: Task<Void, Never>?
 
     struct JumpFeedback: Equatable {
@@ -207,6 +209,7 @@ final class HubClient: ObservableObject {
         config.fingerprint = nil
         Keychain.delete(Keychain.hubFPAccount)
         sessions = []
+        chatDrafts = [:]
         hosts = []
         lastSeq = 0
         connection = .offline(since: nil)
@@ -231,6 +234,7 @@ final class HubClient: ObservableObject {
         config.fingerprint = fingerprint
         Keychain.set(fingerprint ?? "", account: Keychain.hubFPAccount)
         sessions = []
+        chatDrafts = [:]
         hosts = []
         lastSeq = 0
         connection = .connecting
@@ -467,6 +471,9 @@ final class HubClient: ObservableObject {
                 agent: event.agent,
                 event: event.event,
                 host: host,
+                machine: event.machine,
+                hasTmux: event.origin?.tmux != nil,
+                isChild: event.parentSessionKey != nil,
                 name: displayName(event),
                 prompt: event.prompt,
                 reply: event.reply,
@@ -579,6 +586,45 @@ final class HubClient: ObservableObject {
             }
         } catch {
             say(session.key, "Could not reach the hub", ok: false)
+        }
+    }
+
+    /// Wait for the owning computer's receipt; fan-out alone is not a successful send.
+    func sendChat(_ text: String, to session: Session) async -> ChatReceipt {
+        let id = UUID().uuidString
+        func outcome(_ status: String, _ message: String) -> ChatReceipt {
+            ChatReceipt(id: id, status: status, message: message)
+        }
+        if let reason = session.mobileChatUnavailable { return outcome("failed", reason) }
+        guard var request = request("command") else { return outcome("failed", "Connect to a hub before sending.") }
+        let body: [String: Any] = [
+            "v": 1, "id": id, "ts": nowTS(), "command": "chat",
+            "session_key": session.key, "target_host": session.host,
+            "target_machine": session.machine!, "host": deviceHost(), "text": text,
+        ]
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let net = makeSession(timeout: 20)
+            defer { net.finishTasksAndInvalidate() }
+            let (data, response) = try await net.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return outcome("unknown", "Delivery was not confirmed. Check the session before sending again.")
+            }
+            if http.statusCode == 401 { return outcome("failed", "Reconnect this phone to the hub before sending.") }
+            guard http.statusCode == 200 else {
+                if http.statusCode >= 500 {
+                    return outcome("unknown", "The hub could not confirm delivery. Check the session before sending again.")
+                }
+                return outcome("failed", "The hub refused mobile chat. Make sure the computer and hub run the mobile-chat build.")
+            }
+            guard let receipt = try? JSONDecoder().decode(ChatReceipt.self, from: data), receipt.id == id else {
+                return outcome("unknown", "Delivery was not confirmed. Check the session before sending again.")
+            }
+            return receipt
+        } catch {
+            return outcome("unknown", "Connection lost before delivery was confirmed. Check the session before sending again.")
         }
     }
 

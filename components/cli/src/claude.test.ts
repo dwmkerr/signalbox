@@ -197,6 +197,13 @@ describe("lastAssistantText", () => {
 });
 
 describe("claudeReply", () => {
+  test("inline final text wins over a stale or unflushed transcript", () => {
+    for (const transcript_path of [fixture, "/missing/transcript.jsonl"]) {
+      expect(claudeReply({ hook_event_name: "Stop", transcript_path, last_assistant_message: "Newest reply" })).toBe("Newest reply");
+      expect(mapClaudeHook({ hook_event_name: "SubagentStop", agent_id: "worker", agent_transcript_path: transcript_path, last_assistant_message: "Worker reply" })?.reply).toBe("Worker reply");
+    }
+    expect(claudeReply({ hook_event_name: "Stop", transcript_path: fixture, last_assistant_message: "" })).toBe("");
+  });
   test("claude returns the reply as raw markdown", () => {
     const dir = mkdtempSync(join(tmpdir(), "sb-"));
     const p = join(dir, "t.jsonl");

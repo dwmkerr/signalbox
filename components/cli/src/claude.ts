@@ -27,6 +27,8 @@ export interface ClaudeHook {
   prompt?: string;
   raw_prompt?: string;
   transcript_path?: string;
+  /** Final text supplied by Stop/SubagentStop before the transcript is flushed. */
+  last_assistant_message?: string;
   // PermissionRequest / PreToolUse: the pending tool call itself.
   tool_name?: string;
   tool_input?: Record<string, unknown>;
@@ -82,7 +84,7 @@ export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
     case "SubagentStart":
       return h.agent_id ? { eventType: Busy, reason: "session_start", detail: "" } : null;
     case "SubagentStop":
-      return h.agent_id ? { eventType: Done, reason: "stop", detail: "", reply: h.agent_transcript_path ? stripHarness(lastAssistantText(h.agent_transcript_path)) : "" } : null;
+      return h.agent_id ? { eventType: Done, reason: "stop", detail: "", reply: claudeReply(h) } : null;
     case "SessionStart":
       return { eventType: Busy, reason: "session_start", detail: "" };
     case "UserPromptSubmit": {
@@ -153,6 +155,10 @@ export function mapClaudeHook(h: ClaudeHook, clearEnds = true): Mapped | null {
 // tail read, filtered like detail; cropping happens once in buildEvent. Empty
 // on any miss so the reducer's carry keeps the previous reply.
 export function claudeReply(h: ClaudeHook): string {
+  if (h.hook_event_name === "Stop" || h.hook_event_name === "SubagentStop") {
+    if (typeof h.last_assistant_message === "string") return stripHarness(h.last_assistant_message);
+    if (h.hook_event_name === "SubagentStop") return h.agent_transcript_path ? stripHarness(lastAssistantText(h.agent_transcript_path)) : "";
+  }
   const speaking = h.hook_event_name === "Stop" || isIdleNotification(h);
   if (speaking && h.transcript_path) {
     return stripHarness(lastAssistantText(h.transcript_path));

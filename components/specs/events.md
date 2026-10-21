@@ -309,11 +309,12 @@ The macOS jumplist and the iOS board each collapse older rows behind an
 
 Everything above is an **event**: a fact about what happened. Facts are logged, folded into a session, and replayed to whoever reconnects. A **command** is a request addressed to a machine *right now*. It is not logged, folded, or replayed.
 
-There is one command today.
+There are two commands.
 
 | Command | Meaning |
 |---|---|
 | `jump` | Whichever machine owns this session, jump to it. |
+| `chat` | Paste a plain-text prompt into the owning machine's verified tmux agent pane and submit it. |
 
 Jumping is machine-local: it spawns tmux against a socket on a local filesystem, or raises a local window. A phone cannot jump itself, but it can ask the laptop to, over the hub bus every surface listens on.
 
@@ -338,7 +339,7 @@ Jumping is machine-local: it spawns tmux against a socket on a local filesystem,
 }
 ```
 
-**A command is never persisted.** The hub logs every event, and `GET /stream?since=N` replays that log to a reconnecting client, so a logged jump would fire again on the next app restart and move a window hours after the tap. A client whose `/state` is empty reconnects from seq 0 and would replay *every jump ever fired*. So a command skips the log, the reducer, and `seq`; it exists only in flight. `seq` stays contiguous across the log as commands pass through, and a command cannot be acked, ordered, or recovered. If nobody is listening, nothing happens.
+**Command payloads are never persisted or replayed.** The hub logs every event, and `GET /stream?since=N` replays that log to a reconnecting client, so a logged jump would fire again on the next app restart and move a window hours after the tap. Commands skip the event log, reducer, and `seq`; they exist only in flight. Chat separately records a local receipt containing its ID, target, content hash and outcome, never the prompt, to prevent duplicate input after an executor restart. A receipt is never executed or replayed.
 
 It carries no `seq` for a second reason: the hub restarts `seq` from the highest *persisted* value on boot, so a seq consumed but never written would be handed out again after a restart, and a client's monotonic guard would then silently drop that real event.
 
@@ -355,13 +356,55 @@ event: command   data: {...}     a command (no seq, live-only, never replayed)
 
 | Endpoint | Behaviour |
 |---|---|
-| `POST /command` | Validate, fan out to every live stream, forget. Returns `{"ok": true, "delivered": 2}`. Requires `Content-Type: application/json`. |
+| `POST /command` | `jump`: validate and fan out, returning `{"ok": true, "delivered": 2}`. `chat`: wait up to ten seconds for a correlated execution receipt. Requires `Content-Type: application/json`. |
+| `POST /command-result` | An owning forwarder returns a chat receipt to the hub. Uses the same authentication as commands. Unknown IDs or mismatched targets return 409. |
 
 `delivered` counts the listeners the command was written to, confirming fan-out only. `delivered: 0` means no machine is listening; a caller should report that plainly rather than leave it to a timeout.
 
-The hub does not adjudicate targets: whoever owns the session decides whether to act, so a command naming a session the hub has never seen is still delivered.
+For jump, whoever owns the session decides whether to act, so a command naming a session the hub has never seen is still delivered.
 
 Executing a remote jump fires a `seen` from the machine that did it, exactly as a local jump does, and `seen` fires only once the jump has landed. That is the confirmation: the caller learns its jump worked by watching the board go quiet.
+
+### Mobile chat spike
+
+A chat command adds `target_machine` (the session's stable `machine` value) and
+`text` to the jump envelope, and sets `command` to `chat`. Its `id` is a UUID.
+Text is nonempty, at most 8,192 UTF-16 code units, and contains no terminal control
+characters other than newline and tab. The timestamp is a correctness gate for
+chat: requests more than 15 seconds old or more than 60 seconds in the future
+are refused. The phone never automatically retries a send.
+
+The local hub executes its own commands; in remote mode, the owning forwarder
+executes them and returns a receipt. The cloud hub never runs tmux. Only the
+exact machine, host and session match can act. Input is supported for idle root
+Claude Code and Codex sessions. Busy sessions, permission or question prompts,
+stopped processes, child agents, missing panes and tmux copy mode are refused.
+The captured agent process must still match its executable name, descend from
+the pane process, and own the foreground process group. A guessed jump target
+is not sufficient. Codex's shared daemon fails this check; start it inside tmux
+with `codex --no-daemon` for this spike. The pane-local active conversation
+binding must match the session and process, and the live cursor must be at a
+recognized empty agent prompt. Existing drafts and unknown input screens are
+refused. See [adapter binding](adapters.md#mobile-chat-pane-binding).
+
+The executor loads a private tmux buffer from stdin, pastes with bracketed-paste
+handling, rechecks the target and sends Enter. No prompt is interpolated into a
+shell command. Keep the terminal input empty before sending. Process checks and
+terminal input are not atomic, so this is a local spike, not a guarantee against
+a process exiting at the exact instant of input.
+
+The HTTP response is `{id, session_key, target_machine, status, message}`.
+`status` is `sent` (tmux accepted paste and Enter), `failed` (refused before
+paste), or `unknown` (delivery cannot be established). `sent` is not proof that
+the agent accepted or completed a turn; its hooks supply the actual conversation
+updates. Unknown delivery retains the draft and asks the user to check the
+session before sending again. Expiry and reconnection never submit old text.
+
+The executor reserves the command ID on disk before touching tmux. Repeated IDs
+with identical content return the saved outcome; changed content is refused.
+An incomplete receipt is reported as unknown and never retried. One message per
+session executes at a time. Native Codex input, attachments, streamed tokens,
+interrupts and remote approval controls are outside this spike.
 
 ## The hub API
 
@@ -370,7 +413,8 @@ The default posture is `http://127.0.0.1:8377`, loopback only, with no auth. Wid
 | Endpoint | Behaviour |
 |---|---|
 | `POST /events` | Validate, assign `seq`, append to the log, update state, broadcast. Returns `{"seq": 118}`. Requires `Content-Type: application/json`. |
-| `POST /command` | Fan out a [command](#commands) to every live stream and forget it: no `seq`, no log, no state. Returns `{"ok": true, "delivered": 2}`. |
+| `POST /command` | Dispatch a live-only [command](#commands): no `seq`, no event log. Jump returns `{"ok": true, "delivered": 2}`; chat waits for an execution receipt. |
+| `POST /command-result` | Accept a correlated chat receipt from the owning forwarder; never ingest it as an event. |
 | `POST /process-check` | Check captured processes for visible sessions on this hub's host and ingest `done` / `reason: "exited"` for confirmed deaths. Returns `{"checked": true}`. The desktop calls it after opening the jumplist, so the process scan does not delay the panel. |
 | `GET /state` | `{"sessions": [...], "older_horizon_seconds": 86400}` with sessions in display order. The horizon is how long since engagement a row may go before the surfaces draw it as older. |
 | `GET /exchanges?session=K&limit=N&before=S` | `{"session_key": "...", "exchanges": [...], "next_before": 118}` - the newest `N` exchanges for session `K`, **oldest first**. `session` is required and carries the raw `session_key` as an ordinary query value (no path-encoding of keys containing `:`). `limit` defaults to 20 and is clamped to `hub.historyLimit`; `before` pages backwards by returning only exchanges whose `seq` is lower, and `next_before` is the oldest `seq` in the page, so a client pages with it until `exchanges` comes back empty. `400` for a missing `session`; `404` for a session that is not on the board (distinct from a session with no history yet, which is `200` with an empty list). The hub and the [forwarder](#the-forwarder) serve this response contract from their reducer rings rather than from `events.jsonl`. `Cache-Control: no-store`. |
