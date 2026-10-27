@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/dwmkerr/signalbox/compare/v0.1.9...v0.1.10) (2026-10-27)
+
+
+### Bug Fixes
+
+* flag tmux sessions with an option instead of renaming them ([#95](https://github.com/dwmkerr/signalbox/issues/95)) ([353279a](https://github.com/dwmkerr/signalbox/commit/353279a4a4a6ef384937e5ef39f483e651ca5f58)), closes [#94](https://github.com/dwmkerr/signalbox/issues/94)
+
 ## [0.1.9](https://github.com/dwmkerr/signalbox/compare/v0.1.8...v0.1.9) (2026-10-15)
 
 
