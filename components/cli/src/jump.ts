@@ -6,7 +6,7 @@ import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import { newSeen, type Event } from "./event";
 import { Client, fetchState, stateDir } from "./client";
-import { socketPath, bellSuffix } from "./tmux";
+import { socketPath } from "./tmux";
 import { cursorBundle } from "./cursor";
 
 // iTerm2 gets a window-precise raise because its AppleScript exposes session
@@ -241,12 +241,11 @@ export async function jumpTo(hubURL: string, e: Event): Promise<void> {
     return command(tmuxBinary(), full).status === 0;
   };
 
-  // Target the pane id, not the session name: our own bell suffix renames
-  // sessions, so names are unstable. Fall back to exact session:window
-  // ("=" pins exact matching; the live name may carry the bell suffix).
+  // Target the pane id first: the user can rename a session after the origin
+  // was captured. Fall back to exact session:window ("=" pins exact matching).
   const targets: string[] = [];
   if (t.pane) targets.push(t.pane);
-  targets.push(`=${t.session}:${t.window}`, `=${t.session}${bellSuffix}:${t.window}`);
+  targets.push(`=${t.session}:${t.window}`);
 
   // Outside tmux there is no "current client"; same when jumping to a
   // different server - pick the most-recently-active client explicitly.
