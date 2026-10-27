@@ -234,8 +234,8 @@ bind-key j display-popup -E -w 80% -h 15 "command -v signalbox >/dev/null && sig
 set-hook -g pane-focus-in 'run-shell -b "command -v signalbox >/dev/null 2>&1 && signalbox tmux seen-pane --socket #{socket_path} --pane #{pane_id} || true"'
 ```
 
-- Origin capture: any hook fired from a tmux pane records session/window/pane (our own 🔔 suffix stripped from the session name), the server socket, and the terminal app's bundle id (`__CFBundleIdentifier`) - everything jump needs, captured at fire time. The pane beats the editor-terminal check above.
-- In-terminal signals ride every fire, hub or no hub: attention/done/error ring the bell, set an amber pane background and suffix the session name with 🔔; busy/ended clear all three.
+- Origin capture: any hook fired from a tmux pane records session/window/pane, the server socket, and the terminal app's bundle id (`__CFBundleIdentifier`) - everything jump needs, captured at fire time. The pane beats the editor-terminal check above.
+- In-terminal signals ride every fire, hub or no hub: attention/done/error ring the bell, set an amber pane background (pane option `@claude_notify`) and set the session option `@claude_notify_session` on the pane's own session. The session is never renamed, so `new-session -A -s <name>` keeps attaching to it. Busy/ended clear the pane's signals; the session option is cleared only once no pane in the session is still flagged. Focusing a pane (`tmux seen-pane`) clears it the same way. Show the session marker in `choose-tree` with `#{?@claude_notify_session,🔔 ,}` ([tmux docs](../../docs/tmux.md)).
 - Detection (`init`): signalbox in the *running* server's `status-right` counts as set up (options set live never touch a file), as does either `~/.tmux.conf` or the XDG `~/.config/tmux/tmux.conf`.
 
 ## OpenCode (plugin, `components/cli/adapters/opencode/signalbox.js`)

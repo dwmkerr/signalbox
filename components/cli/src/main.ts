@@ -424,9 +424,9 @@ async function runClear(): Promise<void> {
   console.log(`cleared ${keys.length} session${keys.length === 1 ? "" : "s"}`);
 }
 
-// Presence hook for tmux pane-focus-in: any flagged session that originated
-// at the focused pane is marked seen. Fires nothing when nothing is flagged,
-// so focus churn cannot spam the event log.
+// Presence hook for tmux pane-focus-in: the focused pane loses its in-terminal
+// signals, and any flagged session that originated there is marked seen. Fires
+// nothing when nothing is flagged, so focus churn cannot spam the event log.
 async function runSeenPane(args: string[]): Promise<void> {
   const { flags } = parseFlags(args);
   const socket = flags["socket"] ?? "";
@@ -435,6 +435,8 @@ async function runSeenPane(args: string[]): Promise<void> {
     logTo(stateDir(), "seen-pane: usage: signalbox tmux seen-pane --socket <path> --pane <id>");
     return;
   }
+  // Before the hub fetch, so a dead hub cannot leave a looked-at pane lit.
+  tmux.clearPane(pane, socket);
   // Short timeout: pane-focus-in fires on every pane switch, so a dead hub
   // must cost one quick failure, not a hang.
   let doc;

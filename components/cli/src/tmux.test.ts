@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { currentOrigin } from "./tmux";
+import { clear, clearPane, currentOrigin, notify } from "./tmux";
 
 // These drive a real tmux server, so they only run where tmux exists. The
 // macOS CI image ships without it, and a suite that throws in beforeAll fails
@@ -100,5 +100,63 @@ describe.skipIf(!hasTmux)("currentOrigin pane resolution", () => {
     delete process.env.TMUX;
     expect(currentOrigin(dirB)).toBeNull();
     process.env.TMUX = saved;
+  });
+});
+
+describe.skipIf(!hasTmux)("in-terminal signals", () => {
+  let first = "";
+  let second = "";
+
+  beforeAll(() => {
+    if (!hasTmux) return;
+    tmux("new-session", "-d", "-s", "agents", "-c", dirA);
+    tmux("split-window", "-t", "agents:", "-c", dirA);
+    [first, second] = tmux("list-panes", "-t", "agents:", "-F", "#{pane_id}").split("\n") as [string, string];
+  });
+
+  const sessionName = () => tmux("display-message", "-p", "-t", first, "#{session_name}");
+  const sessionFlag = () => tmux("show-options", "-v", "-t", "agents", "@claude_notify_session");
+  const paneFlag = (pane: string) => tmux("display-message", "-p", "-t", pane, "#{@claude_notify}");
+
+  // A rename broke `new-session -A -s <name>`: the next attach could not find
+  // the session and created a duplicate beside it.
+  test("notify flags the pane's session without renaming it", () => {
+    process.env.TMUX_PANE = first;
+    notify();
+    expect(sessionName()).toBe("agents");
+    expect(sessionFlag()).toBe("1");
+    expect(paneFlag(first)).toBe("1");
+    clear();
+  });
+
+  test("the session flag stays while another pane in it is still waiting", () => {
+    process.env.TMUX_PANE = first;
+    notify();
+    process.env.TMUX_PANE = second;
+    notify();
+    clear();
+    expect(paneFlag(second)).toBe("");
+    expect(sessionFlag()).toBe("1");
+    process.env.TMUX_PANE = first;
+    clear();
+    expect(sessionFlag()).toBe("");
+  });
+
+  // pane-focus-in hooks run without $TMUX, so the socket must be enough.
+  test("clearPane reaches the server by socket alone", () => {
+    process.env.TMUX_PANE = first;
+    notify();
+    const saved = process.env.TMUX;
+    delete process.env.TMUX;
+    clearPane(first, socket);
+    process.env.TMUX = saved;
+    expect(paneFlag(first)).toBe("");
+    expect(sessionFlag()).toBe("");
+  });
+
+  test("clearPane leaves the background of a pane it never flagged", () => {
+    tmux("set-option", "-p", "-t", second, "window-style", "bg=blue");
+    clearPane(second, socket);
+    expect(tmux("show-options", "-pv", "-t", second, "window-style")).toBe("bg=blue");
   });
 });

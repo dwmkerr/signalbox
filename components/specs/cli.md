@@ -462,7 +462,7 @@ The app also writes `hub.remoteUrl` into the same section: the remote hub addres
 - `signalbox hook claude` - reads a Claude Code hook payload on stdin and fires the mapped event ([agent integrations](adapters.md)).
 - `signalbox hook cursor` - reads a Cursor hook payload on stdin and fires the mapped event ([agent integrations](adapters.md)). Available (Cursor Hooks are beta upstream).
 - `signalbox hook codex` - reads a Codex hook payload on stdin and fires the mapped event ([agent integrations](adapters.md)). Needs `[features] hooks = true` in `~/.codex/config.toml`.
-- `signalbox tmux seen-pane --socket S --pane P` - for tmux's `pane-focus-in` hook: looking at a pane clears its flag, exactly like jumping to it.
+- `signalbox tmux seen-pane --socket S --pane P` - for tmux's `pane-focus-in` hook: looking at a pane clears its flag, exactly like jumping to it, and clears its in-terminal signals (pane background, and the session option once no pane in the session is flagged). The tmux signals clear even when the hub is down.
 - `signalbox drain` - flush the offline spool. Every event-sending command drains opportunistically before posting, so this is rarely needed by hand.
 
 The flat forms (`signalbox ack`, `signalbox claude-hook`, `signalbox tmux-status`, …) still work as aliases, and `install`/`setup` are aliases for `init`, so existing configs keep running.
