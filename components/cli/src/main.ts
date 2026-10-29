@@ -20,6 +20,7 @@ import { runPair, lanIPv4 } from "./pair";
 import { captureProc, captureAgentProc } from "./proc";
 import { mapClaudeHook, claudeReply, sessionName, type ClaudeHook } from "./claude";
 import { mapCursorHook, cursorReply, cursorPrompt, cursorWorkspace, cursorBundle, editorTerminalOrigin, hostPrefixedAgent, type CursorHook } from "./cursor";
+import { ttyOrigin } from "./tty";
 import { mapCodexHook, codexReply, codexSessionName, resolveCodexTranscript, type CodexHook } from "./codex";
 import {
   loadSettings, saveSettings, settingsPath, normalizeBindInput, lanHint,
@@ -228,11 +229,17 @@ async function buildEvent(opts: {
   let origin: Origin | null = null;
   // An explicit origin (e.g. a Cursor session, which runs no tmux pane) wins;
   // otherwise a URL origin, otherwise the calling tmux pane, otherwise an
-  // editor's integrated terminal (VS Code / Cursor). tmux beats the editor
-  // check: a pane is a more precise jump target than an app window.
+  // editor's integrated terminal (VS Code / Cursor), otherwise the iTerm2 or
+  // Terminal.app tab the agent runs in. tmux beats both: a pane is the more
+  // precise jump target.
   if (opts.origin !== undefined) origin = opts.origin;
   else if (opts.originURL) origin = { kind: "url", url: opts.originURL };
-  else origin = tmux.currentOrigin(cwd, ev.agentFamily(opts.agent)) ?? editorTerminalOrigin(process.env);
+  else {
+    const family = ev.agentFamily(opts.agent);
+    origin = tmux.currentOrigin(cwd, family)
+      ?? editorTerminalOrigin(process.env)
+      ?? ttyOrigin(process.env, opts.proc?.pid ?? process.pid, family);
+  }
   let sessionKey = opts.sessionKey ?? "";
   if (!sessionKey) {
     // Key on the agent family, never the host-prefixed display name: a

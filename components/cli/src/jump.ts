@@ -12,6 +12,7 @@ import { cursorBundle } from "./cursor";
 // iTerm2 gets a window-precise raise because its AppleScript exposes session
 // ttys; other terminals get a generic app activation.
 const iterm2Bundle = "com.googlecode.iterm2";
+const terminalBundle = "com.apple.Terminal";
 
 // command strips TMPDIR so a tmux invocation without -S still resolves the
 // same default socket directory as terminal shells (GUI TMPDIR differs).
@@ -99,6 +100,32 @@ end run`;
 function raiseITermWindow(tty: string): boolean {
   const out = command("osascript", ["-", tty], { input: iTermRaiseScript });
   return out.status === 0 && out.stdout.toString().trim() === "raised";
+}
+
+// Terminal.app tabs expose their tty too. The script only selects the tab and
+// orders its window: `open -b` activates Terminal more reliably than an
+// AppleScript `activate` while another app is frontmost.
+const terminalRaiseScript = `on run argv
+	set targetTty to item 1 of argv
+	tell application "Terminal"
+		repeat with w in windows
+			repeat with t in tabs of w
+				if tty of t is targetTty then
+					set selected of t to true
+					set index of w to 1
+					return "raised"
+				end if
+			end repeat
+		end repeat
+	end tell
+	return "not-found"
+end run`;
+
+function raiseTerminalTab(tty: string): boolean {
+  const out = command("osascript", ["-", tty], { input: terminalRaiseScript });
+  if (out.status !== 0 || out.stdout.toString().trim() !== "raised") return false;
+  runCmd("open", "-b", terminalBundle);
+  return true;
 }
 
 // isRunning reports whether an app with this bundle id is already running,
@@ -226,6 +253,15 @@ export async function jumpTo(hubURL: string, e: Event): Promise<void> {
     // for old events that predate it.
     const bundle = e.origin.cursor.bundle || cursorBundle;
     if (!raiseEditor(bundle, e.cwd ?? "")) throw new Error(`could not raise editor (${bundle})`);
+    await fireSeen(hubURL, e.session_key);
+    return;
+  }
+  if (e.origin.tty) {
+    // Only terminals already running are probed, so none is launched. A miss
+    // means the tab closed; raising the app instead would land on another tab.
+    const tty = e.origin.tty.path;
+    const raised = (isRunning(iterm2Bundle) && raiseITermWindow(tty)) || (isRunning(terminalBundle) && raiseTerminalTab(tty));
+    if (!raised) throw new Error(`no iTerm or Terminal tab holds ${tty}; it may have closed`);
     await fireSeen(hubURL, e.session_key);
     return;
   }
