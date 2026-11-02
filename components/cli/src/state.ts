@@ -32,6 +32,10 @@ export interface Exchange {
 
 export const DefaultHistoryLimit = 1000;
 
+// Claude subagent rows are keyed `<owner>:agent:<id>` (see main.ts), nested
+// workers included, so the owner is always the prefix before the first infix.
+const AgentInfix = ":agent:";
+
 // Store is the LWW reducer over events keyed by session_key.
 export class Store {
   private sessions = new Map<string, Event>();
@@ -90,6 +94,16 @@ export class Store {
             cur.hidden = true;
             cur.event = ev.Done;
             cur.reason = e.reason;
+            // In-process subagents cannot outlive their owner, so they leave
+            // the board with it. Otherwise their unread rows keep the exited
+            // owner on the board as tree context.
+            const prefix = e.session_key + AgentInfix;
+            for (const [key, child] of this.sessions) {
+              if (key.startsWith(prefix)) {
+                delete child.pinned;
+                child.hidden = true;
+              }
+            }
             return;
           }
           if (cur.event === ev.Busy) {
@@ -210,8 +224,18 @@ export class Store {
     for (const k of ["reason", "cwd", "title", "prompt", "reply"] as const) {
       if (e[k] === "") delete e[k];
     }
+    // A subagent's SubagentStop can land after its owner's SessionEnd; it is
+    // still history, but must not bring the exited branch back.
+    if (this.ownerExited(e.session_key)) e.hidden = true;
     this.recordExchange(incoming, incoming.seq ?? 0);
     this.sessions.set(e.session_key, e);
+  }
+
+  private ownerExited(sessionKey: string): boolean {
+    const i = sessionKey.indexOf(AgentInfix);
+    if (i < 0) return false;
+    const owner = this.sessions.get(sessionKey.slice(0, i));
+    return !!owner && !!owner.hidden && owner.reason === "session_end";
   }
 
   // The event TYPE decides which turn a reply belongs to: a busy is a turn
