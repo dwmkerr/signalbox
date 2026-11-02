@@ -6,6 +6,17 @@ final class ChatTextView: NSTextView {
     var onSend: (() -> Void)?
     var onEscape: (() -> Void)?
 
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty else { return }
+        let origin = NSPoint(x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 0),
+                             y: textContainerInset.height)
+        ("Message  ⌘L" as NSString).draw(at: origin, withAttributes: [
+            .font: font ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+            .foregroundColor: NSColor.placeholderTextColor,
+        ])
+    }
+
     override func keyDown(with event: NSEvent) {
         let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
         if (event.keyCode == 36 || event.keyCode == 76), flags == .command {
@@ -25,7 +36,7 @@ final class ChatComposer: NSView, NSTextViewDelegate {
     private let drafts: ChatDrafts
     private let status = NSTextField(wrappingLabelWithString: "")
     private let sendButton = NSButton(title: "Send ⌘↩", target: nil, action: nil)
-    private let helpButton = NSButton(title: "Set up mobile chat", target: nil, action: nil)
+    private let helpButton = NSButton(title: "Set up tmux", target: nil, action: nil)
     private var key: String?
     private var agent = ""
     private var unavailable: String?
@@ -40,7 +51,7 @@ final class ChatComposer: NSView, NSTextViewDelegate {
         editor.isAutomaticQuoteSubstitutionEnabled = false
         editor.isAutomaticDashSubstitutionEnabled = false
         editor.isAutomaticTextReplacementEnabled = false
-        editor.font = .systemFont(ofSize: 12 * scale)
+        editor.font = .monospacedSystemFont(ofSize: 12 * scale, weight: .regular)
         editor.textColor = .labelColor
         editor.backgroundColor = NSColor(white: 0.12, alpha: 1)
         editor.insertionPointColor = .labelColor
@@ -52,7 +63,7 @@ final class ChatComposer: NSView, NSTextViewDelegate {
         editor.delegate = self
         editor.setAccessibilityIdentifier("chat-message")
         editor.setAccessibilityLabel("Message")
-        editor.toolTip = "Return inserts a newline. Command-Return sends. Escape returns to search."
+        editor.toolTip = "Command-L focuses this message box. Return inserts a newline. Command-Return sends. Escape returns to search."
         editor.onSend = { [weak self] in self?.send() }
         editor.onEscape = { [weak self] in self?.onEscape?() }
 
@@ -81,18 +92,23 @@ final class ChatComposer: NSView, NSTextViewDelegate {
         let controls = NSStackView(views: [helpButton, NSView(), sendButton])
         controls.orientation = .horizontal
         controls.distribution = .fill
+        let stack = NSStackView(views: [status, scroll, controls])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4 * scale
+        stack.detachesHiddenViews = true
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
         for view in [status, scroll, controls] {
             view.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(view)
-            view.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
-            view.trailingAnchor.constraint(equalTo: trailingAnchor).isActive = true
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         NSLayoutConstraint.activate([
-            status.topAnchor.constraint(equalTo: topAnchor),
-            scroll.topAnchor.constraint(equalTo: status.bottomAnchor, constant: 5 * scale),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
             scroll.heightAnchor.constraint(equalToConstant: 54 * scale),
-            controls.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 4 * scale),
-            controls.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         drafts.changed = { [weak self] in self?.refresh() }
     }
@@ -118,6 +134,7 @@ final class ChatComposer: NSView, NSTextViewDelegate {
         guard let key else { return }
         let draft = drafts.text[key] ?? ""
         if editor.string != draft { editor.string = draft }
+        editor.needsDisplay = true
         let sending = drafts.sending.contains(key)
         // Keep the field focused during a send so subsequent editing keys cannot hit the board.
         editor.isEditable = !sending && unavailable == nil
@@ -125,7 +142,8 @@ final class ChatComposer: NSView, NSTextViewDelegate {
         sendButton.title = sending ? "Sending…" : "Send ⌘↩"
         let receipt = drafts.receipts[key]
         let validation = draft.utf16.count > 8192 ? "Keep messages under 8,192 characters." : nil
-        status.stringValue = unavailable ?? validation ?? receipt?.message ?? "Message · ⌘L to type"
+        status.stringValue = unavailable ?? validation ?? receipt?.message ?? ""
+        status.isHidden = status.stringValue.isEmpty
         status.textColor = receipt != nil && receipt?.status != "sent" ? .systemOrange : .secondaryLabelColor
     }
 
@@ -147,7 +165,9 @@ final class ChatComposer: NSView, NSTextViewDelegate {
         let launch = codex ? "codex --no-daemon" : "claude"
         let resume = codex ? "codex --no-daemon resume \(id)" : "claude --resume \(id)"
         let text = NSTextField(wrappingLabelWithString: """
-        Set up mobile chat
+        Chat through tmux
+
+        Signalbox pastes your message into the agent's tmux pane and presses Enter. The session link makes sure the message reaches the conversation you selected.
 
         1. In your project directory, start tmux:
         tmux new -s mobile-chat
@@ -158,7 +178,7 @@ final class ChatComposer: NSView, NSTextViewDelegate {
         For an existing conversation, finish its task and exit the agent first, then resume inside tmux:
         \(resume)
 
-        3. Keep Signalbox running with its agent hooks installed. Send one message in the terminal to connect the session, then wait until it is idle.
+        3. Use the same Signalbox build for the app and CLI hooks. Send one message in the terminal to connect the session, then wait until it is idle.
 
         4. Leave the terminal's draft empty. Send from this jump box or your phone. Answer permissions and interactive questions in the terminal.
 

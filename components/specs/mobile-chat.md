@@ -2,8 +2,14 @@
 
 The local spike lets the Signalbox jump box and iOS app send text to an idle Claude Code or Codex
 session running in tmux on your computer. Keep Signalbox and the computer running.
-The phone and the owning computer's hub or forwarder need the mobile-chat build;
-a remote hub also needs it. No native agent input API is used yet.
+Signalbox pastes the message into the agent's tmux pane and presses Enter. The
+conversation link prevents a stale session row from sending to a different
+conversation in the same pane.
+
+The app, CLI used by the agent hooks, and owning computer's hub or forwarder
+need the same mobile-chat build; a remote hub also needs it. Check
+`signalbox version` if the app is updated but a terminal message does not link the session.
+No native agent input API is used yet.
 
 1. In your project directory, start tmux: `tmux new -s mobile-chat`.
 2. Start `claude`, or start `codex --no-daemon`. Codex's shared daemon cannot
@@ -14,6 +20,9 @@ a remote hub also needs it. No native agent input API is used yet.
 4. Keep the terminal's input empty. In the jump box, click Message or press `⌘L`,
    type, and use `⌘Return` or Send. Return inserts a newline and Escape returns
    to search. On your phone, open the session, type a message and tap Send.
+
+The jump box uses monospace input with `Message ⌘L` inside the empty field.
+Its **Set up tmux** link opens the setup help; on iOS the link is **Set up mobile chat**.
 
 To continue an existing conversation, finish its task and exit the agent first.
 Inside tmux, run `claude --resume <session-id>` or

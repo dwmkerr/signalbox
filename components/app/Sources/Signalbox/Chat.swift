@@ -27,7 +27,7 @@ struct ChatSession {
         if !["claude", "codex"].contains(family) { return "Chat supports Claude Code and Codex sessions." }
         if child { return "Open the owning session to chat with this agent." }
         if stopped { return "This agent is no longer running." }
-        if !hasTmux || machine?.isEmpty != false { return "Coding agent sessions must run in tmux for mobile chat." }
+        if !hasTmux || machine?.isEmpty != false { return "Run this session inside tmux to send messages from Signalbox." }
         if event == "busy" { return "Wait for this task to finish before sending." }
         if event == "attention" { return "Answer the pending question or permission request in the terminal first." }
         return nil

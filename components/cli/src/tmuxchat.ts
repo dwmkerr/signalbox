@@ -55,7 +55,11 @@ function paneConnection(session: Event) {
     if (pane.status !== 0) return "The tmux pane is no longer available.";
     const [id, pid, dead, mode, bound] = pane.stdout.trim().split("\t");
     if (id !== target.pane || dead !== "0" || mode !== "0") return "Leave tmux copy mode and reconnect the agent before sending.";
-    if (requireBinding && bound !== binding) return "This conversation is not active in that pane. Set up mobile chat and send a message in its terminal first.";
+    if (requireBinding && bound !== binding) {
+      return bound
+        ? "This tmux pane is linked to a different conversation. Open this session in its terminal and send a message first."
+        : "Send one message in this session's terminal to connect it, then try again.";
+    }
     const ps = spawnSync("ps", ["-axo", "pid=,ppid=,pgid=,tpgid=,comm="], { encoding: "utf8", timeout: 2000 });
     if (ps.status !== 0) return "Could not verify the agent process.";
     const processes = ps.stdout.split("\n").flatMap(line => {
@@ -63,7 +67,9 @@ function paneConnection(session: Event) {
       return match ? [{ pid: +match[1], parent: +match[2], group: +match[3], foreground: +match[4], name: basename(match[5]) }] : [];
     });
     if (!ownsChatPane(processes, Number(pid), session.proc!.pid, session.proc!.name!)) {
-      return "Cannot verify this session's tmux connection. Set up mobile chat; launch Codex with --no-daemon.";
+      return family === "codex"
+        ? "Cannot verify this session's tmux connection. Launch Codex inside tmux with --no-daemon."
+        : "Cannot verify this session's tmux connection. Resume Claude inside tmux.";
     }
     return null;
   };
@@ -118,14 +124,14 @@ export interface TmuxChatOutcome {
 /** Paste literal text into a verified, idle agent pane without activating any window. */
 export async function sendTmuxChat(session: Event, text: string): Promise<TmuxChatOutcome> {
   const fail = (message: string): TmuxChatOutcome => ({ status: "failed", message });
-  if (!["claude", "codex"].includes(agentFamily(session.agent))) return fail("Mobile chat supports Claude Code and Codex.");
+  if (!["claude", "codex"].includes(agentFamily(session.agent))) return fail("Chat supports Claude Code and Codex.");
   if (session.parent_session_key) return fail("Open the owning session to chat with this agent.");
   if (session.reason === "exited" || session.reason === "session_end") return fail("This agent is no longer running.");
   if (session.event === "busy") return fail("Wait for this task to finish before sending.");
   if (session.event === "attention") return fail("Answer the pending question or permission request in the terminal first.");
   const connection = paneConnection(session);
   if (!connection) {
-    return fail("This session is not connected for mobile chat. Set up mobile chat.");
+    return fail("Run this session inside tmux to send messages from Signalbox.");
   }
   const { run, pane } = connection;
   const verify = () => connection.verify(true);

@@ -162,7 +162,7 @@ describe("chat acknowledgements", () => {
       const receipt = await res.json();
       expect(receipt.id).toBe(c.id);
       expect(receipt.status).toBe("failed");
-      expect(receipt.message).toContain("Set up mobile chat");
+      expect(receipt.message).toContain("inside tmux");
       expect(readFileSync(join(remoteDir, "events.jsonl"), "utf8")).not.toContain(c.id);
       expect(hub.sessions()).toHaveLength(1);
     } finally {

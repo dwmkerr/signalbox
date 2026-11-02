@@ -107,12 +107,13 @@
   .preview { flex:1; padding:18px 22px; min-height:360px; background:#000;
              display:flex; flex-direction:column; }
   .chat-composer { margin:10px 0 8px; font-size:11px; }
-  .chat-composer textarea { width:100%; height:54px; margin:5px 0; background:#1e1e21; color:#ededed; border:0; border-radius:7px; padding:7px; resize:none; font:12px -apple-system,sans-serif; }
+  .chat-composer textarea { width:100%; height:54px; margin:5px 0; background:#1e1e21; color:#ededed; border:0; border-radius:7px; padding:7px; resize:none; font:12px 'SF Mono',ui-monospace,Menlo,monospace; }
   .chat-controls { display:flex; align-items:center; justify-content:space-between; }
   .chat-controls a { color:#0a84ff; text-decoration:none; }
   .chat-controls button { color:#ededed; background:#2c2c31; border:1px solid #ffffff22; border-radius:5px; padding:3px 9px; }
   .chat-controls button:disabled { opacity:.4; }
   #chat-status { color:#98989d; }
+  #chat-status:empty { display:none; }
   .term { flex:1; min-height:0; overflow-y:auto;
           font-family:'SF Mono',ui-monospace,Menlo,monospace; font-size:11.5px; line-height:1.75; color:#C8C8CC; }
   .term .turn { margin-bottom:12px; }
@@ -242,9 +243,9 @@
     <div class="preview">
       <div class="term" id="term"></div>
       <div class="chat-composer" id="chat-composer">
-        <div id="chat-status">Message · ⌘L to type</div>
-        <textarea id="chat-message" aria-label="Message"></textarea>
-        <div class="chat-controls"><a href="mobile-chat.md">Set up mobile chat</a><button id="chat-send" disabled>Send ⌘↩</button></div>
+        <div id="chat-status"></div>
+        <textarea id="chat-message" aria-label="Message" placeholder="Message  ⌘L"></textarea>
+        <div class="chat-controls"><a href="mobile-chat.md">Set up tmux</a><button id="chat-send" disabled>Send ⌘↩</button></div>
       </div>
       <div class="actline" id="actline"></div>
     </div>
@@ -475,7 +476,9 @@
   as iOS. Click the field or press <kbd>⌘L</kbd>. Return inserts a newline; <kbd>⌘↩</kbd> or Send sends.
   Escape returns focus to search. While editing, arrows, Tab, control keys and text shortcuts belong
   to the editor; they never move, remove, hide or jump to a session. Outside the composer the existing
-  search and jump keys retain their behavior.</p>
+  search and jump keys retain their behavior. The message uses monospace text, with
+  <b>Message ⌘L</b> as its empty-field placeholder. The line above the field appears only for
+  availability, validation or delivery feedback.</p>
   <p>Drafts are per session and survive row changes, closing the panel and zoom rebuilds for this app
   run. A pending send stays addressed to the original session. Sending disables duplicate submission;
   only <b>Sent to terminal</b> clears that session's unchanged draft. Refused or unconfirmed delivery
@@ -483,7 +486,9 @@
   the agent is working, before its finished exchange reaches history.</p>
   <p>Disconnected, busy, attention, stopped, child, unsupported and non-tmux sessions show why input is
   disabled. The field accepts up to 8,192 UTF-16 code units with the same literal-input rules as iOS.
-  <b>Set up mobile chat</b> opens offline launch/resume instructions. Codex uses
+  <b>Set up tmux</b> opens offline launch/resume instructions explaining that Signalbox pastes
+  into the agent's pane and presses Enter. A missing conversation link asks for one message in
+  that session's terminal; a pane linked to a different conversation says so explicitly. Codex uses
   <code>codex --no-daemon</code> inside tmux for this spike. See <a href="mobile-chat.md">setup</a>.</p>
 
   <h2>Preview</h2>
@@ -927,13 +932,13 @@ function renderChat(){
   if (!session) return;
   let reason = !["claude", "codex"].includes(session.agent) ? "Chat supports Claude Code and Codex sessions."
     : session.processStopped ? "This agent is no longer running."
-    : session.jumpable === false ? "Coding agent sessions must run in tmux for mobile chat."
+    : session.jumpable === false ? "Run this session inside tmux to send messages from Signalbox."
     : session.state === "working" ? "Wait for this task to finish before sending."
     : session.state === "ask" ? "Answer the pending question or permission request in the terminal first." : "";
   chatInput.value = chatDrafts.get(session.key) || "";
   chatInput.disabled = !!reason;
   chatSend.disabled = !!reason || !chatInput.value.trim() || chatInput.value.length > 8192;
-  document.getElementById("chat-status").textContent = reason || chatReceipts.get(session.key) || "Message · ⌘L to type";
+  document.getElementById("chat-status").textContent = reason || chatReceipts.get(session.key) || "";
 }
 chatInput.addEventListener("input", () => { if (SESSIONS[sel]) chatDrafts.set(SESSIONS[sel].key, chatInput.value); renderChat(); });
 chatSend.addEventListener("click", () => {

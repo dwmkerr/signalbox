@@ -7,6 +7,10 @@ struct ChatKeyboardChecks {
     static func main() {
         _ = NSApplication.shared
         let editor = ChatTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 80))
+        // NSTextInputContext needs a first responder even when the window stays offscreen.
+        let window = NSWindow(contentRect: editor.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = editor
+        window.makeFirstResponder(editor)
         editor.isRichText = false
         var sends = 0, escapes = 0
         editor.onSend = { sends += 1 }
