@@ -766,3 +766,54 @@ describe("exchange history", () => {
     expect(state).not.toContain('"pending"');
   });
 });
+
+describe("session_end hides subagents", () => {
+  const owner = "claude:owner";
+  const sub = (id: string) => `${owner}:agent:${id}`;
+  const hidden = (s: Store, key: string) => s.list().find((e) => e.session_key === key)?.hidden === true;
+
+  test("hides the owner's subagents, nested ones included, and leaves other sessions alone", () => {
+    const s = new Store();
+    s.apply(mk(owner, ev.Busy, t(1), 1));
+    s.apply(mkReason(sub("a"), ev.Done, "stop", t(2), 2));
+    s.apply({ ...mkReason(sub("b"), ev.Done, "stop", t(3), 3), pinned: true });
+    s.apply(mkReason(sub("b") + ":agent:c", ev.Done, "stop", t(4), 4));
+    s.apply(mk("claude:owner2", ev.Busy, t(5), 5));
+    s.apply(mkReason("claude:owner2:agent:x", ev.Done, "stop", t(6), 6));
+    s.apply(mkReason(owner, ev.Hide, "session_end", t(7), 7));
+    for (const key of [owner, sub("a"), sub("b"), sub("b") + ":agent:c"]) expect(hidden(s, key)).toBe(true);
+    expect(hidden(s, "claude:owner2")).toBe(false);
+    expect(hidden(s, "claude:owner2:agent:x")).toBe(false);
+  });
+
+  test("a user hide on the owner does not cascade", () => {
+    const s = new Store();
+    s.apply(mkReason(owner, ev.Done, "stop", t(1), 1));
+    s.apply(mkReason(sub("a"), ev.Done, "stop", t(2), 2));
+    s.apply(mk(owner, ev.Hide, t(3), 3));
+    expect(hidden(s, owner)).toBe(true);
+    expect(hidden(s, sub("a"))).toBe(false);
+  });
+
+  test("a subagent event after the owner exits is recorded but stays hidden", () => {
+    const s = new Store();
+    s.apply(mk(owner, ev.Busy, t(1), 1));
+    s.apply(mk(sub("a"), ev.Busy, t(2), 2));
+    s.apply(mkReason(owner, ev.Hide, "session_end", t(3), 3));
+    s.apply({ ...mkReason(sub("a"), ev.Done, "stop", t(4), 4), reply: "late" });
+    const row = s.list().find((e) => e.session_key === sub("a"));
+    expect(row?.hidden).toBe(true);
+    expect(row?.event).toBe(ev.Done);
+    expect(row?.reply).toBe("late");
+  });
+
+  test("resuming the owner lets new subagents show again", () => {
+    const s = new Store();
+    s.apply(mk(owner, ev.Busy, t(1), 1));
+    s.apply(mkReason(owner, ev.Hide, "session_end", t(2), 2));
+    s.apply(mkReason(owner, ev.Busy, "session_start", t(3), 3));
+    s.apply(mk(sub("new"), ev.Busy, t(4), 4));
+    expect(hidden(s, owner)).toBe(false);
+    expect(hidden(s, sub("new"))).toBe(false);
+  });
+});
