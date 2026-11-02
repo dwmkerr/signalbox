@@ -30,6 +30,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      testers:
+        description: Existing tester group to distribute to after processing
+        type: choice
+        options: [none, internal, external]
+        default: none
+      tester_group:
+        description: Exact group name (required if more than one matches)
+        type: string
+        default: ''
 
 concurrency:
   group: testflight
@@ -41,6 +51,9 @@ jobs:
     # than iOS 26 (Xcode 26), and macos-15's default toolchain is Xcode 16.
     runs-on: macos-26
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.archive.outputs.version }}
+      build: ${{ steps.archive.outputs.build }}
     steps:
       - uses: actions/checkout@v7
 
@@ -87,6 +100,7 @@ jobs:
           echo "BUNDLE_ID=${appid#*.}" >> "$GITHUB_ENV"
 
       - name: Archive
+        id: archive
         working-directory: components/ios
         run: |
           # The product version rides the release-please line; the build
@@ -94,6 +108,8 @@ jobs:
           # went up manually), so App Store Connect never sees a duplicate.
           VERSION=$(node -p "require('../cli/package.json').version")
           BUILD=$((100 + GITHUB_RUN_NUMBER))
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
           echo "version $VERSION ($BUILD)"
           xcodebuild archive \
             -project Signalbox.xcodeproj -scheme Signalbox -configuration Release \
@@ -146,3 +162,27 @@ jobs:
         run: |
           rm -f ~/asc/key.p8 /tmp/ExportUpload.plist
           security delete-keychain build.keychain 2>/dev/null || true
+
+  # A separate job can be retried if Apple is slow, without uploading the same
+  # build number again. Existing push releases only verify processing.
+  testers:
+    needs: upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Check tester group selection
+        run: node --test components/ios/scripts/testflight.test.mjs
+      - name: Verify processing and distribute to testers
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          VERSION: ${{ needs.upload.outputs.version }}
+          BUILD: ${{ needs.upload.outputs.build }}
+          TESTERS: ${{ inputs.testers || 'none' }}
+          TESTER_GROUP: ${{ inputs.tester_group }}
+        run: node components/ios/scripts/testflight.mjs

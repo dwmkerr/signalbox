@@ -1,0 +1,5 @@
+Chat with your Claude Code and Codex sessions from Signalbox.
+
+Open a session and use the new message composer. Start the agent inside tmux on your Mac; for this spike, start Codex with --no-daemon. Send one message from the terminal first, then wait for the agent to finish and leave its input empty. The Mac and any remote hub must also run the mobile-chat build.
+
+Tap Set up mobile chat for setup instructions. Failed sends keep your draft. If delivery is unconfirmed, check the terminal before retrying. Answer permissions and interactive questions in the terminal.

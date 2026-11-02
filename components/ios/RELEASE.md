@@ -8,6 +8,26 @@ in the loop except the two Apple-portal steps called out at the end.
 Bundle id `com.dwmkerr.signalbox.ios`, team `5TTNE9J58F`. Run everything from
 `components/ios`.
 
+## GitHub delivery
+
+The `testflight` workflow can upload a feature branch without merging it:
+
+```sh
+gh workflow run testflight.yml --ref <branch> -f testers=internal
+```
+
+Choose `external` for an existing external group, or `none` (the default) to
+upload and verify processing without assigning a group. If there is more than
+one group of that type, pass `-f tester_group='Exact group name'`. The workflow
+never creates groups or changes their membership or public-link settings.
+
+CI signs manually with the stored distribution certificate and provisioning
+profile. The separate `testers` job waits for Apple processing, adds the build
+to the selected group, publishes `testflight-notes.txt`, and verifies the
+assignment. External distribution also submits beta review when required;
+Apple's approval determines when external testers can install it. Retry a
+failed `testers` job without uploading the build again.
+
 ## What is already in place
 
 - **Release configuration** in `Signalbox.xcodeproj/project.pbxproj`: optimized
