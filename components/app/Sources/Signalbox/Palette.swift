@@ -1025,7 +1025,7 @@ final class PaletteController: NSObject {
             // Never move the cursor under the user: follow the session_key
             // across reorders.
             select(index)
-        } else if preservingSelection {
+        } else if preservingSelection && previousIndex >= 0 {
             // The selected row vanished (hidden or removed): land on the
             // round-robin next thing to deal with, else hold position.
             if let next = nextToCheckIndex() {
@@ -1042,11 +1042,12 @@ final class PaletteController: NSObject {
         renderPreview()
     }
 
-    // Naming a session takes priority over unread output that mentions it.
-    // Within equally strong matches, keep the board's unread-first selection.
+    // Opening the board follows its pinned-first display order. A text search
+    // prefers session names, then unread output within equally strong matches.
     private func defaultSelectionIndex() -> Int {
         let q = query.trimmingCharacters(in: .whitespaces)
-        if !q.isEmpty && !q.hasPrefix("#") {
+        if q.isEmpty { return selectableIndices.first ?? -1 }
+        if !q.hasPrefix("#") {
             let named = selectableIndices.filter {
                 !rows[$0].isTreeContext && rows[$0].name.localizedCaseInsensitiveContains(q)
             }
@@ -1640,8 +1641,7 @@ final class PaletteController: NSObject {
         select(indices[min(max(position + delta, 0), indices.count - 1)])
     }
 
-    // Tab cycles unread rows in list order, top to bottom - same reading
-    // order as the topmost-unread default selection.
+    // Tab cycles unread rows in list order, including collapsed descendants.
     private func cycleNeedsCheck() {
         let candidates = allRows.filter { $0.needsCheck && !$0.isHidden && matchesQuery($0) }
         guard !candidates.isEmpty else { return }

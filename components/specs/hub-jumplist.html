@@ -405,13 +405,18 @@
   title, path and snippet shares the same left edge. Snippet whitespace is collapsed.</p>
   <p>Rows keep the order you work in (most recently engaged first, like the app switcher), with
   pinned sessions first; status does not reorder them. Older and Hidden are the two trailing
-  sections, in that order, below every visible row. The panel opens with the topmost unread row
-  selected. For a text search, selection prefers an exact session-name match, then a partial
+  sections, in that order, below every visible row. The panel opens with its first selectable row
+  selected and scrolled into view, including when the first rows arrive after opening. Pinned
+  rows stay the starting point even when they are read, working, or have unread children rather
+  than unread output of their own. Tab cycles unread sessions separately.
+  For a text search, selection prefers an exact session-name match, then a partial
   name match, then a match in the prompt, reply, or agent. Matching ignores case. Within each
   group, select the topmost unread row, falling back to its first row. For example,
   <code>aib</code> selects <b>AIBook</b> ahead of an unread child whose reply mentions AIBook;
   searching a child's own name selects that child. Search does not reorder the session tree.
-  Empty searches and <code>#tag</code> searches retain topmost-unread selection. A live search starts the
+  Clearing the search returns selection to the first row. <code>#tag</code> searches retain
+  topmost-unread selection. Live updates preserve the selected session as rows reorder.
+  A live search starts the
   selected conversation preview at its beginning so matching context is not hidden below the fold.</p>
   <p>A row whose captured agent process has exited carries a muted terminal icon crossed by a slash,
   beside its age. It remains visible and its conversation remains available. A clean agent
@@ -670,7 +675,8 @@ const selectable = () => visible().concat(olderOpen || query !== "" ? olderList(
 function defaultSel(){
   let candidates = selectable();
   const q = query.trim().toLowerCase();
-  if (q && !q.startsWith("#")) {
+  if (!q) return candidates[0] ?? -1;
+  if (!q.startsWith("#")) {
     const name = i => (SESSIONS[i].label || SESSIONS[i].title).toLowerCase();
     const named = candidates.filter(i => name(i).includes(q));
     const exact = named.filter(i => name(i) === q);
