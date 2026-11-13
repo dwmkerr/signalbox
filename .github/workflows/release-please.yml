@@ -75,10 +75,10 @@ jobs:
         include:
           - target: bun-darwin-arm64
             artifact: darwin_arm64
-            os: macos-14
+            os: macos-15
           - target: bun-darwin-x64
             artifact: darwin_amd64
-            os: macos-14
+            os: macos-15
           - target: bun-linux-x64
             artifact: linux_amd64
             os: ubuntu-latest
