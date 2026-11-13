@@ -1,0 +1,1 @@
+Screenshots for PR descriptions, one folder per PR or issue. Sample data only. No shared history with main.
