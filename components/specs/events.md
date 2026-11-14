@@ -237,7 +237,7 @@ until the response contains no exchanges.
 Four user actions on a row's visibility, in ascending strength:
 
 - **seen** (`signalbox session ack`, or any jump): the row is dealt with. It stays on the board, drawn quiet, until the agent speaks again.
-- **hide** (`signalbox session hide`, jumplist `⌃X`): the row disappears until the agent speaks again. Hiding a running session downgrades to seen - running work must stay visible. An agent `SessionEnd` with reason `session_end` is the exception: it confirms the process exited, so the hub hides the row even if its last status was busy.
+- **hide** (`signalbox session hide`, jumplist `⌃X`): the row disappears until the agent speaks again. Hiding a running session downgrades to seen - running work must stay visible. An agent `SessionEnd` with reason `session_end` is the exception: it confirms the process exited, so the hub hides the row even if its last status was busy. It also hides the owner's in-process subagent rows (`<owner>:agent:<id>`, nested workers included), which cannot outlive it, and a subagent event that arrives after the owner's `session_end` (a late `SubagentStop`) is recorded but stays hidden. Any later event on the owner itself unhides only the owner.
 - **show** (`signalbox session show`): the reverse of hide - a hidden row reappears in place, with no ack and no reorder. A no-op on a row that is not hidden.
 - **ended** (`signalbox session remove`, jumplist `⌃⌫`): the row is gone now.
 
