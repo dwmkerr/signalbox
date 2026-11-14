@@ -19,7 +19,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14]
+        # Pinned: ubuntu-latest moved to 26.04, where the tmux pane fixture in
+        # src/tmux.test.ts cannot read pane cwds; macos-14 is retired.
+        os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
