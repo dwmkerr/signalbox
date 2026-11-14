@@ -69,15 +69,24 @@ export interface CursorOrigin {
   bundle?: string;
 }
 
+/** A session in a plain iTerm2 or Terminal.app tab: no tmux pane and no editor. */
+export interface TtyOrigin {
+  /** The agent's controlling terminal, e.g. "/dev/ttys002"; both apps expose it per session. */
+  path: string;
+  /** Bundle id of the terminal, read from __CFBundleIdentifier. */
+  terminal?: string;
+}
+
 // A jump target. `kind` discriminates the union so new origin kinds (ssh,
 // editor windows, a remote host) can be added without guessing from which
 // field is set. Optional on read for old events, where it is inferred.
-export type OriginKind = "tmux" | "url" | "cursor";
+export type OriginKind = "tmux" | "url" | "cursor" | "tty";
 export interface Origin {
   kind?: OriginKind;
   tmux?: TmuxOrigin;
   url?: string;
   cursor?: CursorOrigin;
+  tty?: TtyOrigin;
 }
 
 // Process behind the session, captured at fire time for the liveness sweep.
@@ -368,6 +377,7 @@ export function normalizeInbound(e: Event): void {
     if (e.origin.tmux) e.origin.kind = "tmux";
     else if (e.origin.url) e.origin.kind = "url";
     else if (e.origin.cursor) e.origin.kind = "cursor";
+    else if (e.origin.tty) e.origin.kind = "tty";
   }
 }
 
@@ -387,8 +397,8 @@ export function validate(e: Event): string | null {
     if (e.parent_relation !== "spawned" && e.parent_relation !== "owned") return "parent_relation is required";
   } else if (e.parent_relation !== undefined) return "parent_session_key is required for a relationship";
   if (e.origin) {
-    const set = [e.origin.tmux, e.origin.url, e.origin.cursor].filter(Boolean).length;
-    if (set > 1) return "origin is a union: set exactly one of tmux, url, cursor";
+    const set = [e.origin.tmux, e.origin.url, e.origin.cursor, e.origin.tty].filter(Boolean).length;
+    if (set > 1) return "origin is a union: set exactly one of tmux, url, cursor, tty";
     if (set === 0) return "origin present but empty";
   }
   return null;

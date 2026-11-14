@@ -91,14 +91,16 @@ struct SessionOrigin: Decodable {
     let tmux: TmuxTarget?
     let url: String?
     let cursor: CursorTarget?
+    let tty: TTYTarget?
 
-    private enum CodingKeys: String, CodingKey { case tmux, url, cursor }
+    private enum CodingKeys: String, CodingKey { case tmux, url, cursor, tty }
 
     init(from decoder: Decoder) throws {
         let container = try? decoder.container(keyedBy: CodingKeys.self)
         tmux = try? container?.decodeIfPresent(TmuxTarget.self, forKey: .tmux)
         url = try? container?.decodeIfPresent(String.self, forKey: .url)
         cursor = try? container?.decodeIfPresent(CursorTarget.self, forKey: .cursor)
+        tty = try? container?.decodeIfPresent(TTYTarget.self, forKey: .tty)
     }
 
     // Cursor's own agent: the origin carries only the app bundle id - the CLI
@@ -112,6 +114,12 @@ struct SessionOrigin: Decodable {
             let container = try? decoder.container(keyedBy: CodingKeys.self)
             bundle = try? container?.decodeIfPresent(String.self, forKey: .bundle)
         }
+    }
+
+    // An iTerm2 or Terminal.app tab, which the CLI finds by its tty.
+    struct TTYTarget: Decodable {
+        let path: String?
+        let terminal: String?
     }
 
     struct TmuxTarget: Decodable {
