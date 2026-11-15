@@ -205,19 +205,13 @@ class Setup {
     return { status: statusInstalled, name, detail: dest };
   }
 
-  // The plugin symlink plus a check for the predecessor script: running both
-  // double-fires every notification.
   stepOpencode(): StepResult {
     const pluginDir = join(this.home, ".config", "opencode", "plugin");
-    const r = this.stepSymlink(
+    return this.stepSymlink(
       "opencode plugin",
       join(this.repo, "adapters", "opencode", "signalbox.js"),
       join(pluginDir, "signalbox.js")
     );
-    if (fileExists(join(pluginDir, "tmux-notify.js"))) {
-      r.detail += " (note: old tmux-notify.js present - remove it to avoid double notifications)";
-    }
-    return r;
   }
 
   // Merges the signalbox hooks into the user's settings.json, with consent

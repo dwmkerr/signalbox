@@ -273,8 +273,6 @@ async function buildEvent(opts: {
   return e;
 }
 
-// deliver posts without tmux side-effects - user actions run in whatever
-// pane the user is in, so side-effects would land on the wrong pane.
 async function deliver(e: Event): Promise<void> {
   const c = new Client(hubURL(), stateDir());
   try {
@@ -282,14 +280,6 @@ async function deliver(e: Event): Promise<void> {
   } catch (err) {
     c.logf(`deliver ${e.session_key}/${e.event}: ${err}`);
   }
-}
-
-// fireEvent applies the tmux side-effects then delivers. Side-effects come
-// first so the in-terminal signal appears even when the hub is down.
-async function fireEvent(e: Event): Promise<void> {
-  if (e.event === ev.Attention || e.event === ev.Done || e.event === ev.Error) tmux.notify();
-  else if (e.event === ev.Busy || e.event === ev.Ended) tmux.clear();
-  await deliver(e);
 }
 
 async function runFire(args: string[]): Promise<void> {
@@ -324,7 +314,7 @@ async function runFire(args: string[]): Promise<void> {
     originURL: flags["origin-url"],
     proc,
   });
-  await fireEvent(built);
+  await deliver(built);
   const tags = collectFlag(args, "tag");
   // After the session event, never before: a tag for a session the board has
   // not seen yet would apply to nothing. Both go through the same client, so
@@ -424,8 +414,8 @@ async function runClear(): Promise<void> {
   console.log(`cleared ${keys.length} session${keys.length === 1 ? "" : "s"}`);
 }
 
-// Presence hook for tmux pane-focus-in: the focused pane loses its in-terminal
-// signals, and any flagged session that originated there is marked seen. Fires
+// Presence hook for tmux pane-focus-in: any flagged session that originated in
+// the focused pane is marked seen. Fires
 // nothing when nothing is flagged, so focus churn cannot spam the event log.
 async function runSeenPane(args: string[]): Promise<void> {
   const { flags } = parseFlags(args);
@@ -435,8 +425,6 @@ async function runSeenPane(args: string[]): Promise<void> {
     logTo(stateDir(), "seen-pane: usage: signalbox tmux seen-pane --socket <path> --pane <id>");
     return;
   }
-  // Before the hub fetch, so a dead hub cannot leave a looked-at pane lit.
-  tmux.clearPane(pane, socket);
   // Short timeout: pane-focus-in fires on every pane switch, so a dead hub
   // must cost one quick failure, not a hang.
   let doc;
@@ -519,7 +507,7 @@ async function runClaudeHook(): Promise<void> {
   // server (`state --json` / events.jsonl) instead of a stray file. Redacted
   // out on corp hosts; never sent in normal operation.
   if (process.env.SIGNALBOX_RAW) e.raw = text;
-  await fireEvent(e);
+  await deliver(e);
 }
 
 // ---- cursor hook -------------------------------------------------------------
@@ -565,7 +553,7 @@ async function runCursorHook(): Promise<void> {
     proc,
   });
   if (process.env.SIGNALBOX_RAW) e.raw = text;
-  await fireEvent(e);
+  await deliver(e);
 }
 
 // ---- codex hook --------------------------------------------------------------
@@ -619,7 +607,7 @@ async function runCodexHook(): Promise<void> {
     proc: parent ? undefined : proc,
   });
   if (process.env.SIGNALBOX_RAW) e.raw = text;
-  await fireEvent(e);
+  await deliver(e);
 }
 
 // ---- hub -----------------------------------------------------------------------
