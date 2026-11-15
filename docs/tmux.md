@@ -30,14 +30,9 @@ wide enough for the detail column, short enough to sit over your work.
 bind-key j display-popup -E -w 80% -h 15 "command -v signalbox >/dev/null && signalbox pick || echo signalbox is not installed"
 ```
 
-## Session list: waiting marker
+## Bells and highlights
 
-When an agent needs you, signalbox sets the session option
-`@claude_notify_session` on the agent's session rather than renaming it, so
-`new-session -A -s <name>` still finds the session. To show a 🔔 beside those
-sessions in the session list (prefix + s), add it to the `choose-tree` format.
-This is the tmux 3.6 default format with the marker added:
-
-```tmux
-bind-key s choose-tree -Zs -F '#{?pane_format,#{?pane_marked,#[reverse],}#{pane_current_command}#{?pane_active,*,}#{?pane_marked,M,}#{?#{&&:#{pane_title},#{!=:#{pane_title},#{host_short}}},: "#{pane_title}",},#{?window_format,#{?window_marked_flag,#[reverse],}#{window_name}#{window_flags}#{?#{&&:#{==:#{window_panes},1},#{&&:#{pane_title},#{!=:#{pane_title},#{host_short}}}},: "#{pane_title}",},#{?@claude_notify_session,🔔 ,}#{session_windows} windows#{?session_grouped, (group #{session_group}: #{session_group_list}),}#{?session_attached, (attached),}}}'
-```
+Signalbox only reads tmux: it never rings the bell, styles a pane, or marks or
+renames a session. Add those with your own agent hooks (for Claude Code, a
+`Notification` hook beside `signalbox hook claude`) so they stay under your
+tmux config's control.

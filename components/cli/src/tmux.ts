@@ -1,20 +1,12 @@
-// tmux origin detection and the in-terminal signals - a port of the
-// tmux-notify.sh behaviour (bell, pane bg, pane option, session option).
+// tmux origin detection. Signalbox only reads tmux state: bells, pane
+// highlights and session markers belong to the user's own tmux config, so
+// signalbox never fights it over options, styles or session names.
 
 import { spawnSync } from "node:child_process";
-import { openSync, writeSync, closeSync } from "node:fs";
 import type { Origin } from "./event";
 
-// Dark amber: visible against most themes without shouting.
-const notifyBG = "bg=#1a0500";
-const paneOption = "@claude_notify";
-// A session option, not a rename: terminal profiles attach with
-// `new-session -A -s <name>`, which cannot find a renamed session and creates
-// a duplicate. Shared with tmux-notify.sh so one choose-tree format shows both.
-const sessionOption = "@claude_notify_session";
-
 // inside reports whether we are running in a tmux pane. Both variables are
-// required, matching the guard in tmux-notify.sh.
+// required: TMUX alone is set in panes the agent does not own.
 export function inside(): boolean {
   return !!process.env.TMUX && !!process.env.TMUX_PANE;
 }
@@ -24,14 +16,7 @@ export function inside(): boolean {
 // tmux never sees a TMUX/TMUX_PANE set by a caller - which makes every pane
 // behaviour here untestable.
 function run(...args: string[]): string | null {
-  return runOn("", ...args);
-}
-
-// runOn addresses the server by socket when one is given, because tmux hooks
-// know their server but run without $TMUX.
-function runOn(socket: string, ...args: string[]): string | null {
-  const full = socket ? ["-S", socket, ...args] : args;
-  const out = spawnSync("tmux", full, { env: process.env });
+  const out = spawnSync("tmux", args, { env: process.env });
   if (out.status !== 0) return null;
   return (out.stdout?.toString() ?? "").trim();
 }
@@ -134,55 +119,4 @@ export function currentOrigin(cwd = "", agent = ""): Origin | null {
   const terminal = process.env.__CFBundleIdentifier;
   if (terminal) origin.tmux!.terminal = terminal;
   return origin;
-}
-
-// notify applies the three signals, each visible at a different distance:
-// bell (window tab), pane background (within the window), session option
-// (session list). Best-effort: partial failure leaves the other signals.
-export function notify(): void {
-  if (!inside()) return;
-  const pane = process.env.TMUX_PANE!;
-
-  const tty = run("display-message", "-p", "-t", pane, "#{pane_tty}");
-  if (tty) {
-    try {
-      const fd = openSync(tty, "w");
-      writeSync(fd, "\x07");
-      closeSync(fd);
-    } catch {
-      // bell is best-effort
-    }
-  }
-
-  run("set-option", "-p", "-t", pane, "window-style", notifyBG);
-  // Avoid select-pane -P because it activates the agent pane.
-  run("set-option", "-p", "-t", pane, paneOption, "1");
-
-  // Targeting the pane resolves its own session, which no client may be
-  // viewing - the untargeted default is the client's current session.
-  run("set-option", "-t", pane, sessionOption, "1");
-}
-
-// clear reverts everything notify set on the calling pane. All steps ignore
-// errors, matching the script's clear action.
-export function clear(): void {
-  if (!inside()) return;
-  clearPane(process.env.TMUX_PANE!);
-}
-
-// clearPane reverts the pane's signals, then drops the session option only
-// once no pane in the session is still flagged, so answering one agent cannot
-// hide another that is still waiting. The pane background is only reset on a
-// flagged pane, because focus hooks call this for every pane and the user may
-// style panes themselves.
-export function clearPane(pane: string, socket = ""): void {
-  if (runOn(socket, "display-message", "-p", "-t", pane, `#{${paneOption}}`) === "1") {
-    // Avoid select-pane -P because it activates the agent pane.
-    runOn(socket, "set-option", "-pu", "-t", pane, "window-style");
-    runOn(socket, "set-option", "-pu", "-t", pane, paneOption);
-  }
-  const flags = runOn(socket, "list-panes", "-s", "-t", pane, "-F", `#{${paneOption}}`);
-  if (flags !== null && !flags.split("\n").includes("1")) {
-    runOn(socket, "set-option", "-u", "-t", pane, sessionOption);
-  }
 }

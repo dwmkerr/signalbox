@@ -223,7 +223,7 @@ No adapter and no config. Agents you run in VS Code's *integrated terminal* (cla
 - A tmux pane inside the editor terminal still wins as the *jump* target (the pane is more precise), but the editor host still prefixes the display name.
 - VS Code's *own* agent (Copilot Chat / agent mode) has no external hook system, so there is no event adapter for it - terminal jump-back is the whole VS Code surface for now.
 
-## tmux - in-terminal signals and jump-back
+## tmux - jump-back
 
 Not an agent: tmux is where agents run. `signalbox init --tmux` prints this snippet to add to `~/.tmux.conf` by hand (your config file, never merged; every line no-ops when signalbox is not installed):
 
@@ -235,7 +235,7 @@ set-hook -g pane-focus-in 'run-shell -b "command -v signalbox >/dev/null 2>&1 &&
 ```
 
 - Origin capture: any hook fired from a tmux pane records session/window/pane, the server socket, and the terminal app's bundle id (`__CFBundleIdentifier`) - everything jump needs, captured at fire time. The pane beats the editor-terminal check above.
-- In-terminal signals ride every fire, hub or no hub: attention/done/error ring the bell, set an amber pane background (pane option `@claude_notify`) and set the session option `@claude_notify_session` on the pane's own session. The session is never renamed, so `new-session -A -s <name>` keeps attaching to it. Busy/ended clear the pane's signals; the session option is cleared only once no pane in the session is still flagged. Focusing a pane (`tmux seen-pane`) clears it the same way. Show the session marker in `choose-tree` with `#{?@claude_notify_session,🔔 ,}` ([tmux docs](../../docs/tmux.md)).
+- Read-only: signalbox never writes tmux state - no bell, pane style, option or session rename. In-terminal signals belong to the user's own agent hooks and tmux config, which can run beside `signalbox hook <agent>` without the two fighting over the same pane.
 - Detection (`init`): signalbox in the *running* server's `status-right` counts as set up (options set live never touch a file), as does either `~/.tmux.conf` or the XDG `~/.config/tmux/tmux.conf`.
 
 ## OpenCode (plugin, `components/cli/adapters/opencode/signalbox.js`)

@@ -11,5 +11,3 @@ mkdir -p "$DEST_DIR"
 ln -sf "$SRC" "$DEST"
 
 echo "Linked $DEST -> $SRC"
-echo "Note: this replaces the tmux side-effects of tmux-notify.js - remove"
-echo "that plugin once signalbox is working to avoid double notifications."
